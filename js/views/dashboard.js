@@ -33,7 +33,7 @@ AD.views.dashboard = (function () {
 
   /** Multi-segment ring. Each part becomes an arc; the centre carries the headline. */
   function donutRing(parts, big, small) {
-    const sz = 120, sw = 14, r = (sz - sw) / 2, c = 2 * Math.PI * r;
+    const sz = 120, sw = 21, r = (sz - sw) / 2, c = 2 * Math.PI * r;
     const live = parts.filter(p => p.value > 0);
     const total = live.reduce((s, p) => s + p.value, 0);
     const gap = live.length > 1 ? 3 : 0;
@@ -89,10 +89,57 @@ AD.views.dashboard = (function () {
     ).join('')}</div>`;
   }
 
+  /** Seven-day strip. Empty string when there's no forecast, so the banner just closes up. */
+  function wxStrip(days) {
+    if (!days || !days.length) return '';
+    const today = T.todayKey();
+    const cells = days.slice(0, 7).map((d) => {
+      const w = AD.weather.describe(d.code);
+      const isToday = d.key === today;
+      const dow = isToday ? 'Today' : T.DOW[T.dayOfWeek(d.key)];
+      return `<li class="wx-day${isToday ? ' is-today' : ''}" aria-label="${esc(dow)}: ${esc(w.label)}, ${d.hi} degrees, low ${d.lo}">
+        <span class="wx-dow">${esc(dow)}</span>
+        <span class="wx-ico" title="${esc(w.label)}">${w.glyph}</span>
+        <span class="wx-hi">${d.hi}°</span>
+        <span class="wx-lo">${d.lo}°</span>
+      </li>`;
+    }).join('');
+    return `<ul class="wx-days">${cells}</ul>
+      <p class="wx-src">Source: ${esc(AD.weather.SOURCE)} · Sydney</p>`;
+  }
+
+  /** Full-bleed banner above the page: greeting, Sydney forecast, primary actions. */
+  function hero() {
+    const slot = document.getElementById('hero-slot');
+    if (!slot) return;
+    const longDate = new Intl.DateTimeFormat('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Australia/Sydney' })
+      .format(T.startOfDay(T.todayKey()));
+    slot.innerHTML = `
+      <div class="hero">
+        <div class="hero-inner">
+          <div class="hero-lead">
+            <h1>${greeting()}, ${esc(USER_FIRST_NAME)}.</h1>
+            <p class="hero-brand">Fleet operations</p>
+            <p class="hero-date"><i class="hero-dot"></i>${esc(longDate)}</p>
+          </div>
+          <div class="hero-wx" id="hero-wx">${wxStrip(AD.weather.cached())}</div>
+          <div class="hero-actions">
+            <a class="btn btn-secondary" href="#/defects?new=1">Report defect</a>
+            <a class="btn btn-primary" href="#/calendar?new=1">${I.plus} New booking</a>
+          </div>
+        </div>
+      </div>`;
+    AD.weather.load().then((days) => {
+      const box = document.getElementById('hero-wx');
+      if (box) box.innerHTML = wxStrip(days);
+    });
+  }
+
   function render(el, params) {
     root = el;
     day = /^\d{4}-\d{2}-\d{2}$/.test(params.date || '') ? params.date : T.todayKey();
     fresh = true;
+    hero();
     draw();
   }
 
@@ -162,25 +209,10 @@ AD.views.dashboard = (function () {
     const utilAvg = sameDaySum / 4;
     const utilTrend = utilAvg > 0 ? Math.round(((todayBusy - utilAvg) / utilAvg) * 100) : 0;
 
-    const longDate = new Intl.DateTimeFormat('en-AU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Australia/Sydney' }).format(T.startOfDay(today));
-    const shortDate = new Intl.DateTimeFormat('en-AU', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Australia/Sydney' }).format(T.startOfDay(today));
-
     el.classList.toggle('anim-in', fresh);
     fresh = false;
 
     el.innerHTML = `
-      <header class="page-header greet-header">
-        <div>
-          <h1>${greeting()}, ${esc(USER_FIRST_NAME)}</h1>
-          <p class="page-sub">${esc(longDate)}</p>
-        </div>
-        <div class="page-actions">
-          <span class="date-pill" aria-label="Today's date">${I.calendar}<span>${esc(shortDate)}</span></span>
-          <a class="btn btn-secondary" href="#/defects?new=1">Report defect</a>
-          <a class="btn btn-primary" href="#/calendar?new=1">${I.plus} New booking</a>
-        </div>
-      </header>
-
       <div class="strip" role="group" aria-label="Fleet summary">
         ${card({
           go: ['fleet', {}], icon: kpiIco(I.truck, 'blue'), label: 'Total fleet', value: vehicles.length,

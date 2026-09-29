@@ -60,6 +60,7 @@ AD.views = AD.views || {};
     AD.ui.closeModal();
     current = { name, view, params, arg };
     renderNav(name);
+    $('#hero-slot').innerHTML = '';
     const el = $('#view');
     el.innerHTML = '';
     view.render(el, params, arg);
