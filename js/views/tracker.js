@@ -509,7 +509,7 @@ AD.views.tracker = (function () {
       : assigned ? `${esc(assigned)}<span class="t2">Fleet assignment — not on this booking</span>` : '<span class="muted">Not recorded</span>';
     const site = l.state === 'needs-location'
       ? `<span class="flag flag-amber">Site location required</span>${b.address ? `<span class="t2">${esc(b.address)} (typed, not located)</span>` : ''}`
-      : `${esc(b.address || 'Pinned location')}<span class="t2">${b.lat.toFixed(4)}, ${b.lng.toFixed(4)} · ${b.locationSource === 'pin' ? 'dropped pin' : 'demo site'}</span>`;
+      : `${esc(b.address || 'Pinned location')}<span class="t2">${b.lat.toFixed(4)}, ${b.lng.toFixed(4)} · ${b.locationSource === 'pin' ? 'dropped pin' : 'saved site'}</span>`;
     return `${head}
       <dl>
         <dt>Job</dt><dd>${esc(L.bookingTitle(b))}${[b.jobNumber, b.client].filter(Boolean).length ? `<span class="t2">${[b.jobNumber, b.client].filter(Boolean).map(esc).join(' · ')}</span>` : ''}</dd>

@@ -12,6 +12,11 @@ AD.bookingForm = function (booking, defaults = {}) {
   const sites = AD.store.all('sites');
   const drivers = AD.store.all('drivers');
 
+  /** Type-ahead options built from what's already been booked, so the list grows with use. */
+  const suggestions = (field) => [...new Set(AD.store.all('bookings').map((x) => x[field]).filter(Boolean))]
+    .sort((a, z) => a.localeCompare(z))
+    .map((v) => `<option value="${esc(v)}">`).join('');
+
   let b;
   if (booking) b = Object.assign({}, booking);
   else {
@@ -25,11 +30,11 @@ AD.bookingForm = function (booking, defaults = {}) {
       siteId: defaults.kind === 'maintenance' ? 'site-depot' : '', address: '', lat: null, lng: null, locationSource: 'none',
       start: new Date(start).toISOString(), end: new Date(T.fromParts(y, m, d, sh + 8, 0)).toISOString()
     };
-    if (b.siteId) { const s = sites.find((x) => x.id === b.siteId); Object.assign(b, { address: s.address, lat: s.lat, lng: s.lng, locationSource: 'demo-site' }); }
+    if (b.siteId) { const s = sites.find((x) => x.id === b.siteId); Object.assign(b, { address: s.address, lat: s.lat, lng: s.lng, locationSource: 'site' }); }
     if (b.truckId) { const v = AD.store.get('vehicles', b.truckId); if (v && b.kind === 'job') b.driverId = v.driverId; }
   }
-  // Location mode: a demo site id, 'pin' or 'none'
-  let locMode = b.locationSource === 'demo-site' && b.siteId ? b.siteId : b.locationSource === 'pin' ? 'pin' : 'none';
+  // Location mode: a saved site id, 'pin' or 'none'
+  let locMode = b.locationSource === 'site' && b.siteId ? b.siteId : b.locationSource === 'pin' ? 'pin' : 'none';
   let pin = b.locationSource === 'pin' && L.hasCoords(b) ? { lat: b.lat, lng: b.lng } : null;
 
   const siteOpts = [['none', 'No location yet — site location required'], ['pin', 'Custom location — drop a pin on the map']]
@@ -48,10 +53,10 @@ AD.bookingForm = function (booking, defaults = {}) {
         <div class="field"><label>Vac truck <span class="req">*</span></label>
           <select name="truckId">${options(trucks.map((v) => [v.id, `${v.id} · ${v.rego}${v.status === 'Out of service' || v.status === 'In workshop' ? ' (' + v.status + ')' : ''}`]), b.truckId, 'Select truck')}</select></div>
         <div class="field"><label id="lbl-job">Job name <span class="req">*</span></label><input type="text" name="jobName" value="${esc(b.jobName)}" list="job-list">
-          <datalist id="job-list">${AD.seed.JOBS.map((j) => `<option value="${esc(j)}">`).join('')}</datalist></div>
+          <datalist id="job-list">${suggestions('jobName')}</datalist></div>
         <div class="field job-only"><label>Job number</label><input type="text" name="jobNumber" value="${esc(b.jobNumber)}" placeholder="e.g. J-26301"></div>
         <div class="field job-only"><label>Client</label><input type="text" name="client" value="${esc(b.client)}" list="client-list">
-          <datalist id="client-list">${AD.seed.CLIENTS.map((c) => `<option value="${esc(c)}">`).join('')}</datalist></div>
+          <datalist id="client-list">${suggestions('client')}</datalist></div>
         <div class="field"><label>Driver</label><select name="driverId">${options(drivers.map((d) => [d.id, d.name]), b.driverId, 'Unassigned')}</select></div>
         <div class="field"><label>Start <span class="req">*</span> <span class="muted small" id="abbr-s"></span></label><input type="datetime-local" name="start" value="${T.toInput(b.start)}" step="900"></div>
         <div class="field"><label>Finish <span class="req">*</span> <span class="muted small" id="abbr-e"></span></label><input type="datetime-local" name="end" value="${T.toInput(b.end)}" step="900"></div>
@@ -124,10 +129,10 @@ AD.bookingForm = function (booking, defaults = {}) {
         } else {
           const s = sites.find((x) => x.id === locMode);
           st.className = 'loc-status ok';
-          st.innerHTML = `${I.check} Demo site: ${esc(s.name)} (${s.lat.toFixed(4)}, ${s.lng.toFixed(4)})`;
+          st.innerHTML = `${I.check} Site: ${esc(s.name)} (${s.lat.toFixed(4)}, ${s.lng.toFixed(4)})`;
           addr.value = s.address;
           addr.readOnly = true;
-          $('#lbl-addr').textContent = 'Site address (from demo site list)';
+          $('#lbl-addr').textContent = 'Site address (from saved site)';
           $('#addr-help').textContent = 'Choose “Custom location” to drop your own pin instead.';
         }
         if (map) {
@@ -222,7 +227,7 @@ AD.bookingForm = function (booking, defaults = {}) {
         if (isNaN(s)) err.start = 'Enter a start date and time.';
         if (isNaN(e)) err.end = 'Enter a finish date and time.';
         if (!isNaN(s) && !isNaN(e) && e <= s) err.end = 'Finish must be after start.';
-        if (!isNaN(s) && !isNaN(e) && e - s > 31 * 86400000) err.end = 'Bookings longer than 31 days aren’t supported in the demo.';
+        if (!isNaN(s) && !isNaN(e) && e - s > 31 * 86400000) err.end = 'Bookings longer than 31 days aren’t supported.';
         if (locMode === 'pin' && !pin) err.loc = 'Click the map to drop a pin, or choose another option.';
         if (!showErrors(f, err)) return;
 
@@ -233,7 +238,7 @@ AD.bookingForm = function (booking, defaults = {}) {
           start: new Date(s).toISOString(), end: new Date(e).toISOString(),
           siteId: locMode !== 'pin' && locMode !== 'none' ? locMode : '',
           address: d.address, lat: c ? c.lat : null, lng: c ? c.lng : null,
-          locationSource: locMode === 'pin' ? 'pin' : locMode === 'none' ? 'none' : 'demo-site'
+          locationSource: locMode === 'pin' ? 'pin' : locMode === 'none' ? 'none' : 'site'
         };
         const clashes = L.overlaps(Object.assign({ id: b.id }, rec));
         saveBtn.disabled = true;

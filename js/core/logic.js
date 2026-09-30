@@ -140,7 +140,7 @@ AD.logic = (function () {
   /*
    * Charge-out rates and running costs by vehicle type. Revenue and booked
    * hours are read from real bookings; fuel and "other" are modelled from
-   * those hours because the demo records no fuel dockets or overheads.
+   * those hours, since no fuel dockets or overheads are recorded.
    */
   const RATE = { 'Vac truck': 180, 'Tipper truck': 145, Ute: 95, Van: 85, Other: 110 };
   const FUEL_PER_HOUR = { 'Vac truck': 32, 'Tipper truck': 26, Ute: 9, Van: 8, Other: 14 };

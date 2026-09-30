@@ -47,7 +47,7 @@ AD.views.vehicle = (function () {
     const v = AD.store.get('vehicles', id);
     if (!v) {
       el.innerHTML = `<a class="back" href="#/fleet">${I.chevL} Fleet register</a>
-        <p class="empty">Vehicle “${esc(id)}” was not found. It may have been removed by a demo reset.</p>`;
+        <p class="empty">Vehicle “${esc(id)}” was not found. It may have been removed.</p>`;
       return;
     }
     const isVac = v.type === 'Vac truck';
@@ -237,7 +237,7 @@ AD.views.vehicle = (function () {
       </tbody></table></div>`;
 
     if (tab === 'documents') return `
-      <div class="tab-tools"><p class="note">Placeholder entries only. No files are stored in this demo, so documents can’t be opened or uploaded yet.</p></div>
+      <div class="tab-tools"><p class="note">Placeholder entries only — file upload isn’t built yet, so these can’t be opened.</p></div>
       <div class="table-wrap"><table class="data"><thead><tr><th>Document</th><th>Category</th><th>File</th></tr></thead><tbody>
       ${docs.map((d) => `<tr><td>${esc(d.name)}<span class="t2">Placeholder</span></td><td>${esc(d.category)}</td><td class="muted">No file attached</td></tr>`).join('')}
       </tbody></table></div>`;

@@ -209,8 +209,7 @@ AD.views = AD.views || {};
     if (initialised) { render(); return; }
     initialised = true;
     $('#menu-btn').innerHTML = I.menu;
-    $('#reset-btn').innerHTML = `${I.reset} Reset sample data`;
-    $('#signout-btn').textContent = 'Sign out';
+    $('#signout-btn').innerHTML = `${I.logout} Sign out`;
     const menuBtn = $('#menu-btn');
     menuBtn.setAttribute('aria-controls', 'sidebar');
     menuBtn.setAttribute('aria-expanded', 'false');
@@ -224,20 +223,6 @@ AD.views = AD.views || {};
     menuBtn.onclick = () => setNav(!document.body.classList.contains('nav-open'));
     $('#scrim').onclick = () => setNav(false);
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !document.querySelector('#modal-root.open, .confirm-open')) AD.closeNav(); });
-    $('#reset-btn').onclick = async () => {
-      const ok = await AD.ui.confirm({
-        title: 'Reset sample data?',
-        message: 'This discards every vehicle, booking, service and defect in the shared database — for everyone signed in, not just you — and reloads fresh fictional sample data.',
-        confirmText: 'Reset sample data', danger: true
-      });
-      if (!ok) return;
-      try {
-        await AD.store.reset();
-        AD.ui.toast('Sample data reset for everyone');
-      } catch (e) {
-        toast('Reset failed: ' + e.message, 'error');
-      }
-    };
     $('#signout-btn').onclick = async () => {
       clearInterval(pollTimer);
       await AD.auth.signOut();

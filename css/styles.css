@@ -89,7 +89,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .nav .count { margin-left: auto; font-size: 12.5px; font-weight: 600; color: #fff; background: rgba(255,255,255,.12); border-radius: 3px; padding: 0 6px; line-height: 20px; }
 .sidebar-foot { margin-top: auto; padding: 14px 20px 16px; border-top: 1px solid var(--navy-line); font-size: 13px; color: #95a2ba; display: grid; gap: 8px; }
 .sidebar-foot .clock { display: flex; align-items: center; gap: 7px; color: #c3ccdc; }
-.demo-tag { display: inline-block; font-size: 12px; font-weight: 600; letter-spacing: .02em; color: #d9e0ec; border: 1px solid rgba(255,255,255,.22); border-radius: 3px; padding: 1px 6px; width: max-content; }
+.user-tag { display: inline-block; font-size: 12px; font-weight: 600; letter-spacing: .02em; color: #d9e0ec; border: 1px solid rgba(255,255,255,.22); border-radius: 3px; padding: 1px 6px; width: max-content; }
 .link-btn { background: none; border: 0; padding: 0; cursor: pointer; color: inherit; text-align: left; display: inline-flex; gap: 6px; align-items: center; }
 .sidebar-foot .link-btn:hover { color: #fff; text-decoration: underline; }
 
@@ -446,7 +446,7 @@ label.check { display: flex; gap: 8px; align-items: center; font-weight: 400; co
   .topbar .icon-btn { border-color: transparent; background: transparent; color: #fff; }
   .topbar .icon-btn:hover { background: rgba(255,255,255,.08); }
   .topbar-logo { height: 32px; width: auto; display: block; }
-  .topbar .demo-tag { margin-left: auto; }
+  .topbar .user-tag { margin-left: auto; }
   .view { padding-top: 20px; }
   .page-header { margin-bottom: 20px; }
   .page-header h1 { font-size: 23px; }
@@ -623,7 +623,7 @@ input[type=text], input[type=number], input[type=date], input[type=datetime-loca
 .tag-now { background: var(--mint); color: var(--navy); }
 .toast { border-left-color: var(--mint); border-radius: var(--r); box-shadow: var(--shadow-2); }
 .modal { border-radius: 14px; }
-.demo-tag { border-radius: 6px; }
+.user-tag { border-radius: 6px; }
 .device-toggle { border-radius: 10px; }
 .device-toggle button { border-radius: 7px; }
 .device-toggle button.on { background: var(--mint); color: var(--navy); }
@@ -1417,7 +1417,7 @@ body { background: var(--bg); }
 .nav-label { color: #7e98af; }
 .sidebar-foot { color: var(--muted); border-top-color: rgba(255, 255, 255, .08); }
 .sidebar-foot .clock { color: var(--ink-2); }
-.demo-tag { color: var(--ink-2); border-color: rgba(255, 255, 255, .2); }
+.user-tag { color: var(--ink-2); border-color: rgba(255, 255, 255, .2); }
 .sidebar-foot .link-btn:hover { color: var(--mint); }
 
 /* Primary action: mint chip with deep navy text */
