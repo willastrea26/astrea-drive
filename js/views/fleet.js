@@ -127,7 +127,7 @@ AD.views.fleet = (function () {
       <div class="table-wrap"><table class="data">
         <thead><tr>
           <th style="width:150px">Fleet ID</th><th class="col-opt">Registration</th><th class="col-model">Make / model</th><th class="col-opt col-wide">Type</th>
-          <th class="col-opt">Assigned driver</th><th class="num col-opt col-wide">Odometer</th><th>Status</th><th class="col-opt">Needs attention</th><th class="col-action col-opt col-wide"><span class="hide">Actions</span></th>
+          <th class="col-opt">Assigned driver</th><th class="num col-opt col-wide">Odometer</th><th>Status</th><th class="col-opt" style="min-width:200px">Needs attention</th><th class="col-action col-opt col-wide"><span class="hide">Actions</span></th>
         </tr></thead>
         <tbody id="f-body"></tbody>
       </table></div>`;

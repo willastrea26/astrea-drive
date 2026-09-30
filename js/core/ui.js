@@ -71,9 +71,14 @@ AD.ui = (function () {
     const regoLine = r.state === 'overdue'
       ? flag('red', `Rego expired ${regoDate} · ${regoDays}d ago`)
       : flag(r.state === 'soon' ? L.attentionTone(r.state, r.days) : 'muted', `Rego due ${regoDate} · ${r.days}d`);
+    const svcDate = T.fmtKey(v.nextServiceDate).slice(0, 5);
+    const serviceLine = s.state === 'overdue'
+      ? flag('red', `Service overdue · ${-s.daysLeft}d`)
+      : s.state === 'soon'
+        ? flag(L.attentionTone(s.state, s.daysLeft, s.kmLeft), `Service due ${svcDate} · ${s.daysLeft}d`)
+        : flag('muted', `Service due ${svcDate} · ${s.daysLeft}d`);
     const lines = [
-      s.state === 'overdue' ? flag('red', 'Service overdue')
-        : s.state === 'soon' ? flag(L.attentionTone(s.state, s.daysLeft, s.kmLeft), `Service due ${T.fmtKey(v.nextServiceDate).slice(0, 5)}`) : '',
+      serviceLine,
       regoLine,
       defects.length ? flag(defectTone, `${defects.length} open defect${defects.length > 1 ? 's' : ''}`) : ''
     ].filter(Boolean);
