@@ -6,10 +6,26 @@ AD.views.dashboard = (function () {
   const L = AD.logic, T = AD.time, I = AD.icons;
   const LIST_MAX = 5;
   const USER_FIRST_NAME = 'Will';
-  let root = null, day = '', schedFilter = 'all';
+  let root = null, day = '', schedFilter = 'all', dashTab = 'overview';
   // Charts animate in when the page is opened, not on every in-page redraw
   // (changing the schedule tab or date would otherwise replay the whole page).
   let fresh = true;
+
+  // Static tool register — update serial numbers and service dates here as they become known.
+  const POWER_TOOLS = [
+    { type: 'Demo Saw',     make: '',        serial: '', location: 'Various sites', responsible: 'Dale or Beggs', interval: '3 months or 100 hrs', last: '', next: '' },
+    { type: 'Demo Saw',     make: '',        serial: '', location: 'Various sites', responsible: 'Dale or Beggs', interval: '3 months or 100 hrs', last: '', next: '' },
+    { type: 'Demo Saw',     make: '',        serial: '', location: 'Various sites', responsible: 'Dale or Beggs', interval: '3 months or 100 hrs', last: '', next: '' },
+    { type: 'Vibe Plate',   make: '',        serial: '', location: 'Various sites', responsible: 'Dale or Beggs', interval: '3 months or 100 hrs', last: '', next: '' },
+    { type: 'Vibe Plate',   make: '',        serial: '', location: 'Various sites', responsible: 'Dale or Beggs', interval: '3 months or 100 hrs', last: '', next: '' },
+    { type: 'Vibe Plate',   make: '',        serial: '', location: 'Various sites', responsible: 'Dale or Beggs', interval: '3 months or 100 hrs', last: '', next: '' },
+    { type: 'Jumping Jack', make: '',        serial: '', location: 'Various sites', responsible: 'Dale or Beggs', interval: '3 months or 100 hrs', last: '', next: '' },
+    { type: 'Jumping Jack', make: '',        serial: '', location: 'Various sites', responsible: 'Dale or Beggs', interval: '3 months or 100 hrs', last: '', next: '' },
+    { type: 'Jumping Jack', make: '',        serial: '', location: 'Various sites', responsible: 'Dale or Beggs', interval: '3 months or 100 hrs', last: '', next: '' },
+    { type: 'Generator',    make: '',        serial: '', location: 'Various sites', responsible: 'Dale or Beggs', interval: '3 months or 200 hrs', last: '', next: '' },
+    { type: 'Generator',    make: '',        serial: '', location: 'Various sites', responsible: 'Dale or Beggs', interval: '3 months or 200 hrs', last: '', next: '' },
+    { type: 'Generator',    make: '',        serial: '', location: 'Various sites', responsible: 'Dale or Beggs', interval: '3 months or 200 hrs', last: '', next: '' },
+  ];
 
   function greeting() {
     const hour = T.parts(Date.now()).hour;
@@ -138,6 +154,7 @@ AD.views.dashboard = (function () {
   function render(el, params) {
     root = el;
     day = /^\d{4}-\d{2}-\d{2}$/.test(params.date || '') ? params.date : T.todayKey();
+    dashTab = params.tab === 'tools' ? 'tools' : 'overview';
     fresh = true;
     hero();
     draw();
@@ -213,6 +230,12 @@ AD.views.dashboard = (function () {
     fresh = false;
 
     el.innerHTML = `
+      <div class="dash-tabs tabs" role="tablist">
+        <button role="tab" data-dashtab="overview" class="${dashTab === 'overview' ? 'on' : ''}" aria-selected="${dashTab === 'overview'}">Fleet overview</button>
+        <button role="tab" data-dashtab="tools" class="${dashTab === 'tools' ? 'on' : ''}" aria-selected="${dashTab === 'tools'}">Power &amp; motor tools</button>
+      </div>
+
+      ${dashTab === 'tools' ? powerToolsTab() : `
       <div class="strip" role="group" aria-label="Fleet summary">
         ${card({
           go: ['fleet', {}], icon: kpiIco(I.truck, 'blue'), label: 'Total fleet', value: vehicles.length,
@@ -273,8 +296,10 @@ AD.views.dashboard = (function () {
         <ul class="rows activity">
           ${AD.store.all('activity').slice(0, 6).map((a) => `<li><span class="what">${esc(a.text)}</span><span class="when">${esc(relTime(a.ts))}</span></li>`).join('') || '<li class="muted">No activity yet.</li>'}
         </ul>
-      </section>`;
+      </section>`}
+    `;
 
+    el.querySelectorAll('[data-dashtab]').forEach((b) => b.addEventListener('click', () => { dashTab = b.dataset.dashtab; fresh = true; AD.setParams({ tab: dashTab === 'overview' ? '' : dashTab }); draw(); }));
     el.querySelectorAll('[data-go]').forEach((b) => b.addEventListener('click', () => { const [r, p] = JSON.parse(b.dataset.go); AD.go(r, p); }));
     el.querySelectorAll('.rows li[data-veh]').forEach((li) => li.addEventListener('click', (e) => {
       if (e.target.closest('a')) return;
@@ -412,6 +437,46 @@ AD.views.dashboard = (function () {
             ${V.table(['Type'].concat(V.VEHICLE.map((s) => s.label)), types.map(({ t, list }) => [t].concat(V.VEHICLE.map((s) => String(list.filter((v) => v.status === s.key).length)))))}
           </figure>
         </div>
+      </section>`;
+  }
+
+  // ---------- Power & motor tools ----------
+  function powerToolsTab() {
+    const typeCounts = POWER_TOOLS.reduce((m, t) => { m[t.type] = (m[t.type] || 0) + 1; return m; }, {});
+    const summary = Object.entries(typeCounts).map(([type, n]) => `${n}× ${type}`).join(' · ');
+    const typeNums = {};
+    return `
+      <section class="section">
+        ${sectionHead({ title: 'Power &amp; motor tools register', meta: summary })}
+        <div class="table-wrap"><table class="data">
+          <thead><tr>
+            <th style="width:140px">Tool</th>
+            <th class="col-opt">Make / model</th>
+            <th class="col-opt">Serial #</th>
+            <th class="col-opt col-wide">Location</th>
+            <th class="col-opt col-wide">Responsible person</th>
+            <th>Service interval</th>
+            <th class="col-opt">Last service</th>
+            <th class="col-opt">Next service</th>
+          </tr></thead>
+          <tbody>
+            ${POWER_TOOLS.map((t) => {
+              typeNums[t.type] = (typeNums[t.type] || 0) + 1;
+              const num = typeNums[t.type];
+              return `<tr>
+                <td><span class="id">${esc(t.type)}</span><span class="t2">#${num}</span></td>
+                <td class="col-opt">${t.make ? esc(t.make) : dash}</td>
+                <td class="col-opt">${t.serial ? esc(t.serial) : dash}</td>
+                <td class="col-opt col-wide">${esc(t.location)}</td>
+                <td class="col-opt col-wide">${esc(t.responsible)}</td>
+                <td>${esc(t.interval)}</td>
+                <td class="col-opt">${t.last ? esc(t.last) : dash}</td>
+                <td class="col-opt">${t.next ? esc(t.next) : dash}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table></div>
+        <p class="section-foot muted small">Serial numbers and service dates to be filled in. Contact Dale or Beggs for current serviceability status.</p>
       </section>`;
   }
 
