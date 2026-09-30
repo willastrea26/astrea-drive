@@ -9,8 +9,11 @@ AD.serviceForm = function (vehicleId) {
   const vehicles = AD.store.all('vehicles').slice().sort((a, b) => a.id.localeCompare(b.id));
   const today = T.todayKey();
 
+  let map = null;
   modal({
+    wide: true,
     title: 'Record completed service',
+    onClose: () => { if (map) { map.remove(); map = null; } },
     body: `
       <form class="form-grid" novalidate>
         <div class="field full"><label>Vehicle <span class="req">*</span></label>
@@ -21,6 +24,10 @@ AD.serviceForm = function (vehicleId) {
         <div class="field"><label>Workshop</label>
           <select name="workshopSel" id="svc-wk"></select>
           <input type="text" name="workshopOther" id="svc-wk-other" placeholder="Workshop name" class="hide" style="margin-top:6px">
+        </div>
+        <div class="field full">
+          <div class="pick-map-wrap" style="position:relative"><div class="pick-map" id="svc-map"></div></div>
+          <p class="help" id="svc-map-help">Pins are workshops for this vehicle's category. Click one to select it.</p>
         </div>
         <div class="field"><label>Cost (AUD, inc. GST)</label><input type="number" name="cost" min="0" step="0.01" placeholder="0.00"></div>
         <div class="field"><label>&nbsp;</label><div class="help" id="svc-hint"></div></div>
@@ -36,7 +43,64 @@ AD.serviceForm = function (vehicleId) {
     onMount(el, close) {
       const f = el.querySelector('form');
       el.querySelector('[data-close]').onclick = close;
+
+      const mapEl = el.querySelector('#svc-map');
+      map = AD.maps.create(mapEl, mapEl.parentElement, { scrollWheelZoom: true });
+      setTimeout(() => map && map.invalidateSize(), 60);
+      let wsMarkers = [];
+
+      function wsPinIcon(sel, occupied) {
+        const size = sel ? 34 : 28;
+        const color = sel ? '#2f9e6e' : '#3b7dc9';
+        return window.L.divIcon({
+          className: 'wk-pin',
+          html: `<div class="wk-pin-inner">
+            <svg viewBox="0 0 24 24" width="${size}" height="${size}"><path d="M12 22s-7-6.4-7-12a7 7 0 0 1 14 0c0 5.6-7 12-7 12z" fill="${color}" stroke="#fff" stroke-width="1.5"/><circle cx="12" cy="10" r="3" fill="#fff"/></svg>
+            ${occupied ? `<span class="wk-pin-badge">${occupied}</span>` : ''}
+          </div>`,
+          iconSize: [size, size], iconAnchor: [size / 2, size - 1]
+        });
+      }
+
+      function drawWorkshopMap() {
+        if (!map) return;
+        wsMarkers.forEach((m) => map.removeLayer(m));
+        wsMarkers = [];
+        const v = AD.store.get('vehicles', f.vehicleId.value);
+        const shops = v ? L.workshopsFor(v.type) : [];
+        const pts = [];
+        shops.forEach((w) => {
+          if (w.lat == null) return;
+          const here = L.atWorkshop(w.id);
+          const sel = f.workshopSel.value === w.id;
+          const m = window.L.marker([w.lat, w.lng], { icon: wsPinIcon(sel, here.length) });
+          m.bindTooltip(`<b>${esc(w.name)}</b>${here.length ? `<br>${here.length} here now: ${here.map((x) => esc(x.id)).join(', ')}` : ''}`, { direction: 'top', offset: [0, sel ? -32 : -26], className: 'tm-tip' });
+          m.on('click', () => {
+            f.workshopSel.value = w.id;
+            f.workshopSel.dispatchEvent(new Event('change', { bubbles: true }));
+          });
+          m.addTo(map);
+          wsMarkers.push(m);
+          pts.push([w.lat, w.lng]);
+        });
+        if (pts.length === 1) map.setView(pts[0], 11, { animate: false });
+        else if (pts.length) map.fitBounds(pts, { padding: [50, 50], maxZoom: 11, animate: false });
+        else map.fitBounds(AD.maps.AU_BOUNDS, { animate: false });
+      }
       const toggleWkOther = () => el.querySelector('#svc-wk-other').classList.toggle('hide', f.workshopSel.value !== 'other');
+      function updateMapHelp() {
+        const help = el.querySelector('#svc-map-help');
+        const v = AD.store.get('vehicles', f.vehicleId.value);
+        if (!v) { help.textContent = 'Select a vehicle to see relevant workshops on the map.'; return; }
+        const wid = f.workshopSel.value;
+        if (wid && wid !== 'other') {
+          const w = AD.store.get('workshops', wid);
+          const here = w ? L.atWorkshop(w.id).filter((x) => x.id !== v.id) : [];
+          help.innerHTML = w ? `Selected <b>${esc(w.name)}</b>${here.length ? ` — also here: ${here.map((x) => esc(x.id)).join(', ')}` : ''}` : '';
+        } else {
+          help.textContent = 'Pins are workshops for this vehicle’s category. Click one to select it.';
+        }
+      }
       const fill = () => {
         const v = AD.store.get('vehicles', f.vehicleId.value);
         el.querySelector('#ret-wrap').classList.toggle('hide', !(v && v.status === 'In workshop'));
@@ -44,6 +108,8 @@ AD.serviceForm = function (vehicleId) {
           el.querySelector('#svc-hint').textContent = '';
           f.workshopSel.innerHTML = options([['other', 'Other / not listed']], '', 'Select a vehicle first');
           toggleWkOther();
+          drawWorkshopMap();
+          updateMapHelp();
           return;
         }
         f.odometer.value = v.odometer;
@@ -54,11 +120,15 @@ AD.serviceForm = function (vehicleId) {
         f.nextServiceKm.value = v.odometer + (v.serviceIntervalKm || 10000);
         el.querySelector('#svc-hint').textContent = `Interval: every ${(v.serviceIntervalKm || 10000).toLocaleString('en-AU')} km or ${v.serviceIntervalMonths || 6} months. Current odometer ${L.fmtKm(v.odometer)}.`;
         const shops = L.workshopsFor(v.type);
-        f.workshopSel.innerHTML = options(shops.map((w) => [w.id, w.name]).concat([['other', 'Other / not listed']]), f.workshopSel.value, shops.length ? 'Select a workshop' : undefined);
+        // Preserve the vehicle's current workshop selection when the form opens for a vehicle already in the shop.
+        const preferred = f.workshopSel.value || (v.workshopId && shops.some((s) => s.id === v.workshopId) ? v.workshopId : '');
+        f.workshopSel.innerHTML = options(shops.map((w) => [w.id, w.name]).concat([['other', 'Other / not listed']]), preferred, shops.length ? 'Select a workshop' : undefined);
         toggleWkOther();
+        drawWorkshopMap();
+        updateMapHelp();
       };
       f.vehicleId.addEventListener('change', fill);
-      f.workshopSel.addEventListener('change', toggleWkOther);
+      f.workshopSel.addEventListener('change', () => { toggleWkOther(); drawWorkshopMap(); updateMapHelp(); });
       f.odometer.addEventListener('input', () => {
         const v = AD.store.get('vehicles', f.vehicleId.value);
         if (v && f.odometer.value) f.nextServiceKm.value = Number(f.odometer.value) + (v.serviceIntervalKm || 10000);
