@@ -52,6 +52,7 @@ WHERE id IN ('ATR01', 'ATR02');
 
 -- 6. Activity log
 INSERT INTO activity (id, ts, "vehicleId", text)
-VALUES ('act-first-aid', now(), '', 'First aid kit register imported — all kits inspected 18 May 2026, next due 15 Nov 2026');
+VALUES ('act-first-aid', now(), '', 'First aid kit register imported — all kits inspected 18 May 2026, next due 15 Nov 2026')
+ON CONFLICT (id) DO NOTHING;
 
 COMMIT;
