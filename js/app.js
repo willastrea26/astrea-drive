@@ -1,12 +1,12 @@
 /*
- * App shell: hash router, navigation, clock and reset.
+ * App shell: sign-in gate, hash router, navigation, clock and reset.
  * Routes look like  #/fleet?status=Available  or  #/vehicle/VAC-03
  */
 window.AD = window.AD || {};
 AD.views = AD.views || {};
 
 (function () {
-  const { $, esc } = AD.ui;
+  const { $, esc, toast } = AD.ui;
   const I = AD.icons;
 
   const NAV = [
@@ -65,7 +65,7 @@ AD.views = AD.views || {};
     el.innerHTML = '';
     view.render(el, params, arg);
     const title = typeof view.title === 'function' ? view.title(arg) : view.title;
-    document.title = `${title} — Astrea Drive (Demo)`;
+    document.title = `${title} — Astrea Drive`;
     if (AD.closeNav) AD.closeNav(); else document.body.classList.remove('nav-open');
     window.scrollTo(0, 0);
   }
@@ -91,7 +91,9 @@ AD.views = AD.views || {};
 
   // ---------- Computer / iPhone preview ----------
   // iPhone mode loads this same app in a 390px-wide frame so the real phone
-  // layout (driven by media queries) is shown. Both share localStorage.
+  // layout (driven by media queries) is shown. Both share the same Supabase
+  // session (same origin), so returning to computer mode just re-fetches to
+  // pick up anything changed inside the phone preview.
   const EMBEDDED = new URLSearchParams(location.search).has('embed');
   const DEVICE_KEY = 'astrea-drive-preview-device';
   let device = 'computer';
@@ -101,7 +103,7 @@ AD.views = AD.views || {};
     $('.phone').style.setProperty('--phone-h', h + 'px');
   }
 
-  function setDevice(mode) {
+  async function setDevice(mode) {
     if (mode === device) return;
     const frame = $('#device-frame');
     if (mode === 'iphone') {
@@ -119,7 +121,7 @@ AD.views = AD.views || {};
       frame.src = 'about:blank';
       $('#device-stage').hidden = true;
       document.body.classList.remove('device-iphone');
-      AD.store.load(); // pick up changes made inside the phone preview
+      try { await AD.store.load(); } catch (e) { toast('Could not refresh data: ' + e.message, 'error'); }
       if (location.hash !== hash) location.hash = hash; else render();
     }
     device = mode;
@@ -144,10 +146,71 @@ AD.views = AD.views || {};
     if (saved === 'iphone') setDevice('iphone');
   }
 
+  // ---------- Sign-in gate ----------
+  function showGate() {
+    $('#app-shell').hidden = true;
+    $('#auth-gate').hidden = false;
+  }
+
+  function showApp() {
+    $('#auth-gate').hidden = true;
+    $('#app-shell').hidden = false;
+  }
+
+  function wireAuthForm() {
+    const form = $('#auth-form');
+    const errBox = $('#auth-error');
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      errBox.hidden = true;
+      const btn = form.querySelector('.auth-submit');
+      const email = form.email.value.trim();
+      const password = form.password.value;
+      btn.disabled = true;
+      btn.textContent = 'Signing in…';
+      try {
+        await AD.auth.signIn(email, password);
+        form.reset();
+      } catch (err) {
+        errBox.textContent = /invalid/i.test(err.message) ? 'Incorrect email or password.' : err.message;
+        errBox.hidden = false;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Sign in';
+      }
+    };
+  }
+
+  // ---------- Boot ----------
+  let pollTimer = null;
+
+  async function enterApp(session) {
+    showApp();
+    $('#user-tag').textContent = session.user.email;
+    try {
+      await AD.store.load();
+    } catch (e) {
+      toast('Could not load fleet data: ' + e.message, 'error');
+      return;
+    }
+    init();
+    // Nobody else's edits push to this tab on their own (no realtime), so
+    // poll for changes: on a timer, and whenever the tab regains focus.
+    clearInterval(pollTimer);
+    pollTimer = setInterval(() => AD.store.load().catch(() => {}), 45000);
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) AD.store.load().catch(() => {});
+    });
+  }
+
+  let initialised = false;
+
   function init() {
-    AD.store.load();
+    if (initialised) { render(); return; }
+    initialised = true;
     $('#menu-btn').innerHTML = I.menu;
-    $('#reset-btn').innerHTML = `${I.reset} Reset demo data`;
+    $('#reset-btn').innerHTML = `${I.reset} Reset sample data`;
+    $('#signout-btn').textContent = 'Sign out';
     const menuBtn = $('#menu-btn');
     menuBtn.setAttribute('aria-controls', 'sidebar');
     menuBtn.setAttribute('aria-expanded', 'false');
@@ -163,13 +226,21 @@ AD.views = AD.views || {};
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !document.querySelector('#modal-root.open, .confirm-open')) AD.closeNav(); });
     $('#reset-btn').onclick = async () => {
       const ok = await AD.ui.confirm({
-        title: 'Reset demo data?',
-        message: 'This discards every change made in this browser (vehicles, services, defects and bookings) and reloads fresh sample data with dates relative to today.',
-        confirmText: 'Reset demo data', danger: true
+        title: 'Reset sample data?',
+        message: 'This discards every vehicle, booking, service and defect in the shared database — for everyone signed in, not just you — and reloads fresh fictional sample data.',
+        confirmText: 'Reset sample data', danger: true
       });
       if (!ok) return;
-      AD.store.reset();
-      AD.ui.toast('Demo data reset to fresh sample data');
+      try {
+        await AD.store.reset();
+        AD.ui.toast('Sample data reset for everyone');
+      } catch (e) {
+        toast('Reset failed: ' + e.message, 'error');
+      }
+    };
+    $('#signout-btn').onclick = async () => {
+      clearInterval(pollTimer);
+      await AD.auth.signOut();
     };
     AD.store.on(() => refresh());
     window.addEventListener('hashchange', render);
@@ -179,5 +250,20 @@ AD.views = AD.views || {};
     initDevice();
   }
 
-  document.addEventListener('DOMContentLoaded', init);
+  async function boot() {
+    wireAuthForm();
+    let session;
+    try { session = await AD.auth.getSession(); }
+    catch (e) { session = null; }
+
+    if (session) await enterApp(session);
+    else showGate();
+
+    AD.auth.onChange((s) => {
+      if (s && $('#auth-gate').hidden === false) enterApp(s);
+      else if (!s) { clearInterval(pollTimer); showGate(); }
+    });
+  }
+
+  document.addEventListener('DOMContentLoaded', boot);
 })();

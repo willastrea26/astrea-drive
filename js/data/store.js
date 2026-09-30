@@ -1,78 +1,114 @@
 /*
  * Data store — the single source of truth for every screen.
  *
- * Demo mode keeps everything in memory and persists to localStorage.
- * To connect Supabase later, replace the bodies of load/persist/insert/update/
- * remove with Supabase queries (one table per collection) and keep this API,
- * so the views don't need to change. Calendar and Tracker both read the same
- * `bookings` collection, which is what keeps them in sync.
+ * Backed by Supabase (see supabase/schema.sql for the tables and RLS
+ * policies). Reads are served from an in-memory mirror of all 8 tables —
+ * all()/get() stay synchronous so view code doesn't need to change —
+ * refilled by load() on sign-in, on a timer, and after every write.
+ * Writes (insert/update/remove/log) hit Supabase first and only touch the
+ * local mirror once the database confirms the change, so a failed write
+ * can't get out of sync with what's actually saved.
+ *
+ * Calendar and Tracker both read the same `bookings` collection, which is
+ * what keeps them in sync with each other.
  */
 window.AD = window.AD || {};
 
 AD.store = (function () {
-  const KEY = 'astrea-drive-demo-v1';
-  let db = null;
+  const TABLES = ['vehicles', 'drivers', 'sites', 'bookings', 'services', 'defects', 'documents', 'activity'];
+  let db = Object.fromEntries(TABLES.map((t) => [t, []]));
   const listeners = new Set();
 
-  function load() {
-    try {
-      const raw = localStorage.getItem(KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (parsed && parsed.version === 2) { db = parsed; return; }
-      }
-    } catch (e) { console.warn('Could not read saved demo data; reseeding.', e); }
-    db = AD.seed.build();
-    persist();
-  }
-
-  function persist() {
-    try { localStorage.setItem(KEY, JSON.stringify(db)); }
-    catch (e) { console.warn('Could not save demo data to localStorage.', e); }
-  }
+  function sb() { return AD.sb; }
 
   function emit(coll) { listeners.forEach((fn) => fn(coll)); }
 
   const uid = (prefix) => prefix + '-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 
+  /**
+   * Refetch every table. Call after sign-in, and periodically to pick up
+   * other users' changes.
+   *
+   * The activity log is the one table with an order the views depend on —
+   * the dashboard takes the first 6 entries and expects the newest — and
+   * it's the one table that grows without bound, so it's capped here.
+   */
+  const ACTIVITY_LIMIT = 100;
+
+  function query(t) {
+    const q = sb().from(t).select('*');
+    return t === 'activity' ? q.order('ts', { ascending: false }).limit(ACTIVITY_LIMIT) : q;
+  }
+
+  async function load() {
+    const results = await Promise.all(TABLES.map(query));
+    const next = {};
+    results.forEach((r, i) => {
+      if (r.error) throw r.error;
+      next[TABLES[i]] = r.data;
+    });
+    db = next;
+    emit('*');
+  }
+
   function all(coll) { return db[coll]; }
   function get(coll, id) { return db[coll].find((r) => r.id === id) || null; }
 
-  function insert(coll, row, prefix) {
+  async function insert(coll, row, prefix) {
     const rec = Object.assign({ id: row.id || uid(prefix || coll.slice(0, 3)) }, row);
-    db[coll].push(rec);
-    persist(); emit(coll);
-    return rec;
+    const { data, error } = await sb().from(coll).insert(rec).select().single();
+    if (error) throw error;
+    if (coll === 'activity') db[coll].unshift(data); else db[coll].push(data);
+    emit(coll);
+    return data;
   }
 
-  function update(coll, id, patch) {
-    const rec = get(coll, id);
-    if (!rec) return null;
-    Object.assign(rec, patch);
-    persist(); emit(coll);
-    return rec;
+  async function update(coll, id, patch) {
+    const { data, error } = await sb().from(coll).update(patch).eq('id', id).select().single();
+    if (error) throw error;
+    const i = db[coll].findIndex((r) => r.id === id);
+    if (i >= 0) db[coll][i] = data; else db[coll].push(data);
+    emit(coll);
+    return data;
   }
 
-  function remove(coll, id) {
+  async function remove(coll, id) {
+    const { error } = await sb().from(coll).delete().eq('id', id);
+    if (error) throw error;
     const i = db[coll].findIndex((r) => r.id === id);
     if (i >= 0) db[coll].splice(i, 1);
-    persist(); emit(coll);
+    emit(coll);
   }
 
-  function log(text, vehicleId) {
-    db.activity.unshift({ id: uid('act'), ts: new Date().toISOString(), vehicleId: vehicleId || '', text });
-    db.activity = db.activity.slice(0, 60);
-    persist(); emit('activity');
+  async function log(text, vehicleId) {
+    return insert('activity', { ts: new Date().toISOString(), vehicleId: vehicleId || '', text }, 'act');
   }
 
-  function reset() {
-    db = AD.seed.build();
-    persist(); emit('*');
+  /** Wipes the SHARED database — every signed-in user's data — and reloads fictional sample data. */
+  async function reset() {
+    const wipe = (t) => sb().from(t).delete().neq('id', '');
+    for (const t of ['bookings', 'services', 'defects', 'documents', 'activity']) {
+      const { error } = await wipe(t);
+      if (error) throw error;
+    }
+    for (const t of ['vehicles', 'drivers', 'sites']) {
+      const { error } = await wipe(t);
+      if (error) throw error;
+    }
+    // Parents before children, so the foreign keys resolve. Inserted in
+    // chunks because the sample set runs to a couple of thousand bookings.
+    const CHUNK = 500;
+    const seed = AD.seed.build();
+    for (const t of ['drivers', 'sites', 'vehicles', 'bookings', 'services', 'defects', 'documents', 'activity']) {
+      for (let i = 0; i < seed[t].length; i += CHUNK) {
+        const { error } = await sb().from(t).insert(seed[t].slice(i, i + CHUNK));
+        if (error) throw error;
+      }
+    }
+    await load();
   }
 
   function on(fn) { listeners.add(fn); return () => listeners.delete(fn); }
 
-  function meta() { return { seededAt: db.seededAt, seedDay: db.seedDay }; }
-
-  return { load, all, get, insert, update, remove, log, reset, on, meta, uid };
+  return { load, all, get, insert, update, remove, log, reset, on, uid };
 })();

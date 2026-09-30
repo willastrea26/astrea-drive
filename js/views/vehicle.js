@@ -132,22 +132,28 @@ AD.views.vehicle = (function () {
   }
 
   /**
-   * Photos are stored on the vehicle record, which lives in localStorage, so
-   * they are downscaled to a 640px JPEG before saving to stay well inside quota.
+   * Photos are stored on the vehicle record as a data URL, so they're
+   * downscaled to a 640px JPEG before saving to keep the row (and the
+   * network round-trip) small.
    */
   function storePhoto(file, v) {
     if (!file || !/^image\//.test(file.type)) return toast('That file is not an image');
     const reader = new FileReader();
     reader.onload = () => {
       const img = new Image();
-      img.onload = () => {
+      img.onload = async () => {
         const max = 640;
         const scale = Math.min(1, max / Math.max(img.width, img.height));
         const c = document.createElement('canvas');
         c.width = Math.round(img.width * scale);
         c.height = Math.round(img.height * scale);
         c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-        AD.store.update('vehicles', v.id, { photo: c.toDataURL('image/jpeg', 0.75) });
+        try {
+          await AD.store.update('vehicles', v.id, { photo: c.toDataURL('image/jpeg', 0.75) });
+        } catch (err) {
+          toast('Could not save photo: ' + err.message, 'error');
+          return;
+        }
         toast(`${v.id} photo updated`);
         draw();
       };
@@ -172,30 +178,42 @@ AD.views.vehicle = (function () {
       zone.classList.remove('is-over');
     }));
     zone.addEventListener('drop', (e) => storePhoto(e.dataTransfer.files[0], v));
-    if (clear) clear.onclick = () => {
-      AD.store.update('vehicles', v.id, { photo: '' });
+    if (clear) clear.onclick = async () => {
+      try {
+        await AD.store.update('vehicles', v.id, { photo: '' });
+      } catch (err) {
+        return toast('Could not remove photo: ' + err.message, 'error');
+      }
       toast(`${v.id} photo removed`);
       draw();
     };
   }
 
   function bindOverview(el, v) {
-    el.querySelector('#odo-form').addEventListener('submit', (e) => {
+    el.querySelector('#odo-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const f = e.target, val = Number(f.odo.value);
       if (f.odo.value === '' || !Number.isFinite(val)) return AD.ui.showErrors(f, { odo: 'Enter a reading.' });
       if (val < v.odometer) return AD.ui.showErrors(f, { odo: `Must be at least ${v.odometer.toLocaleString('en-AU')} km.` });
       if (val - v.odometer > 20000) return AD.ui.showErrors(f, { odo: 'That’s over 20,000 km more — check the reading.' });
-      AD.store.update('vehicles', v.id, { odometer: Math.round(val) });
-      AD.store.log(`${v.id} odometer updated to ${L.fmtKm(val)}`, v.id);
+      try {
+        await AD.store.update('vehicles', v.id, { odometer: Math.round(val) });
+        await AD.store.log(`${v.id} odometer updated to ${L.fmtKm(val)}`, v.id);
+      } catch (err) {
+        return toast('Could not update odometer: ' + err.message, 'error');
+      }
       toast(`${v.id} odometer updated`);
     });
-    el.querySelector('#status-form').addEventListener('submit', (e) => {
+    el.querySelector('#status-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const status = e.target.status.value;
       if (status === v.status) return;
-      AD.store.update('vehicles', v.id, { status });
-      AD.store.log(`${v.id} status changed to ${status}`, v.id);
+      try {
+        await AD.store.update('vehicles', v.id, { status });
+        await AD.store.log(`${v.id} status changed to ${status}`, v.id);
+      } catch (err) {
+        return toast('Could not change status: ' + err.message, 'error');
+      }
       toast(`${v.id} is now ${status}`);
     });
   }

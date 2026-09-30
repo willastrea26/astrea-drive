@@ -34,7 +34,8 @@ AD.defectForm = function (vehicleId) {
       el.querySelector('[data-close]').onclick = close;
       const upd = () => el.querySelector('#oos-wrap').classList.toggle('hide', f.priority.value !== 'Critical');
       f.priority.addEventListener('change', upd);
-      el.querySelector('[data-save]').onclick = () => {
+      const saveBtn = el.querySelector('[data-save]');
+      saveBtn.onclick = async () => {
         const d = formData(f);
         const err = {};
         if (!d.vehicleId) err.vehicleId = 'Choose a vehicle.';
@@ -42,12 +43,19 @@ AD.defectForm = function (vehicleId) {
         if (!d.reportedBy) err.reportedBy = 'Who reported it?';
         if (d.reportedDate > today) err.reportedDate = 'Can’t be in the future.';
         if (!showErrors(f, err)) return;
-        AD.store.insert('defects', {
-          vehicleId: d.vehicleId, description: d.description, priority: d.priority, status: d.status,
-          reportedBy: d.reportedBy, reportedDate: d.reportedDate || today, resolvedDate: '', resolutionNotes: ''
-        }, 'def');
-        if (d.priority === 'Critical' && d.markOOS) AD.store.update('vehicles', d.vehicleId, { status: 'Out of service' });
-        AD.store.log(`Defect reported on ${d.vehicleId}: ${d.description.slice(0, 60)} (${d.priority})`, d.vehicleId);
+        saveBtn.disabled = true;
+        try {
+          await AD.store.insert('defects', {
+            vehicleId: d.vehicleId, description: d.description, priority: d.priority, status: d.status,
+            reportedBy: d.reportedBy, reportedDate: d.reportedDate || today, resolvedDate: null, resolutionNotes: ''
+          }, 'def');
+          if (d.priority === 'Critical' && d.markOOS) await AD.store.update('vehicles', d.vehicleId, { status: 'Out of service' });
+          await AD.store.log(`Defect reported on ${d.vehicleId}: ${d.description.slice(0, 60)} (${d.priority})`, d.vehicleId);
+        } catch (err2) {
+          saveBtn.disabled = false;
+          toast('Could not report defect: ' + err2.message, 'error');
+          return;
+        }
         toast(`Defect reported on ${d.vehicleId}`);
         close();
       };
@@ -71,10 +79,18 @@ AD.resolveDefect = function (defectId) {
       </div>`,
     onMount(el, close) {
       el.querySelector('[data-close]').onclick = close;
-      el.querySelector('[data-save]').onclick = () => {
+      const saveBtn = el.querySelector('[data-save]');
+      saveBtn.onclick = async () => {
         const notes = el.querySelector('textarea').value.trim();
-        AD.store.update('defects', d.id, { status: 'Resolved', resolvedDate: T.todayKey(), resolutionNotes: notes });
-        AD.store.log(`Defect resolved on ${d.vehicleId}: ${d.description.slice(0, 60)}`, d.vehicleId);
+        saveBtn.disabled = true;
+        try {
+          await AD.store.update('defects', d.id, { status: 'Resolved', resolvedDate: T.todayKey(), resolutionNotes: notes });
+          await AD.store.log(`Defect resolved on ${d.vehicleId}: ${d.description.slice(0, 60)}`, d.vehicleId);
+        } catch (err) {
+          saveBtn.disabled = false;
+          toast('Could not resolve defect: ' + err.message, 'error');
+          return;
+        }
         toast(`Defect on ${d.vehicleId} marked resolved`);
         close();
       };
@@ -144,15 +160,19 @@ AD.views.defects = (function () {
     }).join('') || '<tr><td colspan="6" class="empty">No defects match these filters.</td></tr>';
 
     body.querySelectorAll('[data-resolve]').forEach((b) => (b.onclick = () => AD.resolveDefect(b.dataset.resolve)));
-    body.querySelectorAll('[data-prog]').forEach((b) => (b.onclick = () => {
-      const d = AD.store.update('defects', b.dataset.prog, { status: 'In progress' });
-      AD.store.log(`Work started on ${d.vehicleId} defect: ${d.description.slice(0, 50)}`, d.vehicleId);
-      toast(`Defect on ${d.vehicleId} set to In progress`);
+    body.querySelectorAll('[data-prog]').forEach((b) => (b.onclick = async () => {
+      try {
+        const d = await AD.store.update('defects', b.dataset.prog, { status: 'In progress' });
+        await AD.store.log(`Work started on ${d.vehicleId} defect: ${d.description.slice(0, 50)}`, d.vehicleId);
+        toast(`Defect on ${d.vehicleId} set to In progress`);
+      } catch (err) { toast('Could not update defect: ' + err.message, 'error'); }
     }));
-    body.querySelectorAll('[data-reopen]').forEach((b) => (b.onclick = () => {
-      const d = AD.store.update('defects', b.dataset.reopen, { status: 'Open', resolvedDate: '', resolutionNotes: '' });
-      AD.store.log(`Defect reopened on ${d.vehicleId}`, d.vehicleId);
-      toast(`Defect on ${d.vehicleId} reopened`);
+    body.querySelectorAll('[data-reopen]').forEach((b) => (b.onclick = async () => {
+      try {
+        const d = await AD.store.update('defects', b.dataset.reopen, { status: 'Open', resolvedDate: null, resolutionNotes: '' });
+        await AD.store.log(`Defect reopened on ${d.vehicleId}`, d.vehicleId);
+        toast(`Defect on ${d.vehicleId} reopened`);
+      } catch (err) { toast('Could not reopen defect: ' + err.message, 'error'); }
     }));
   }
 

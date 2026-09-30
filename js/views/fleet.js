@@ -44,7 +44,8 @@ AD.vehicleForm = function (vehicle, onSaved) {
     onMount(el, close) {
       const form = el.querySelector('form');
       el.querySelector('[data-close]').onclick = close;
-      el.querySelector('[data-save]').onclick = () => {
+      const saveBtn = el.querySelector('[data-save]');
+      saveBtn.onclick = async () => {
         const d = formData(form);
         const err = {};
         const id = (isNew ? d.id : v.id).toUpperCase();
@@ -63,19 +64,26 @@ AD.vehicleForm = function (vehicle, onSaved) {
         if (!showErrors(form, err)) return;
 
         const rec = {
-          rego: d.rego.toUpperCase(), make: d.make, model: d.model, type: d.type, year: Number(d.year) || '',
+          rego: d.rego.toUpperCase(), make: d.make, model: d.model, type: d.type, year: Number(d.year) || null,
           driverId: d.driverId, status: d.status, odometer: Math.round(odo), regoExpiry: d.regoExpiry,
           nextServiceDate: d.nextServiceDate, nextServiceKm: Math.round(Number(d.nextServiceKm)), notes: d.notes
         };
+        saveBtn.disabled = true;
         let saved;
-        if (isNew) {
-          saved = AD.store.insert('vehicles', Object.assign({ id, serviceIntervalKm: 10000, serviceIntervalMonths: 6, lastServiceDate: '', lastServiceKm: rec.odometer }, rec));
-          AD.store.log(`${id} added to the fleet register`, id);
-          toast(`${id} added`);
-        } else {
-          saved = AD.store.update('vehicles', v.id, rec);
-          AD.store.log(`${v.id} details updated`, v.id);
-          toast(`${v.id} saved`);
+        try {
+          if (isNew) {
+            saved = await AD.store.insert('vehicles', Object.assign({ id, serviceIntervalKm: 10000, serviceIntervalMonths: 6, lastServiceDate: null, lastServiceKm: rec.odometer }, rec));
+            await AD.store.log(`${id} added to the fleet register`, id);
+            toast(`${id} added`);
+          } else {
+            saved = await AD.store.update('vehicles', v.id, rec);
+            await AD.store.log(`${v.id} details updated`, v.id);
+            toast(`${v.id} saved`);
+          }
+        } catch (err2) {
+          saveBtn.disabled = false;
+          toast('Could not save vehicle: ' + err2.message, 'error');
+          return;
         }
         close();
         onSaved && onSaved(saved);

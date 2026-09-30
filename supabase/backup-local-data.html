@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en-AU">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Astrea Drive — back up local data</title>
+  <style>
+    body { font-family: "Segoe UI", system-ui, sans-serif; background: #12283d; color: #e8eef6;
+           margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+    .card { background: #1d3a56; border: 1px solid rgba(255,255,255,.12); border-radius: 12px;
+            padding: 28px 30px; max-width: 520px; width: 100%; }
+    h1 { font-size: 20px; margin: 0 0 6px; }
+    p { color: #a9bbd0; font-size: 14px; line-height: 1.5; margin: 0 0 16px; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 14px; }
+    td { padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,.08); }
+    td:last-child { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+    button { background: #5fe0b4; color: #0c2437; border: 0; border-radius: 8px; padding: 11px 18px;
+             font-size: 15px; font-weight: 600; cursor: pointer; width: 100%; }
+    button[disabled] { opacity: .5; cursor: default; }
+    .note { font-size: 13px; color: #8fa6c0; margin-top: 14px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Back up local data</h1>
+    <p>This reads the sample data still stored in this browser from before the app moved to
+       Supabase, and saves it as a JSON file. Nothing is deleted either way — this is just a copy.</p>
+    <div id="out"></div>
+  </div>
+
+  <script>
+    const KEY = 'astrea-drive-demo-v1';
+    const COLLS = ['vehicles', 'drivers', 'sites', 'bookings', 'services', 'defects', 'documents', 'activity'];
+    const out = document.getElementById('out');
+    const raw = localStorage.getItem(KEY);
+
+    if (!raw) {
+      out.innerHTML = '<p>Nothing found in this browser under <code>' + KEY + '</code> — there is nothing to back up.</p>';
+    } else {
+      const data = JSON.parse(raw);
+      const rows = COLLS.map((c) =>
+        '<tr><td>' + c + '</td><td>' + (Array.isArray(data[c]) ? data[c].length : 0) + '</td></tr>').join('');
+      out.innerHTML =
+        '<table>' + rows + '</table>' +
+        '<button id="dl">Download backup (' + Math.round(raw.length / 1024) + ' KB)</button>' +
+        '<p class="note">Seeded ' + (data.seededAt || 'unknown date') + '</p>';
+
+      document.getElementById('dl').onclick = (e) => {
+        const blob = new Blob([raw], { type: 'application/json' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'astrea-drive-local-backup-' + new Date().toISOString().slice(0, 10) + '.json';
+        a.click();
+        URL.revokeObjectURL(a.href);
+        e.target.textContent = 'Downloaded';
+        e.target.disabled = true;
+      };
+    }
+  </script>
+</body>
+</html>

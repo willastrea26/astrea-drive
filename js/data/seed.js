@@ -89,10 +89,10 @@ AD.seed = (function () {
 
     // --- Defects ------------------------------------------------------
     const defects = [
-      { id: 'def-1', vehicleId: 'VAC-03', reportedDate: dk(-2), reportedBy: 'Mia Russo', description: 'Hydraulic hose weeping on boom lift cylinder.', priority: 'Medium', status: 'Open', resolvedDate: '', resolutionNotes: '' },
-      { id: 'def-2', vehicleId: 'UTE-02', reportedDate: dk(-4), reportedBy: 'Jack Morrison', description: 'Brake warning light on; soft pedal feel. Vehicle parked up.', priority: 'Critical', status: 'Open', resolvedDate: '', resolutionNotes: '' },
-      { id: 'def-3', vehicleId: 'VAC-07', reportedDate: dk(-1), reportedBy: 'Noah Kelly', description: 'Rear amber beacon intermittent.', priority: 'Low', status: 'Open', resolvedDate: '', resolutionNotes: '' },
-      { id: 'def-4', vehicleId: 'VAN-01', reportedDate: dk(-6), reportedBy: 'Grace O’Neill', description: 'Sliding door latch not engaging first time.', priority: 'High', status: 'In progress', resolvedDate: '', resolutionNotes: '' },
+      { id: 'def-1', vehicleId: 'VAC-03', reportedDate: dk(-2), reportedBy: 'Mia Russo', description: 'Hydraulic hose weeping on boom lift cylinder.', priority: 'Medium', status: 'Open', resolvedDate: null, resolutionNotes: '' },
+      { id: 'def-2', vehicleId: 'UTE-02', reportedDate: dk(-4), reportedBy: 'Jack Morrison', description: 'Brake warning light on; soft pedal feel. Vehicle parked up.', priority: 'Critical', status: 'Open', resolvedDate: null, resolutionNotes: '' },
+      { id: 'def-3', vehicleId: 'VAC-07', reportedDate: dk(-1), reportedBy: 'Noah Kelly', description: 'Rear amber beacon intermittent.', priority: 'Low', status: 'Open', resolvedDate: null, resolutionNotes: '' },
+      { id: 'def-4', vehicleId: 'VAN-01', reportedDate: dk(-6), reportedBy: 'Grace O’Neill', description: 'Sliding door latch not engaging first time.', priority: 'High', status: 'In progress', resolvedDate: null, resolutionNotes: '' },
       { id: 'def-5', vehicleId: 'VAC-01', reportedDate: dk(-15), reportedBy: 'Liam Carter', description: 'Debris tank door seal worn.', priority: 'Medium', status: 'Resolved', resolvedDate: dk(-11), resolutionNotes: 'Seal replaced at depot.' }
     ];
 

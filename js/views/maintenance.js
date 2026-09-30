@@ -52,7 +52,8 @@ AD.serviceForm = function (vehicleId) {
       });
       fill();
 
-      el.querySelector('[data-save]').onclick = () => {
+      const saveBtn = el.querySelector('[data-save]');
+      saveBtn.onclick = async () => {
         const d = formData(f);
         const v = AD.store.get('vehicles', d.vehicleId);
         const err = {};
@@ -68,15 +69,22 @@ AD.serviceForm = function (vehicleId) {
         if (d.cost !== '' && !(Number(d.cost) >= 0)) err.cost = 'Enter a valid amount.';
         if (!showErrors(f, err)) return;
 
-        AD.store.insert('services', {
-          vehicleId: v.id, date: d.date, odometer: Math.round(odo), type: d.type,
-          workshop: d.workshop, cost: d.cost === '' ? 0 : Number(d.cost), notes: d.notes
-        }, 'svc');
-        const patch = { lastServiceDate: d.date, lastServiceKm: Math.round(odo), nextServiceDate: d.nextServiceDate, nextServiceKm: Math.round(Number(d.nextServiceKm)) };
-        if (odo > v.odometer) patch.odometer = Math.round(odo);
-        if (v.status === 'In workshop' && d.returnAvail) patch.status = 'Available';
-        AD.store.update('vehicles', v.id, patch);
-        AD.store.log(`Service recorded for ${v.id} at ${L.fmtKm(odo)} — next due ${T.fmtKey(d.nextServiceDate)}`, v.id);
+        saveBtn.disabled = true;
+        try {
+          await AD.store.insert('services', {
+            vehicleId: v.id, date: d.date, odometer: Math.round(odo), type: d.type,
+            workshop: d.workshop, cost: d.cost === '' ? 0 : Number(d.cost), notes: d.notes
+          }, 'svc');
+          const patch = { lastServiceDate: d.date, lastServiceKm: Math.round(odo), nextServiceDate: d.nextServiceDate, nextServiceKm: Math.round(Number(d.nextServiceKm)) };
+          if (odo > v.odometer) patch.odometer = Math.round(odo);
+          if (v.status === 'In workshop' && d.returnAvail) patch.status = 'Available';
+          await AD.store.update('vehicles', v.id, patch);
+          await AD.store.log(`Service recorded for ${v.id} at ${L.fmtKm(odo)} — next due ${T.fmtKey(d.nextServiceDate)}`, v.id);
+        } catch (err2) {
+          saveBtn.disabled = false;
+          toast('Could not save service record: ' + err2.message, 'error');
+          return;
+        }
         toast(`Service recorded for ${v.id}`);
         close();
       };

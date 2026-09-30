@@ -199,15 +199,21 @@ AD.bookingForm = function (booking, defaults = {}) {
       syncLoc(true);
 
       if (!isNew) $('[data-del]').onclick = async () => {
-        const ok = await confirm({ title: 'Delete booking?', message: `Delete <b>${esc(L.bookingTitle(b))}</b> for ${esc(b.truckId)} (${T.fmtDateTime(b.start)} – ${T.fmtDateTime(b.end)})? This can’t be undone (except by resetting demo data).`, confirmText: 'Delete booking', danger: true });
+        const ok = await confirm({ title: 'Delete booking?', message: `Delete <b>${esc(L.bookingTitle(b))}</b> for ${esc(b.truckId)} (${T.fmtDateTime(b.start)} – ${T.fmtDateTime(b.end)})? This can’t be undone.`, confirmText: 'Delete booking', danger: true });
         if (!ok) return;
-        AD.store.remove('bookings', b.id);
-        AD.store.log(`Booking deleted: ${b.truckId} — ${L.bookingTitle(b)} (${T.fmtDateTime(b.start)})`, b.truckId);
+        try {
+          await AD.store.remove('bookings', b.id);
+          await AD.store.log(`Booking deleted: ${b.truckId} — ${L.bookingTitle(b)} (${T.fmtDateTime(b.start)})`, b.truckId);
+        } catch (err) {
+          toast('Could not delete booking: ' + err.message, 'error');
+          return;
+        }
         toast('Booking deleted');
         close();
       };
 
-      $('[data-save]').onclick = () => {
+      const saveBtn = $('[data-save]');
+      saveBtn.onclick = async () => {
         const d = formData(f);
         const s = T.fromInput(d.start), e = T.fromInput(d.end);
         const err = {};
@@ -230,13 +236,20 @@ AD.bookingForm = function (booking, defaults = {}) {
           locationSource: locMode === 'pin' ? 'pin' : locMode === 'none' ? 'none' : 'demo-site'
         };
         const clashes = L.overlaps(Object.assign({ id: b.id }, rec));
+        saveBtn.disabled = true;
         let saved;
-        if (isNew) {
-          saved = AD.store.insert('bookings', rec, 'bk');
-          AD.store.log(`Booking created: ${rec.truckId} — ${rec.jobName} (${T.fmtDateTime(rec.start)})`, rec.truckId);
-        } else {
-          saved = AD.store.update('bookings', b.id, rec);
-          AD.store.log(`Booking updated: ${rec.truckId} — ${rec.jobName} (${T.fmtDateTime(rec.start)})`, rec.truckId);
+        try {
+          if (isNew) {
+            saved = await AD.store.insert('bookings', rec, 'bk');
+            await AD.store.log(`Booking created: ${rec.truckId} — ${rec.jobName} (${T.fmtDateTime(rec.start)})`, rec.truckId);
+          } else {
+            saved = await AD.store.update('bookings', b.id, rec);
+            await AD.store.log(`Booking updated: ${rec.truckId} — ${rec.jobName} (${T.fmtDateTime(rec.start)})`, rec.truckId);
+          }
+        } catch (err) {
+          saveBtn.disabled = false;
+          toast('Could not save booking: ' + err.message, 'error');
+          return;
         }
         toast(clashes.length ? `Booking saved — clashes with ${clashes.length} other booking${clashes.length > 1 ? 's' : ''}` : (isNew ? 'Booking created' : 'Booking saved'), clashes.length ? 'warn' : 'ok');
         close();
