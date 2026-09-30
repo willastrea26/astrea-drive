@@ -17,6 +17,7 @@ AD.views = AD.views || {};
     { route: 'defects', label: 'Defects', icon: I.alert, count: () => AD.logic.openDefects().length },
     { route: 'power-tools', label: 'Power & motor tools', icon: I.gauge },
     { route: 'first-aid', label: 'First aid kits', icon: I.firstAid },
+    { route: 'fire-extinguishers', label: 'Fire extinguishers', icon: I.fireExt },
     { group: 'Vac trucks' },
     { route: 'calendar', label: 'Calendar', icon: I.calendar },
     { route: 'tracker', label: 'Tracker', icon: I.map }
