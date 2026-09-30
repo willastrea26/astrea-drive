@@ -119,13 +119,7 @@ AD.views.vehicle = (function () {
 
   // ---------- Photo drop zone ----------
   /** Illustration standing in for a missing photo. Falls back to a plain icon for types we haven't drawn. */
-  const ART = {
-    'Vac truck': (v) => AD.art.vac(AD.art.num(v.id), 168, `${v.id} vac truck`),
-    'Ute': (v) => AD.art.ute(168, `${v.id} ute`),
-    'Tipper truck': (v) => AD.art.tip(168, `${v.id} tipper`),
-    'Excavator': (v) => AD.art.dig(168, `${v.id} excavator`)
-  };
-  const placeholderArt = (v) => (ART[v.type] ? ART[v.type](v) : '');
+  const placeholderArt = (v) => AD.art.forVehicle(v, 168);
 
   function photoDrop(v) {
     const art = placeholderArt(v);

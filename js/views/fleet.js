@@ -1,7 +1,7 @@
 /* Fleet register + add/edit vehicle form */
 AD.views = AD.views || {};
 
-AD.VEHICLE_TYPES = ['Vac truck', 'Ute', 'Van', 'Tipper truck', 'Excavator', 'Other'];
+AD.VEHICLE_TYPES = ['Vac truck', 'Ute', 'Van', 'Car', 'Tipper truck', 'Excavator', 'Trailer', 'Other'];
 AD.VEHICLE_STATUSES = ['Available', 'In use', 'In workshop', 'Out of service'];
 
 /** Add / edit vehicle modal. Calls onSaved(vehicle) after saving. */
@@ -118,7 +118,7 @@ AD.views.fleet = (function () {
       </div>
       <div class="table-wrap"><table class="data">
         <thead><tr>
-          <th style="width:96px">Fleet ID</th><th class="col-opt">Registration</th><th class="col-model">Make / model</th><th class="col-opt col-wide">Type</th>
+          <th style="width:150px">Fleet ID</th><th class="col-opt">Registration</th><th class="col-model">Make / model</th><th class="col-opt col-wide">Type</th>
           <th class="col-opt">Assigned driver</th><th class="num col-opt col-wide">Odometer</th><th>Status</th><th class="col-opt">Needs attention</th><th class="col-action col-opt col-wide"><span class="hide">Actions</span></th>
         </tr></thead>
         <tbody id="f-body"></tbody>
@@ -152,8 +152,12 @@ AD.views.fleet = (function () {
     body.innerHTML = list.map((v) => {
       const alerts = AD.ui.attentionFlags(v);
       const [model, spec] = v.model.split(' — ');
+      const art = AD.art.forVehicle(v, 44) || `<span class="fleet-thumb-icon">${I.truck}</span>`;
       return `<tr class="row-link" data-id="${v.id}" title="Open ${v.id}">
-        <td><a class="id" href="#/vehicle/${v.id}">${esc(v.id)}</a><span class="t2 only-mobile">${esc(v.rego)}</span></td>
+        <td><span class="fleet-id-cell">
+          <span class="fleet-thumb">${art}</span>
+          <span><a class="id" href="#/vehicle/${v.id}">${esc(v.id)}</a><span class="t2 only-mobile">${esc(v.rego)}</span></span>
+        </span></td>
         <td class="col-opt">${esc(v.rego)}</td>
         <td>${esc(v.make)} ${esc(model)}<span class="t2">${esc(v.year)}${spec ? ' · ' + esc(spec) : ''}</span>${alerts ? `<span class="t2 only-mobile">${alerts}</span>` : ''}</td>
         <td class="col-opt col-wide">${esc(v.type)}</td>

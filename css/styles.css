@@ -229,6 +229,12 @@ table.data { width: 100%; border-collapse: collapse; font-size: 14.5px; }
 .data tbody td.truck-cell.span { background: var(--paper) !important; }
 .data .id { font-weight: 700; font-size: 15px; color: var(--ink); white-space: nowrap; }
 .data a.id:hover { color: var(--blue); text-decoration: none; }
+.fleet-id-cell { display: flex; align-items: center; gap: 10px; }
+.fleet-thumb { flex: none; width: 46px; }
+.fleet-thumb .veh-svg { display: block; width: 100%; height: auto; }
+.fleet-thumb-icon { display: flex; align-items: center; justify-content: center; width: 100%; aspect-ratio: 2 / 1; color: var(--muted); }
+.fleet-thumb-icon .ico { width: 20px; height: 20px; }
+@media (max-width: 640px) { .fleet-thumb { display: none; } }
 .data .t2 { display: block; font-size: 13.5px; color: var(--muted); margin-top: 1px; }
 .site-name { color: var(--ink-2); font-weight: 600; }
 .data .num { text-align: right; white-space: nowrap; }

@@ -157,6 +157,16 @@ AD.art = (function () {
   }
 
   const plain = (id) => (width = 88, label = '') => `${open(width, label)}<use href="#${id}"/></svg>`;
+  const ute = plain('art-ute'), tip = plain('art-tip'), dig = plain('art-dig');
 
-  return { vac, ute: plain('art-ute'), tip: plain('art-tip'), dig: plain('art-dig'), num };
+  /** Illustration for a vehicle record, keyed on its fleet type. '' if we have no art for that type. */
+  const BY_TYPE = {
+    'Vac truck': (v, width, label) => vac(num(v.id), width, label || `${v.id} vac truck`),
+    'Ute': (v, width, label) => ute(width, label || `${v.id} ute`),
+    'Tipper truck': (v, width, label) => tip(width, label || `${v.id} tipper`),
+    'Excavator': (v, width, label) => dig(width, label || `${v.id} excavator`)
+  };
+  const forVehicle = (v, width = 88, label = '') => (BY_TYPE[v.type] ? BY_TYPE[v.type](v, width, label) : '');
+
+  return { vac, ute, tip, dig, num, forVehicle };
 })();
