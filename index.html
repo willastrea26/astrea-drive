@@ -4,22 +4,22 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Astrea Drive</title>
-  <link rel="icon" type="image/png" href="assets/favicon.png?v=63">
-  <link rel="apple-touch-icon" href="assets/favicon.png?v=63">
+  <link rel="icon" type="image/png" href="assets/favicon.png?v=64">
+  <link rel="apple-touch-icon" href="assets/favicon.png?v=64">
   <!-- Leaflet (map library). Needs internet; the app still runs without it, maps show a notice. -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
   <!-- MapLibre GL draws the styled vector basemap (OpenFreeMap tiles, no API key) -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/4.7.1/maplibre-gl.css">
   <!-- Marker clustering for trucks that share or crowd a location -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.min.css">
-  <link rel="stylesheet" href="css/styles.css?v=63">
+  <link rel="stylesheet" href="css/styles.css?v=64">
 </head>
 <body>
   <!-- Sign-in gate. Shown until Supabase confirms a session; #app-shell stays
        hidden until then so nobody sees the shell flash before we know who's signed in. -->
   <div class="auth-gate" id="auth-gate" hidden>
     <form class="auth-card" id="auth-form" novalidate>
-      <img src="assets/logo-lockup.png?v=63" alt="Astrea Drive" width="160" height="43" class="auth-logo">
+      <img src="assets/logo-lockup.png?v=64" alt="Astrea Drive" width="160" height="43" class="auth-logo">
       <h1>Sign in</h1>
       <p class="auth-sub">Fleet operations — approved staff only</p>
       <label class="field auth-field">
@@ -54,7 +54,7 @@
   <div class="app" id="app-shell" hidden>
     <aside class="sidebar" id="sidebar">
       <a class="brand" href="#/dashboard" aria-label="Astrea Drive home">
-        <img src="assets/logo-lockup.png?v=63" alt="Astrea Drive" width="184" height="50">
+        <img src="assets/logo-lockup.png?v=64" alt="Astrea Drive" width="184" height="50">
       </a>
       <nav class="nav" id="nav" aria-label="Main"></nav>
       <div class="sidebar-foot">
@@ -68,7 +68,7 @@
     <div class="main">
       <header class="topbar">
         <button class="icon-btn" id="menu-btn" aria-label="Open navigation"></button>
-        <img class="topbar-logo" src="assets/logo-lockup.png?v=63" alt="Astrea Drive">
+        <img class="topbar-logo" src="assets/logo-lockup.png?v=64" alt="Astrea Drive">
         
       </header>
       <!-- Full-bleed banner slot. Views that want one fill it; the router clears it. -->
@@ -86,26 +86,27 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.min.js"></script>
   <!-- Supabase client (auth + database). UMD build exposes window.supabase.createClient(). -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-  <script src="js/core/time.js?v=63"></script>
-  <script src="js/core/icons.js?v=63"></script>
-  <script src="js/core/vehicle-art.js?v=63"></script>
-  <script src="js/core/ui.js?v=63"></script>
-  <script src="js/core/viz.js?v=63"></script>
-  <script src="js/core/weather.js?v=63"></script>
-  <script src="js/core/config.js?v=63"></script>
-  <script src="js/core/auth.js?v=63"></script>
-  <script src="js/data/store.js?v=63"></script>
-  <script src="js/core/logic.js?v=63"></script>
-  <script src="js/core/maps.js?v=63"></script>
-  <script src="js/views/dashboard.js?v=63"></script>
-  <script src="js/views/fleet.js?v=63"></script>
-  <script src="js/views/vehicle.js?v=63"></script>
-  <script src="js/views/maintenance.js?v=63"></script>
-  <script src="js/views/power-tools.js?v=63"></script>
-  <script src="js/views/defects.js?v=63"></script>
-  <script src="js/views/booking-form.js?v=63"></script>
-  <script src="js/views/calendar.js?v=63"></script>
-  <script src="js/views/tracker.js?v=63"></script>
-  <script src="js/app.js?v=63"></script>
+  <script src="js/core/time.js?v=64"></script>
+  <script src="js/core/icons.js?v=64"></script>
+  <script src="js/core/vehicle-art.js?v=64"></script>
+  <script src="js/core/ui.js?v=64"></script>
+  <script src="js/core/viz.js?v=64"></script>
+  <script src="js/core/weather.js?v=64"></script>
+  <script src="js/core/config.js?v=64"></script>
+  <script src="js/core/auth.js?v=64"></script>
+  <script src="js/data/store.js?v=64"></script>
+  <script src="js/core/logic.js?v=64"></script>
+  <script src="js/core/maps.js?v=64"></script>
+  <script src="js/views/dashboard.js?v=64"></script>
+  <script src="js/views/fleet.js?v=64"></script>
+  <script src="js/views/vehicle.js?v=64"></script>
+  <script src="js/views/maintenance.js?v=64"></script>
+  <script src="js/views/power-tools.js?v=64"></script>
+  <script src="js/views/first-aid.js?v=64"></script>
+  <script src="js/views/defects.js?v=64"></script>
+  <script src="js/views/booking-form.js?v=64"></script>
+  <script src="js/views/calendar.js?v=64"></script>
+  <script src="js/views/tracker.js?v=64"></script>
+  <script src="js/app.js?v=64"></script>
 </body>
 </html>

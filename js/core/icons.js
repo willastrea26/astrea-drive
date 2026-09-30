@@ -32,6 +32,7 @@ AD.icons = (function () {
     monitor: svg('<rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M8 20h8M12 16v4"/>'),
     phone: svg('<rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/>'),
     dots: svg('<circle cx="12" cy="5" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="19" r="1.4" fill="currentColor" stroke="none"/>'),
-    pie: svg('<circle cx="12" cy="12" r="8.5"/><path d="M12 3.5V12l6 6"/>')
+    pie: svg('<circle cx="12" cy="12" r="8.5"/><path d="M12 3.5V12l6 6"/>'),
+    firstAid: svg('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M12 9v6M9 12h6"/>')
   };
 })();

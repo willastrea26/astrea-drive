@@ -16,6 +16,7 @@ AD.views = AD.views || {};
     { route: 'maintenance', label: 'Maintenance', icon: I.wrench },
     { route: 'defects', label: 'Defects', icon: I.alert, count: () => AD.logic.openDefects().length },
     { route: 'power-tools', label: 'Power & motor tools', icon: I.gauge },
+    { route: 'first-aid', label: 'First aid kits', icon: I.firstAid },
     { group: 'Vac trucks' },
     { route: 'calendar', label: 'Calendar', icon: I.calendar },
     { route: 'tracker', label: 'Tracker', icon: I.map }
