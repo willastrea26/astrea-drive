@@ -193,6 +193,54 @@ AD.logic = (function () {
     return [...map.entries()].map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
   }
 
+  /**
+   * Revenue broken into a series of equal buckets across [from, to).
+   * Returns [{ label, from, to, total, hours, count }, ...].
+   * bucket: 'day' | 'week' | 'month'.
+   */
+  function revenueSeries(v, from, to, bucket) {
+    const rate = hourlyRate(v);
+    const jobs = billableJobs(v.id, from, to);
+    const buckets = [];
+    if (bucket === 'day') {
+      let d = new Date(from);
+      d.setUTCHours(0, 0, 0, 0);
+      while (d.getTime() < to) {
+        const start = d.getTime();
+        const end = start + 86400000;
+        buckets.push({ label: T.fmtKey(T.dateKey(start)).slice(0, 5), from: start, to: end, total: 0, hours: 0, count: 0 });
+        d = new Date(end);
+      }
+    } else if (bucket === 'week') {
+      let start = from;
+      while (start < to) {
+        const end = Math.min(start + 7 * 86400000, to);
+        buckets.push({ label: T.fmtKey(T.dateKey(start)).slice(0, 5), from: start, to: end, total: 0, hours: 0, count: 0 });
+        start = end;
+      }
+    } else {
+      const fp = T.parts(from);
+      let y = fp.year, m = fp.month;
+      while (true) {
+        const s = Date.UTC(y, m - 1, 1);
+        const e = Date.UTC(m === 12 ? y + 1 : y, m === 12 ? 0 : m, 1);
+        if (s >= to) break;
+        buckets.push({ label: new Date(s).toLocaleString('en-AU', { month: 'short' }), from: Math.max(s, from), to: Math.min(e, to), total: 0, hours: 0, count: 0 });
+        if (m === 12) { y++; m = 1; } else m++;
+      }
+    }
+    jobs.forEach((b) => {
+      const t = ms(b.end);
+      const bkt = buckets.find((x) => t >= x.from && t < x.to);
+      if (!bkt) return;
+      const h = bookingHours(b);
+      bkt.total += h * rate;
+      bkt.hours += h;
+      bkt.count += 1;
+    });
+    return buckets;
+  }
+
   /** Revenue against maintenance, fuel and overheads for the period. */
   function costs(v, from, to) {
     const rev = revenue(v, from, to);
@@ -208,7 +256,7 @@ AD.logic = (function () {
     serviceState, regoState, attentionTone, openDefects, fmtKm, fmtAUD, driverName,
     vacTrucks, bookingsFor, activeAt, overlaps, conflictIds, nextBooking, locate, hasCoords,
     bookingCategory, bookingTitle, SOON_DAYS, SOON_KM,
-    hourlyRate, revenue, revenueBy, costs, bookingHours,
+    hourlyRate, revenue, revenueBy, costs, bookingHours, revenueSeries,
     workshopsFor, atWorkshop
   };
 })();

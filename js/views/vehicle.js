@@ -366,8 +366,12 @@ AD.views.vehicle = (function () {
     const clients = L.revenueBy(v, from, to, 'client');
     const jobTypes = L.revenueBy(v, from, to, 'jobName');
     const shortLabel = (RANGES.find((r) => r.key === range) || RANGES[0]).short;
+    const trendBucket = range === '30d' ? 'day' : range === '3m' ? 'week' : 'month';
+    const trendSeries = L.revenueSeries(v, from, to, trendBucket);
 
-    if (!period.count) return `<p class="empty">No completed jobs in the ${esc(rangeLabel)}.</p>`;
+    if (!period.count) {
+      return `<p class="empty">No completed jobs in the ${esc(rangeLabel)}.${v.type !== 'Vac truck' ? ' Only vac trucks currently generate billable bookings.' : ''}</p>`;
+    }
 
     const kpi = (icon, tone, label, sub, value, foot) => `
       <div class="strip-item is-static">
@@ -385,7 +389,11 @@ AD.views.vehicle = (function () {
         ${kpi(I.truck, 'amber', 'Avg revenue / job', '', aud0(period.total / period.count), trend(period.total / period.count, prior.count ? prior.total / prior.count : 0, 'vs prior period'))}
       </div>
 
-      <div class="rev-grid">
+      <div class="rev-grid rev-grid-2x2">
+        <section class="section viz-card">
+          ${sectionHead({ title: 'Revenue trend', meta: esc(shortLabel), level: 3 })}
+          ${trendBars(trendSeries)}
+        </section>
         <section class="section viz-card">
           ${sectionHead({ title: 'Revenue vs operating costs', meta: esc(rangeLabel), level: 3 })}
           ${costBars(c)}
@@ -400,6 +408,44 @@ AD.views.vehicle = (function () {
           ${donutSplit(jobTypes, period.total, 'type')}
         </section>
       </div>`;
+  }
+
+  /** Monthly (or weekly/daily) revenue bar chart. Ghost bar shows the ceiling. */
+  function trendBars(series) {
+    const max = Math.max(...series.map((b) => b.total), 1);
+    // Y-axis: 4 gridlines at a rounded step.
+    const step = niceStep(max / 4);
+    const top = Math.ceil(max / step) * step || step;
+    const gridVals = [];
+    for (let v = 0; v <= top; v += step) gridVals.push(v);
+    // Too many bars → thin the labels (show first, last, and every Nth) so they don't overlap.
+    const labelStride = series.length > 20 ? Math.ceil(series.length / 8) : 1;
+    return `<div class="trend-chart" role="img" aria-label="${esc('Revenue trend, ' + series.map((b) => `${b.label} ${aud0(b.total)}`).join(', '))}">
+      <div class="trend-y">
+        ${gridVals.slice().reverse().map((v) => `<span>${audK(v)}</span>`).join('')}
+      </div>
+      <div class="trend-plot">
+        <div class="trend-grid" aria-hidden="true">${gridVals.map(() => '<i></i>').join('')}</div>
+        <div class="trend-bars">
+          ${series.map((b, i) => {
+            const pct = (b.total / top) * 100;
+            const showLbl = labelStride === 1 || i === 0 || i === series.length - 1 || i % labelStride === 0;
+            return `<div class="trend-bar" tabindex="0" data-tip="${esc(JSON.stringify({ t: b.label, rows: [[b.count + ' jobs', aud0(b.total)]] }))}">
+              <span class="tb-track"><i class="tb-ghost"></i><i class="tb-val" style="height:${pct.toFixed(1)}%"></i></span>
+              ${showLbl ? `<span class="tb-lbl">${esc(b.label)}</span>` : ''}
+            </div>`;
+          }).join('')}
+        </div>
+      </div>
+    </div>`;
+  }
+
+  /** Pick a "nice" gridline step (1, 2, 5 × 10^n) at or above the raw step. */
+  function niceStep(raw) {
+    if (!isFinite(raw) || raw <= 0) return 1;
+    const pow = Math.pow(10, Math.floor(Math.log10(raw)));
+    const n = raw / pow;
+    return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * pow;
   }
 
   /** Grouped column chart: revenue, each cost line, then the margin. */

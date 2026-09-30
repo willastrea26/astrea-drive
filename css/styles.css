@@ -1619,6 +1619,10 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 /* Map placeholder while vector tiles load — matches the navy basemap */
 .trk-map-wrap.is-dark .trk-map { background: #1b3047; }
 
+/* Trend bar chart: dark theme uses a brighter navy so bars read on the surface */
+.tb-val { background: #2b3e5e; }
+.tb-ghost { background: rgba(255,255,255,.05); opacity: 1; }
+
 /* =====================================================================
    VEHICLE PROFILE — hero, photo drop zone, revenue tab
    ===================================================================== */
@@ -1687,6 +1691,24 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 .rev-grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 18px; margin-top: 26px; }
 .rev-grid > .section { margin-top: 0; }
 .rev-grid > .section:first-child { grid-row: span 2; }
+
+/* 2×2 grid variant: revenue trend | costs, then client donut | job-type donut */
+.rev-grid-2x2 { grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); }
+.rev-grid-2x2 > .section:first-child { grid-row: auto; }
+
+/* Revenue trend bar chart */
+.trend-chart { display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 8px; padding-top: 12px; height: 240px; }
+.trend-y { display: flex; flex-direction: column; justify-content: space-between; font-size: 11.5px; color: var(--muted); text-align: right; padding-bottom: 22px; font-variant-numeric: tabular-nums; }
+.trend-plot { position: relative; min-width: 0; }
+.trend-grid { position: absolute; inset: 0 0 22px 0; display: flex; flex-direction: column; justify-content: space-between; pointer-events: none; }
+.trend-grid i { display: block; height: 1px; background: var(--viz-grid); }
+.trend-bars { position: relative; display: flex; gap: 6px; align-items: flex-end; height: 100%; padding-bottom: 22px; }
+.trend-bar { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; height: 100%; position: relative; cursor: default; outline: none; }
+.tb-track { position: relative; width: 100%; max-width: 40px; flex: 1; display: flex; align-items: flex-end; justify-content: center; }
+.tb-ghost { position: absolute; left: 50%; transform: translateX(-50%); bottom: 0; width: 100%; max-width: 40px; height: 100%; background: var(--viz-free); border-radius: 4px 4px 0 0; opacity: .55; }
+.tb-val { position: relative; z-index: 1; width: 100%; max-width: 40px; background: var(--navy); border-radius: 4px 4px 0 0; min-height: 2px; transition: filter .15s ease; }
+.trend-bar:hover .tb-val, .trend-bar:focus-visible .tb-val { filter: brightness(1.15); }
+.tb-lbl { position: absolute; bottom: -20px; left: 0; right: 0; text-align: center; font-size: 11.5px; color: var(--ink-2); font-weight: 500; font-variant-numeric: tabular-nums; }
 .viz-card { background: var(--paper); border: 1px solid var(--rule); border-radius: var(--r-lg); padding: 18px 20px 20px; }
 .viz-card .section-head { padding-bottom: 6px; }
 
@@ -1777,6 +1799,9 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 .anim-in .kpi-col:nth-child(3) .kpi-col-track i, .anim-in .cost-bar:nth-child(3) .cost-track i { animation-delay: .18s; }
 .anim-in .cost-bar:nth-child(4) .cost-track i { animation-delay: .24s; }
 .anim-in .cost-bar:nth-child(5) .cost-track i { animation-delay: .30s; }
+
+.anim-in .tb-val { transform-origin: bottom; animation: grow-y .55s cubic-bezier(.2,.75,.3,1) backwards; }
+.anim-in .trend-bar:nth-child(n) .tb-val { animation-delay: calc(.05s + var(--i, 0) * .03s); }
 
 .anim-in .uc-col:nth-child(n+1) .uc-bar i { animation-delay: .04s; }
 .anim-in .uc-col:nth-child(n+4) .uc-bar i { animation-delay: .10s; }
