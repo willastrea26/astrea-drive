@@ -66,18 +66,22 @@ AD.ui = (function () {
     const flag = (tone, text) => `<span class="flag ${tone ? 'flag-' + tone : ''}">${esc(text)}</span>`;
     const defectTone = defects.some((d) => d.priority === 'Critical' || d.priority === 'High') ? 'red'
       : defects.some((d) => d.priority === 'Medium') ? 'amber' : '';
+    const regoDate = T.fmtKey(v.regoExpiry).slice(0, 5);
+    const regoDays = Math.abs(r.days);
+    const regoLine = r.state === 'overdue'
+      ? flag('red', `Rego expired ${regoDate} · ${regoDays}d ago`)
+      : flag(r.state === 'soon' ? L.attentionTone(r.state, r.days) : 'muted', `Rego due ${regoDate} · ${r.days}d`);
     const lines = [
       s.state === 'overdue' ? flag('red', 'Service overdue')
         : s.state === 'soon' ? flag(L.attentionTone(s.state, s.daysLeft, s.kmLeft), `Service due ${T.fmtKey(v.nextServiceDate).slice(0, 5)}`) : '',
-      r.state === 'overdue' ? flag('red', `Rego expired ${T.fmtKey(v.regoExpiry).slice(0, 5)}`)
-        : r.state === 'soon' ? flag(L.attentionTone(r.state, r.days), `Rego due ${T.fmtKey(v.regoExpiry).slice(0, 5)}`) : '',
+      regoLine,
       defects.length ? flag(defectTone, `${defects.length} open defect${defects.length > 1 ? 's' : ''}`) : ''
     ].filter(Boolean);
-    if (!lines.length) return '';
-    // Icon mirrors the most serious issue: red alert first, else the leading category.
+    const hasIssue = s.state !== 'ok' || r.state !== 'ok' || defects.length;
     const red = s.state === 'overdue' || r.state === 'overdue' || defectTone === 'red';
-    const icon = red ? I.alert : s.state !== 'ok' ? I.wrench : r.state !== 'ok' ? I.calendar : I.alert;
-    return `<span class="attn-cell"><span class="attn-icon ${red ? 'flag-red' : 'flag-amber'}">${icon}</span><span class="attn-lines">${lines.join('')}</span></span>`;
+    const icon = red ? I.alert : s.state !== 'ok' ? I.wrench : I.calendar;
+    const iconTone = red ? 'flag-red' : hasIssue ? 'flag-amber' : 'flag-muted';
+    return `<span class="attn-cell"><span class="attn-icon ${iconTone}">${icon}</span><span class="attn-lines">${lines.join('')}</span></span>`;
   }
 
   /** Link every form label to its control so screen readers announce it. */

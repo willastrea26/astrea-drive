@@ -95,7 +95,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .topbar { display: none; }
-.view { padding: 30px var(--gutter) 64px; outline: none; max-width: 1480px; width: 100%; }
+.view { padding: 30px var(--gutter) 64px; outline: none; width: 100%; }
 .scrim { display: none; }
 
 /* ============ Page header ============ */
@@ -205,6 +205,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .flag { font-size: 14px; font-weight: 600; white-space: nowrap; }
 .flag-red { color: var(--red); }
 .flag-amber { color: var(--amber); }
+.flag-muted { color: var(--muted); font-weight: 400; }
 .tag-now { display: inline-block; font-size: 12px; font-weight: 700; color: var(--blue-strong); background: var(--blue-tint); border-radius: 3px; padding: 0 5px; margin-left: 6px; line-height: 18px; vertical-align: 1px; }
 .dash { color: var(--muted); }
 .missing { color: var(--muted); font-style: italic; }
@@ -1196,7 +1197,7 @@ input[type=text], input[type=number], input[type=date], input[type=datetime-loca
 /* Side columns share the slack evenly, so the forecast sits dead centre
    however wide the greeting or the buttons run. */
 .hero-inner {
-  max-width: 1480px; padding: 18px var(--gutter);
+  padding: 18px var(--gutter);
   display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center; gap: 14px 28px;
 }
@@ -1541,6 +1542,7 @@ input::placeholder { color: var(--faint); }
 .attn-icon .ico { width: 16px; height: 16px; }
 .attn-icon.flag-red { color: var(--red); }
 .attn-icon.flag-amber { color: var(--amber); }
+.attn-icon.flag-muted { color: var(--muted); }
 .attn-lines { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .attn-lines .flag { font-size: 13.5px; white-space: normal; }
 .col-attn { vertical-align: top; }
