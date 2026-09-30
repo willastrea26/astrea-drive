@@ -208,17 +208,25 @@ AD.views.vehicle = (function () {
       }
       toast(`${v.id} odometer updated`);
     });
+    const statusSel = el.querySelector('#status-in');
+    const wkField = el.querySelector('#wk-field');
+    statusSel.addEventListener('change', () => { wkField.style.display = statusSel.value === 'In workshop' ? '' : 'none'; });
+
     el.querySelector('#status-form').addEventListener('submit', async (e) => {
       e.preventDefault();
-      const status = e.target.status.value;
-      if (status === v.status) return;
+      const f = e.target;
+      const status = f.status.value;
+      const workshopId = status === 'In workshop' && f.workshopId ? f.workshopId.value : '';
+      if (status === v.status && workshopId === (v.workshopId || '')) return;
       try {
-        await AD.store.update('vehicles', v.id, { status });
-        await AD.store.log(`${v.id} status changed to ${status}`, v.id);
+        await AD.store.update('vehicles', v.id, { status, workshopId });
+        const shop = workshopId && AD.store.get('workshops', workshopId);
+        await AD.store.log(`${v.id} status changed to ${status}${shop ? ' at ' + shop.name : ''}`, v.id);
       } catch (err) {
         return toast('Could not change status: ' + err.message, 'error');
       }
       toast(`${v.id} is now ${status}`);
+      draw();
     });
   }
 
@@ -289,6 +297,7 @@ AD.views.vehicle = (function () {
             <div><dt>Charge-out rate</dt><dd>${aud0(L.hourlyRate(v))}/hr</dd></div>
             <div><dt>Registration expiry</dt><dd>${T.fmtKey(v.regoExpiry)}<span class="sub ${flagTone(L.attentionTone(r.state, r.days))}">${esc(r.state === 'ok' ? 'Current — ' + r.why : r.why)}</span></dd></div>
             <div><dt>Next service</dt><dd>${T.fmtKey(v.nextServiceDate)} or ${L.fmtKm(v.nextServiceKm)}<span class="sub ${flagTone(L.attentionTone(s.state, s.daysLeft, s.kmLeft))}">${esc(s.why.charAt(0).toUpperCase() + s.why.slice(1))}</span></dd></div>
+            ${v.status === 'In workshop' && v.workshopId ? `<div><dt>Currently at</dt><dd>${esc((AD.store.get('workshops', v.workshopId) || {}).name || 'Unknown workshop')}</dd></div>` : ''}
           </dl>
           ${detailsFacts(v)}
           <section class="section">
@@ -317,6 +326,10 @@ AD.views.vehicle = (function () {
             ${sectionHead({ title: 'Vehicle status', level: 3 })}
             <form class="inline-form" id="status-form">
               <div class="field"><label for="status-in">Status</label><select id="status-in" name="status">${options(AD.VEHICLE_STATUSES, v.status)}</select></div>
+              <div class="field" id="wk-field" style="${v.status === 'In workshop' ? '' : 'display:none'}">
+                <label for="wk-in">Workshop</label>
+                <select id="wk-in" name="workshopId">${options(L.workshopsFor(v.type).map((w) => [w.id, w.name]), v.workshopId || '', 'Not specified')}</select>
+              </div>
               <button class="btn btn-secondary" type="submit">Save</button>
             </form>
           </section>

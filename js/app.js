@@ -18,6 +18,7 @@ AD.views = AD.views || {};
     { route: 'power-tools', label: 'Power & motor tools', icon: I.gauge },
     { route: 'first-aid', label: 'First aid kits', icon: I.firstAid },
     { route: 'fire-extinguishers', label: 'Fire extinguishers', icon: I.fireExt },
+    { route: 'workshops', label: 'Workshops', icon: I.garage },
     { group: 'Vac trucks' },
     { route: 'calendar', label: 'Calendar', icon: I.calendar },
     { route: 'tracker', label: 'Tracker', icon: I.map }

@@ -18,7 +18,10 @@ AD.serviceForm = function (vehicleId) {
         <div class="field"><label>Service date <span class="req">*</span></label><input type="date" name="date" value="${today}" max="${today}"></div>
         <div class="field"><label>Odometer at service (km) <span class="req">*</span></label><input type="number" name="odometer" min="0" step="1"></div>
         <div class="field"><label>Service type</label><select name="type">${options(AD.SERVICE_TYPES, 'Scheduled service')}</select></div>
-        <div class="field"><label>Workshop</label><input type="text" name="workshop" placeholder="e.g. Western Sydney Truck Centre"></div>
+        <div class="field"><label>Workshop</label>
+          <select name="workshopSel" id="svc-wk"></select>
+          <input type="text" name="workshopOther" id="svc-wk-other" placeholder="Workshop name" class="hide" style="margin-top:6px">
+        </div>
         <div class="field"><label>Cost (AUD, inc. GST)</label><input type="number" name="cost" min="0" step="0.01" placeholder="0.00"></div>
         <div class="field"><label>&nbsp;</label><div class="help" id="svc-hint"></div></div>
         <div class="field"><label>Next service date <span class="req">*</span></label><input type="date" name="nextServiceDate"></div>
@@ -33,10 +36,16 @@ AD.serviceForm = function (vehicleId) {
     onMount(el, close) {
       const f = el.querySelector('form');
       el.querySelector('[data-close]').onclick = close;
+      const toggleWkOther = () => el.querySelector('#svc-wk-other').classList.toggle('hide', f.workshopSel.value !== 'other');
       const fill = () => {
         const v = AD.store.get('vehicles', f.vehicleId.value);
         el.querySelector('#ret-wrap').classList.toggle('hide', !(v && v.status === 'In workshop'));
-        if (!v) { el.querySelector('#svc-hint').textContent = ''; return; }
+        if (!v) {
+          el.querySelector('#svc-hint').textContent = '';
+          f.workshopSel.innerHTML = options([['other', 'Other / not listed']], '', 'Select a vehicle first');
+          toggleWkOther();
+          return;
+        }
         f.odometer.value = v.odometer;
         const d = f.date.value || today;
         const { y, m, d: dd } = T.parseKey(d);
@@ -44,8 +53,12 @@ AD.serviceForm = function (vehicleId) {
         f.nextServiceDate.value = next.toISOString().slice(0, 10);
         f.nextServiceKm.value = v.odometer + (v.serviceIntervalKm || 10000);
         el.querySelector('#svc-hint').textContent = `Interval: every ${(v.serviceIntervalKm || 10000).toLocaleString('en-AU')} km or ${v.serviceIntervalMonths || 6} months. Current odometer ${L.fmtKm(v.odometer)}.`;
+        const shops = L.workshopsFor(v.type);
+        f.workshopSel.innerHTML = options(shops.map((w) => [w.id, w.name]).concat([['other', 'Other / not listed']]), f.workshopSel.value, shops.length ? 'Select a workshop' : undefined);
+        toggleWkOther();
       };
       f.vehicleId.addEventListener('change', fill);
+      f.workshopSel.addEventListener('change', toggleWkOther);
       f.odometer.addEventListener('input', () => {
         const v = AD.store.get('vehicles', f.vehicleId.value);
         if (v && f.odometer.value) f.nextServiceKm.value = Number(f.odometer.value) + (v.serviceIntervalKm || 10000);
@@ -69,11 +82,14 @@ AD.serviceForm = function (vehicleId) {
         if (d.cost !== '' && !(Number(d.cost) >= 0)) err.cost = 'Enter a valid amount.';
         if (!showErrors(f, err)) return;
 
+        const workshopName = d.workshopSel === 'other' ? d.workshopOther
+          : d.workshopSel ? ((AD.store.get('workshops', d.workshopSel) || {}).name || '') : '';
+
         saveBtn.disabled = true;
         try {
           await AD.store.insert('services', {
             vehicleId: v.id, date: d.date, odometer: Math.round(odo), type: d.type,
-            workshop: d.workshop, cost: d.cost === '' ? 0 : Number(d.cost), notes: d.notes
+            workshop: workshopName, cost: d.cost === '' ? 0 : Number(d.cost), notes: d.notes
           }, 'svc');
           const patch = { lastServiceDate: d.date, lastServiceKm: Math.round(odo), nextServiceDate: d.nextServiceDate, nextServiceKm: Math.round(Number(d.nextServiceKm)) };
           if (odo > v.odometer) patch.odometer = Math.round(odo);

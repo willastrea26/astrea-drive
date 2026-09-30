@@ -107,7 +107,22 @@ AD.bookingForm = function (booking, defaults = {}) {
         if (locMode === 'pin') return pin;
         if (locMode === 'none') return null;
         const s = sites.find((x) => x.id === locMode);
-        return s ? { lat: s.lat, lng: s.lng } : null;
+        if (s) return { lat: s.lat, lng: s.lng };
+        const w = AD.store.get('workshops', locMode);
+        return w && w.lat != null ? { lat: w.lat, lng: w.lng } : null;
+      }
+
+      /** Rebuild the site <select>: sites always, plus category-matched workshops while booking maintenance. */
+      function rebuildLocOptions() {
+        const prev = f.loc.value || locMode;
+        let html = options(siteOpts, prev);
+        if (f.kind.value === 'maintenance') {
+          const v = AD.store.get('vehicles', f.truckId.value);
+          const shops = v ? L.workshopsFor(v.type) : [];
+          if (shops.length) html += `<optgroup label="Workshops">${options(shops.map((w) => [w.id, `${w.name} — ${w.address}`]), prev)}</optgroup>`;
+        }
+        f.loc.innerHTML = html;
+        locMode = f.loc.value; // falls back to the first option if `prev` no longer applies
       }
 
       function syncLoc(fly = true) {
@@ -128,12 +143,28 @@ AD.bookingForm = function (booking, defaults = {}) {
           $('#addr-help').textContent = 'The map position comes only from the pin. The text is a label and is not checked against the pin.';
         } else {
           const s = sites.find((x) => x.id === locMode);
-          st.className = 'loc-status ok';
-          st.innerHTML = `${I.check} Site: ${esc(s.name)} (${s.lat.toFixed(4)}, ${s.lng.toFixed(4)})`;
-          addr.value = s.address;
-          addr.readOnly = true;
-          $('#lbl-addr').textContent = 'Site address (from saved site)';
-          $('#addr-help').textContent = 'Choose “Custom location” to drop your own pin instead.';
+          const w = !s ? AD.store.get('workshops', locMode) : null;
+          const loc = s || w;
+          if (loc && loc.lat != null) {
+            st.className = 'loc-status ok';
+            st.innerHTML = `${I.check} ${s ? 'Site' : 'Workshop'}: ${esc(loc.name)} (${loc.lat.toFixed(4)}, ${loc.lng.toFixed(4)})`;
+            addr.value = loc.address;
+            addr.readOnly = true;
+            $('#lbl-addr').textContent = s ? 'Site address (from saved site)' : 'Workshop address (from workshop record)';
+            $('#addr-help').textContent = 'Choose “Custom location” to drop your own pin instead.';
+          } else if (loc) {
+            // Workshop with no fixed address (e.g. an inspector that visits multiple sites).
+            st.className = 'loc-status none';
+            st.innerHTML = `${I.alert} ${esc(loc.name)} has no fixed address. Drop a custom pin if you know the exact site.`;
+            addr.value = loc.address;
+            addr.readOnly = true;
+            $('#lbl-addr').textContent = 'Workshop address (from workshop record)';
+            $('#addr-help').textContent = 'This workshop operates at multiple sites, so no map position is set automatically.';
+          } else {
+            st.className = 'loc-status none';
+            st.innerHTML = `${I.alert} That location isn’t available for this vehicle. Choose another.`;
+            addr.readOnly = false;
+          }
         }
         if (map) {
           if (marker) { map.removeLayer(marker); marker = null; }
@@ -179,10 +210,12 @@ AD.bookingForm = function (booking, defaults = {}) {
         return list;
       }
 
-      f.kind.addEventListener('change', () => { kindUI(); checkClash(); });
+      f.kind.addEventListener('change', () => { kindUI(); rebuildLocOptions(); syncLoc(true); checkClash(); });
       f.truckId.addEventListener('change', () => {
         const v = AD.store.get('vehicles', f.truckId.value);
         if (v && !f.driverId.value && f.kind.value === 'job') f.driverId.value = v.driverId || '';
+        rebuildLocOptions();
+        syncLoc(true);
         checkClash();
       });
       ['start', 'end', 'status'].forEach((n) => f[n].addEventListener('input', checkClash));
@@ -201,6 +234,7 @@ AD.bookingForm = function (booking, defaults = {}) {
         syncLoc(true);
       });
       kindUI();
+      rebuildLocOptions();
       syncLoc(true);
 
       if (!isNew) $('[data-del]').onclick = async () => {

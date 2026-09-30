@@ -49,6 +49,23 @@ AD.logic = (function () {
     return S().all('defects').filter((d) => d.status !== 'Resolved' && (!vehicleId || d.vehicleId === vehicleId));
   }
 
+  // ---------- Workshops ----------
+  // Which repairer category a vehicle type uses. Trailers have none (matches
+  // first aid / fire extinguisher registers, which also skip trailers).
+  const WORKSHOP_CATEGORY = { Ute: 'ute', Car: 'ute', Van: 'ute', 'Vac truck': 'heavy', 'Tipper truck': 'heavy', Excavator: 'excavator' };
+
+  /** Workshops relevant to a vehicle type: its own category plus any 'all' (own-yard) locations. */
+  function workshopsFor(type) {
+    const cat = WORKSHOP_CATEGORY[type];
+    if (!cat) return [];
+    return S().all('workshops').filter((w) => w.category === cat || w.category === 'all').sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  /** Vehicles currently parked at a given workshop (status set with a linked workshop). */
+  function atWorkshop(workshopId) {
+    return S().all('vehicles').filter((v) => v.status === 'In workshop' && v.workshopId === workshopId);
+  }
+
   function fmtKm(n) { return Math.round(n).toLocaleString('en-AU') + ' km'; }
   function fmtAUD(n) { return Number(n || 0).toLocaleString('en-AU', { style: 'currency', currency: 'AUD' }); }
 
@@ -191,6 +208,7 @@ AD.logic = (function () {
     serviceState, regoState, attentionTone, openDefects, fmtKm, fmtAUD, driverName,
     vacTrucks, bookingsFor, activeAt, overlaps, conflictIds, nextBooking, locate, hasCoords,
     bookingCategory, bookingTitle, SOON_DAYS, SOON_KM,
-    hourlyRate, revenue, revenueBy, costs, bookingHours
+    hourlyRate, revenue, revenueBy, costs, bookingHours,
+    workshopsFor, atWorkshop
   };
 })();

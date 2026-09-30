@@ -14,8 +14,9 @@ AD.views.tracker = (function () {
   const STATUS_WORD = { confirmed: 'Confirmed', tentative: 'Tentative', maintenance: 'Maintenance', depot: 'Depot' };
   const reducedMotion = () => !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
 
-  let root = null, map = null, group = null, centerDot = null, playTimer = null;
+  let root = null, map = null, group = null, wsGroup = null, centerDot = null, playTimer = null;
   const markers = new Map();
+  const wsMarkers = new Map();
   let st = {};
   let prefs = loadPrefs();
 
@@ -180,6 +181,37 @@ AD.views.tracker = (function () {
       group = window.L.layerGroup(); // clustering plugin unavailable: plain markers
     }
     group.addTo(map);
+
+    // Static, always-on layer of repairer/workshop locations relevant to vac trucks.
+    wsGroup = window.L.layerGroup().addTo(map);
+    L.workshopsFor('Vac truck').filter((w) => w.lat != null).forEach((w) => {
+      const m = window.L.marker([w.lat, w.lng], { icon: wsIcon(0), keyboard: false, zIndexOffset: -1000 });
+      m._wid = w.id;
+      m._w = w;
+      wsGroup.addLayer(m);
+      wsMarkers.set(w.id, m);
+    });
+  }
+
+  function wsIcon(count) {
+    return window.L.divIcon({
+      className: 'wk-pin wk-pin-sm',
+      html: `<div class="wk-pin-inner">
+        <svg viewBox="0 0 24 24" width="22" height="22"><path d="M12 22s-7-6.4-7-12a7 7 0 0 1 14 0c0 5.6-7 12-7 12z" fill="#6b7280" stroke="#fff" stroke-width="1.5"/><circle cx="12" cy="10" r="3" fill="#fff"/></svg>
+        ${count ? `<span class="wk-pin-badge">${count}</span>` : ''}
+      </div>`,
+      iconSize: [22, 22], iconAnchor: [11, 21]
+    });
+  }
+
+  /** Refresh workshop pin badges/tooltips with whichever trucks are currently located there. */
+  function syncWorkshops(shown) {
+    for (const [id, m] of wsMarkers) {
+      const w = m._w;
+      const here = shown.filter((l) => l.state === 'located' && l.lat === w.lat && l.lng === w.lng);
+      m.setIcon(wsIcon(here.length));
+      m.bindTooltip(`<b>${esc(w.name)}</b><br>${esc(w.address)}${here.length ? `<br><b>${here.length} truck${here.length > 1 ? 's' : ''} here now:</b> ${here.map((l) => esc(l.truckId)).join(', ')}` : ''}`, { direction: 'top', offset: [0, -18], className: 'tm-tip' });
+    }
   }
 
   const sameSpot = (cluster) => { const k = cluster.getAllChildMarkers(); return k.every((m) => m.getLatLng().equals(k[0].getLatLng())); };
@@ -377,6 +409,7 @@ AD.views.tracker = (function () {
     drawTimeline(key, ds, de, now);
     drawList(shown);
     syncMarkers(shown);
+    syncWorkshops(locs);
   }
 
   // ---------------------------------------------------------------- timeline
@@ -422,7 +455,10 @@ AD.views.tracker = (function () {
   const siteName = (b) => {
     if (!b) return '';
     const s = b.siteId ? AD.store.get('sites', b.siteId) : null;
-    return s ? s.name : (b.address || (L.hasCoords(b) ? 'Pinned location' : ''));
+    if (s) return s.name;
+    const w = b.siteId ? AD.store.get('workshops', b.siteId) : null;
+    if (w) return w.name;
+    return b.address || (L.hasCoords(b) ? 'Pinned location' : '');
   };
 
   function timeRange(b) {
@@ -544,8 +580,9 @@ AD.views.tracker = (function () {
 
   function destroy() {
     stopPlay();
-    if (map) { map.remove(); map = null; group = null; centerDot = null; }
+    if (map) { map.remove(); map = null; group = null; wsGroup = null; centerDot = null; }
     markers.clear();
+    wsMarkers.clear();
     if (root) root.classList.remove('view-flush');
     root = null;
   }

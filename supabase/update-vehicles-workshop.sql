@@ -1,0 +1,5 @@
+BEGIN;
+
+ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS "workshopId" text NOT NULL DEFAULT '';
+
+COMMIT;

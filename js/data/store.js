@@ -15,7 +15,7 @@
 window.AD = window.AD || {};
 
 AD.store = (function () {
-  const TABLES = ['vehicles', 'drivers', 'sites', 'bookings', 'services', 'defects', 'documents', 'power_tools', 'activity'];
+  const TABLES = ['vehicles', 'drivers', 'sites', 'bookings', 'services', 'defects', 'documents', 'power_tools', 'workshops', 'activity'];
   let db = Object.fromEntries(TABLES.map((t) => [t, []]));
   const listeners = new Set();
 

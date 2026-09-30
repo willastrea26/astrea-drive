@@ -429,6 +429,14 @@ label.check { display: flex; gap: 8px; align-items: center; font-weight: 400; co
 .drop-pin svg { width: 30px; height: 30px; filter: drop-shadow(0 1px 1px rgba(0,0,0,.3)); }
 .drop-pin svg path { fill: var(--navy); stroke: #fff; }
 
+/* Workshops register + shared workshop-pin styling (also used on the Tracker map) */
+.wk-map { height: 420px; border-radius: var(--r); border: 1px solid var(--rule-strong); overflow: hidden; position: relative; background: #eef1f4; }
+.wk-pin-inner { position: relative; width: 100%; height: 100%; }
+.wk-pin svg { filter: drop-shadow(0 1px 1px rgba(0,0,0,.35)); }
+.wk-pin-sm { opacity: .92; }
+.wk-pin-badge { position: absolute; top: -4px; right: -6px; background: var(--red); color: #fff; font-size: 11px; font-weight: 700; line-height: 1; padding: 3px 5px; border-radius: 999px; border: 2px solid #fff; }
+.wk-pop { font-size: 14px; }
+
 /* ============ Utilities ============ */
 .muted { color: var(--muted); }
 .small { font-size: 13.5px; }

@@ -88,7 +88,7 @@ AD.views['power-tools'] = (function () {
 
     root.innerHTML = `
       ${pageHeader({
-        title: 'Power &amp; motor tools',
+        title: 'Power & motor tools',
         sub: summary || 'No tools recorded yet',
         actions: `<button class="btn btn-primary" id="add-tool">${I.plus} Add tool</button>`
       })}
