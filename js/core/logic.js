@@ -142,9 +142,9 @@ AD.logic = (function () {
    * hours are read from real bookings; fuel and "other" are modelled from
    * those hours, since no fuel dockets or overheads are recorded.
    */
-  const RATE = { 'Vac truck': 180, 'Tipper truck': 145, Ute: 95, Van: 85, Other: 110 };
-  const FUEL_PER_HOUR = { 'Vac truck': 32, 'Tipper truck': 26, Ute: 9, Van: 8, Other: 14 };
-  const OTHER_PER_HOUR = { 'Vac truck': 9, 'Tipper truck': 7, Ute: 4, Van: 4, Other: 5 };
+  const RATE = { 'Vac truck': 180, 'Tipper truck': 145, Excavator: 165, Ute: 95, Van: 85, Other: 110 };
+  const FUEL_PER_HOUR = { 'Vac truck': 32, 'Tipper truck': 26, Excavator: 28, Ute: 9, Van: 8, Other: 14 };
+  const OTHER_PER_HOUR = { 'Vac truck': 9, 'Tipper truck': 7, Excavator: 8, Ute: 4, Van: 4, Other: 5 };
 
   const hourlyRate = (v) => RATE[v.type] || RATE.Other;
 

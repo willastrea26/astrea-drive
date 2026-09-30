@@ -1,7 +1,7 @@
 /* Fleet register + add/edit vehicle form */
 AD.views = AD.views || {};
 
-AD.VEHICLE_TYPES = ['Vac truck', 'Ute', 'Van', 'Tipper truck', 'Other'];
+AD.VEHICLE_TYPES = ['Vac truck', 'Ute', 'Van', 'Tipper truck', 'Excavator', 'Other'];
 AD.VEHICLE_STATUSES = ['Available', 'In use', 'In workshop', 'Out of service'];
 
 /** Add / edit vehicle modal. Calls onSaved(vehicle) after saving. */
