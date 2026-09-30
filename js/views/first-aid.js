@@ -25,7 +25,8 @@ AD.views['first-aid'] = (function () {
   }
 
   function fullBadge(val) {
-    if (!val || val === 'N/A') return badge('N/A', 'grey muted');
+    if (!val) return badge('Not recorded', 'grey muted');
+    if (val === 'N/A') return badge('N/A', 'grey muted');
     if (val === 'Yes' || val === 'YES') return badge('Yes', 'green');
     return badge('No', 'red');
   }
@@ -33,20 +34,20 @@ AD.views['first-aid'] = (function () {
   function render(el, params) {
     root = el;
     st = { q: params.q || '', kit: params.kit || '', status: params.status || '' };
-    const all = AD.store.all('vehicles');
-    const withKit = all.filter((v) => v.firstAidFull && v.firstAidFull !== 'N/A');
-    const overdue = withKit.filter((v) => kitState(v).state === 'overdue').length;
-    const soon = withKit.filter((v) => kitState(v).state === 'soon').length;
+    const all = AD.store.all('vehicles').filter((v) => v.type !== 'Trailer');
+    const overdue = all.filter((v) => kitState(v).state === 'overdue').length;
+    const soon = all.filter((v) => kitState(v).state === 'soon').length;
+    const unrecorded = all.filter((v) => kitState(v).state === 'unknown').length;
 
     el.innerHTML = `
       ${pageHeader({
         title: 'First aid kit register',
-        sub: `${withKit.length} kits tracked${overdue ? ' · ' + overdue + ' overdue' : ''}${soon ? ' · ' + soon + ' due soon' : ''}`
+        sub: `${all.length} vehicles${overdue ? ' · ' + overdue + ' overdue' : ''}${soon ? ' · ' + soon + ' due soon' : ''}${unrecorded ? ' · ' + unrecorded + ' not yet recorded' : ''}`
       })}
       <div class="toolbar">
         <div class="search">${I.search}<input type="search" id="fa-q" placeholder="Search ID, rego, make or model" value="${esc(st.q)}" aria-label="Search vehicles"></div>
         <select id="fa-kit" aria-label="Kit type">${options([['Car', 'Car kit'], ['Truck', 'Truck kit']], st.kit, 'All kit types')}</select>
-        <select id="fa-status" aria-label="Inspection status">${options([['overdue', 'Overdue'], ['soon', 'Due within 30 days'], ['ok', 'OK']], st.status, 'Any status')}</select>
+        <select id="fa-status" aria-label="Inspection status">${options([['overdue', 'Overdue'], ['soon', 'Due within 30 days'], ['ok', 'OK'], ['unknown', 'Not yet recorded']], st.status, 'Any status')}</select>
         <span class="count" id="fa-count"></span>
       </div>
       <div class="table-wrap"><table class="data">
@@ -76,7 +77,7 @@ AD.views['first-aid'] = (function () {
   function rows() {
     const q = st.q.toLowerCase();
     const list = AD.store.all('vehicles').filter((v) => {
-      if (v.firstAidFull === 'N/A' || (!v.firstAidFull && !v.firstAidNextDue)) return false;
+      if (v.type === 'Trailer') return false;
       if (st.kit && v.firstAidKitType !== st.kit) return false;
       if (st.status && kitState(v).state !== st.status) return false;
       if (q) {

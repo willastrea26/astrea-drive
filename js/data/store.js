@@ -2,7 +2,7 @@
  * Data store — the single source of truth for every screen.
  *
  * Backed by Supabase (see supabase/schema.sql for the tables and RLS
- * policies). Reads are served from an in-memory mirror of all 8 tables —
+ * policies). Reads are served from an in-memory mirror of every table —
  * all()/get() stay synchronous so view code doesn't need to change —
  * refilled by load() on sign-in, on a timer, and after every write.
  * Writes (insert/update/remove/log) hit Supabase first and only touch the
@@ -15,7 +15,7 @@
 window.AD = window.AD || {};
 
 AD.store = (function () {
-  const TABLES = ['vehicles', 'drivers', 'sites', 'bookings', 'services', 'defects', 'documents', 'activity'];
+  const TABLES = ['vehicles', 'drivers', 'sites', 'bookings', 'services', 'defects', 'documents', 'power_tools', 'activity'];
   let db = Object.fromEntries(TABLES.map((t) => [t, []]));
   const listeners = new Set();
 
