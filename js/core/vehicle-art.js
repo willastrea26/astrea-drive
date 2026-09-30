@@ -57,11 +57,11 @@ AD.art = (function () {
     <rect x="36" y="42.5" width="50" height="3.2" rx="1.2" fill="#1d2330"/>
     <!-- body. The tray rail sits 1.5 below the bonnet line so the tub reads
          as a separate box rather than one slab running the whole length. -->
-    <path d="M7 37.5 L7.5 30.8 L33 28 L45 16.2 L72 16.2 L77 29.5 L111 29.5 L111 43
-             L102 43 Q94 32.5 86 43 L36 43 Q28 32.5 20 43 L7 43 Z"
+    <path d="M7.4 37 L8.6 31 Q9 29.6 10.6 29.4 L33 27.4 L45 16.2 L72 16.2 L77 29.5 L111 29.5 L111 43
+             L102 43 Q94 32.5 86 43 L36 43 Q28 32.5 20 43 L7.4 43 Z"
           fill="#ffffff" stroke="#aeb8c6" stroke-width="1" stroke-linejoin="round"/>
     <!-- cab/tray seam, tray swage line, tailgate -->
-    <path d="M77.8 30.3 V42.4 M106.5 30.5 V42.4" stroke="#d3dae3" stroke-width="1"/>
+    <path d="M77.8 30.3 V42.4 M105 30.5 V42.4" stroke="#d3dae3" stroke-width="1"/>
     <path d="M79.5 35.8 H105" stroke="#e2e8ef" stroke-width="1"/>
     <!-- glass: windscreen, front door, rear door -->
     <path d="M35 27.2 L45 17.4 L47 17.4 L47 27.2 Z" fill="#26344f"/>
@@ -77,11 +77,10 @@ AD.art = (function () {
           font-family="'Segoe UI Variable Display','Segoe UI',system-ui,sans-serif"
           font-size="6" font-weight="700" fill="#2463EB">Astrea</text>
     <!-- mirror on the A-pillar -->
-    <path d="M40 21.6 h-3.2 a1.2 1.2 0 0 0 -1.2 1.2 v1.3" stroke="#8b96a4" stroke-width="1.5" fill="none" stroke-linecap="round"/>
-    <!-- headlight, grille, bumper -->
-    <rect x="7.2" y="31.4" width="6.3" height="3.4" rx="1.1" fill="#dfe5ec"/>
-    <rect x="7.2" y="35.7" width="5.6" height="2.1" rx=".8" fill="#c3ccd7"/>
-    <rect x="5.5" y="38.4" width="9" height="4.7" rx="1.2" fill="#1d2330"/>
+    <path d="M40.2 21.9 L37.2 22.7" stroke="#8b96a4" stroke-width="1.7" fill="none" stroke-linecap="round"/>
+    <!-- headlight swept back along the nose, then the bumper -->
+    <path d="M9.2 31.4 L14.6 31 Q15.4 30.9 15.4 31.8 L15.4 34.2 Q15.4 35 14.6 35 L8.9 35 Z" fill="#dfe5ec"/>
+    <rect x="5.8" y="38.2" width="9" height="4.8" rx="1.3" fill="#1d2330"/>
     <!-- wheels -->
     <g fill="#161b24"><circle cx="28" cy="46.5" r="7.5"/><circle cx="94" cy="46.5" r="7.5"/></g>
     <g fill="#8a95a5"><circle cx="28" cy="46.5" r="3"/><circle cx="94" cy="46.5" r="3"/></g>
