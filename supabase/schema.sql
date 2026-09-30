@@ -19,10 +19,12 @@ create table public.approved_users (
   email text primary key
 );
 
+-- Replace with the real address before running. The live allowlist lives in
+-- the database, not in this file, so it's deliberately not recorded here.
 insert into public.approved_users (email) values
-  ('estimating@astrea.com.au');
+  ('first.user@example.com');
   -- To add someone later, run this in the SQL Editor:
-  --   insert into public.approved_users (email) values ('name@astrea.com.au');
+  --   insert into public.approved_users (email) values ('name@example.com');
 
 alter table public.approved_users enable row level security;
 -- (RLS on, zero policies -> every direct client request is denied)
