@@ -118,13 +118,21 @@ AD.views.vehicle = (function () {
   }
 
   // ---------- Photo drop zone ----------
+  /** Illustration standing in for a missing photo. Falls back to a plain icon for types we haven't drawn. */
+  function placeholderArt(v) {
+    if (v.type === 'Vac truck') return AD.art.vac(AD.art.num(v.id), 168, `${v.id} vac truck`);
+    if (v.type === 'Ute') return AD.art.ute(168, `${v.id} ute`);
+    return '';
+  }
+
   function photoDrop(v) {
+    const art = placeholderArt(v);
     return `<div class="veh-photo${v.photo ? ' has-photo' : ''}" id="veh-photo">
       ${v.photo
         ? `<img src="${esc(v.photo)}" alt="${esc(v.id)}">
            <button type="button" class="veh-photo-clear" id="photo-clear" title="Remove photo" aria-label="Remove photo">${I.x}</button>`
         : `<div class="veh-photo-empty">
-             ${v.type === 'Vac truck' ? `<span class="veh-photo-truck">${AD.truck.svg(AD.truck.num(v.id), 168, `${v.id} vac truck`)}</span>` : I.truck}
+             ${art ? `<span class="veh-photo-truck">${art}</span>` : I.truck}
              <span class="veh-photo-hint">Drop a photo<span>or click to browse</span></span>
            </div>`}
       <input type="file" id="photo-input" accept="image/*" hidden>

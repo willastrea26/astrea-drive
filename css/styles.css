@@ -690,7 +690,7 @@ input[type=text], input[type=number], input[type=date], input[type=datetime-loca
 .fp-row:hover { background: rgba(16, 29, 53, .03); }
 .fp-row:focus-visible { outline-offset: -3px; }
 .fp-thumb { padding-top: 6px; }
-.fp-thumb .vac-svg { display: block; }
+.fp-thumb .veh-svg { display: block; }
 .fp-main { min-width: 0; display: block; }
 .fp-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .fp-top b { font-size: 15px; font-weight: 700; font-family: var(--font-display); }
@@ -795,7 +795,7 @@ input[type=text], input[type=number], input[type=date], input[type=datetime-loca
 .tm-wrap { background: none; border: 0; }
 .tm-wrap:focus-visible { outline: none; }
 .tm { position: relative; width: 88px; height: 64px; }
-.tm .vac-svg { position: absolute; left: 0; top: 0; overflow: visible; filter: drop-shadow(0 1px 1.5px rgba(16, 29, 53, .28)); }
+.tm .veh-svg { position: absolute; left: 0; top: 0; overflow: visible; filter: drop-shadow(0 1px 1.5px rgba(16, 29, 53, .28)); }
 .vac-num { font-family: var(--font-display); font-weight: 800; font-size: 21px; fill: #101d35; letter-spacing: -0.4px; }
 .tm-stem { position: absolute; left: 43px; top: 43px; width: 2px; height: 12px; background: #101d35; opacity: .5; border-radius: 1px; }
 .tm-anchor { position: absolute; left: 39px; top: 55px; width: 10px; height: 10px; border-radius: 50%; background: #101d35; box-shadow: 0 0 0 2px #fff; }
@@ -860,10 +860,10 @@ input[type=text], input[type=number], input[type=date], input[type=datetime-loca
 
 /* Truck illustrations outside the Tracker */
 .truck-thumb { display: block; margin: -2px 0 4px -2px; }
-.truck-thumb .vac-svg { display: block; }
+.truck-thumb .veh-svg { display: block; }
 .title-truck { display: inline-flex; margin-right: 2px; }
-.title-truck .vac-svg { display: block; }
-@media (max-width: 860px) { .truck-thumb { display: none; } .title-truck .vac-svg { width: 84px; height: 42px; } }
+.title-truck .veh-svg { display: block; }
+@media (max-width: 860px) { .truck-thumb { display: none; } .title-truck .veh-svg { width: 84px; height: 42px; } }
 
 /* =====================================================================
    CHART COLOURS — validated (dataviz validator, light mode, surface #fff)

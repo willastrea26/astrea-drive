@@ -456,7 +456,7 @@ AD.views.dashboard = (function () {
       const rows = (live.length ? [] : [null]).concat(list);
       const span = rows.length;
       const truckCell = `<td rowspan="${span}" class="truck-cell${span > 1 ? ' span' : ''}">
-          <span class="truck-thumb">${AD.truck.svg(AD.truck.num(v.id), 72)}</span>
+          <span class="truck-thumb">${AD.art.vac(AD.art.num(v.id), 72)}</span>
           <a class="id" href="#/vehicle/${v.id}" title="Open ${v.id}">${v.id}</a>
           <span class="t2">${esc(v.rego)}</span>
           ${v.status === 'Out of service' || v.status === 'In workshop' ? `<span class="t2">${esc(v.status)}</span>` : ''}

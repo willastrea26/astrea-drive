@@ -195,13 +195,13 @@ AD.views.tracker = (function () {
   }
 
   function markerIcon(l, sel) {
-    const num = AD.truck.num(l.truckId);
+    const num = AD.art.num(l.truckId);
     return window.L.divIcon({
       className: 'tm-wrap',
       html: `<div class="tm tm-${l.cat}${sel ? ' sel' : ''}">
         <span class="tm-halo"></span>
         <span class="tm-status"><i></i>${STATUS_WORD[l.cat] || ''}</span>
-        ${AD.truck.svg(num, 88)}
+        ${AD.art.vac(num, 88)}
         <span class="tm-stem"></span><span class="tm-anchor"></span>
       </div>`,
       iconSize: [88, 64], iconAnchor: [44, 60]
@@ -459,7 +459,7 @@ AD.views.tracker = (function () {
       const fullSite = b ? (b.address || siteName(b)) : '';
       return `<div class="fp-item${sel ? ' sel' : ''}" role="listitem" data-t="${l.truckId}">
         <button type="button" class="fp-row" data-pick="${l.truckId}" aria-expanded="${sel}" aria-controls="fp-d-${l.truckId}" ${fullSite ? `title="${esc(fullSite)}"` : ''}>
-          <span class="fp-thumb">${AD.truck.svg(AD.truck.num(l.truckId), 64)}</span>
+          <span class="fp-thumb">${AD.art.vac(AD.art.num(l.truckId), 64)}</span>
           <span class="fp-main">
             <span class="fp-top"><b>${l.truckId}</b>${statusFor(l)}</span>
             <span class="fp-job">${job}</span>
