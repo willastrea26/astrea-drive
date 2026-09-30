@@ -35,6 +35,12 @@ AD.vehicleForm = function (vehicle, onSaved) {
         <div class="field"><label>Registration expiry <span class="req">*</span></label><input type="date" name="regoExpiry" value="${esc(v.regoExpiry)}"></div>
         <div class="field"><label>Next service date <span class="req">*</span></label><input type="date" name="nextServiceDate" value="${esc(v.nextServiceDate)}"></div>
         <div class="field"><label>Next service odometer (km) <span class="req">*</span></label><input type="number" name="nextServiceKm" value="${esc(v.nextServiceKm)}" min="0" step="1"></div>
+        <div class="field"><label>VIN</label><input type="text" name="vin" value="${esc(v.vin || '')}" maxlength="20"></div>
+        <div class="field"><label>Variant / spec</label><input type="text" name="variant" value="${esc(v.variant || '')}"></div>
+        <div class="field"><label>Linkt tag</label><input type="text" name="linktTag" value="${esc(v.linktTag || '')}"></div>
+        <div class="field"><label>WRDT plant no.</label><input type="text" name="wrdtPlantNo" value="${esc(v.wrdtPlantNo || '')}"></div>
+        <div class="field"><label>EVIE fob</label><input type="text" name="evieFob" value="${esc(v.evieFob || '')}"></div>
+        <div class="field"><label>EVIE card</label><input type="text" name="evieCard" value="${esc(v.evieCard || '')}"></div>
         <div class="field full"><label>Notes</label><textarea name="notes" rows="2">${esc(v.notes)}</textarea></div>
       </form>
       <div class="form-actions">
@@ -66,7 +72,9 @@ AD.vehicleForm = function (vehicle, onSaved) {
         const rec = {
           rego: d.rego.toUpperCase(), make: d.make, model: d.model, type: d.type, year: Number(d.year) || null,
           driverId: d.driverId, status: d.status, odometer: Math.round(odo), regoExpiry: d.regoExpiry,
-          nextServiceDate: d.nextServiceDate, nextServiceKm: Math.round(Number(d.nextServiceKm)), notes: d.notes
+          nextServiceDate: d.nextServiceDate, nextServiceKm: Math.round(Number(d.nextServiceKm)), notes: d.notes,
+          vin: d.vin || null, variant: d.variant || null, linktTag: d.linktTag || null,
+          wrdtPlantNo: d.wrdtPlantNo || null, evieFob: d.evieFob || null, evieCard: d.evieCard || null
         };
         saveBtn.disabled = true;
         let saved;

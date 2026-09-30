@@ -262,6 +262,22 @@ AD.views.vehicle = (function () {
       </tbody></table></div>`;
   }
 
+  function detailsFacts(v) {
+    const rows = [
+      v.variant && ['Variant', v.variant],
+      v.vin && ['VIN', v.vin],
+      v.linktTag && ['Linkt tag', v.linktTag],
+      v.wrdtPlantNo && ['WRDT plant no.', v.wrdtPlantNo],
+      v.evieFob && ['EVIE fob', v.evieFob],
+      v.evieCard && ['EVIE card', v.evieCard],
+    ].filter(Boolean);
+    if (!rows.length) return '';
+    return `<section class="section">
+      ${sectionHead({ title: 'Vehicle details', level: 3 })}
+      <dl class="facts">${rows.map(([dt, dd]) => `<div><dt>${esc(dt)}</dt><dd style="font-family:var(--mono,monospace);font-size:.92em">${esc(dd)}</dd></div>`).join('')}</dl>
+    </section>`;
+  }
+
   function overview(v, services, defects) {
     const s = L.serviceState(v), r = L.regoState(v);
     const flagTone = (tone) => (tone ? 'flag-' + tone : 'muted');
@@ -274,6 +290,7 @@ AD.views.vehicle = (function () {
             <div><dt>Registration expiry</dt><dd>${T.fmtKey(v.regoExpiry)}<span class="sub ${flagTone(L.attentionTone(r.state, r.days))}">${esc(r.state === 'ok' ? 'Current — ' + r.why : r.why)}</span></dd></div>
             <div><dt>Next service</dt><dd>${T.fmtKey(v.nextServiceDate)} or ${L.fmtKm(v.nextServiceKm)}<span class="sub ${flagTone(L.attentionTone(s.state, s.daysLeft, s.kmLeft))}">${esc(s.why.charAt(0).toUpperCase() + s.why.slice(1))}</span></dd></div>
           </dl>
+          ${detailsFacts(v)}
           <section class="section">
             ${sectionHead({ title: 'Recent services', meta: `${services.length} recorded`, level: 3 })}
             <ul class="rows">
