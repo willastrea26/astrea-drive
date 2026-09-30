@@ -87,7 +87,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .nav a .ico { color: #8e9bb4; }
 .nav a.active .ico, .nav a:hover .ico { color: #fff; }
 .nav .count { margin-left: auto; font-size: 12.5px; font-weight: 600; color: #fff; background: rgba(255,255,255,.12); border-radius: 3px; padding: 0 6px; line-height: 20px; }
-.sidebar-foot { margin-top: auto; padding: 14px 20px 16px; border-top: 1px solid var(--navy-line); font-size: 13px; color: #95a2ba; display: grid; gap: 8px; }
+.sidebar-hero { margin-top: auto; position: relative; height: 180px; overflow: hidden; }
+.sidebar-hero img { width: 100%; height: 100%; object-fit: cover; object-position: center 40%; display: block; }
+.sidebar-hero::before { content: ''; position: absolute; inset: 0; z-index: 1; background: linear-gradient(to bottom, var(--sidebar) 0%, transparent 50%); pointer-events: none; }
+.sidebar-foot { padding: 14px 20px 16px; border-top: 1px solid var(--navy-line); font-size: 13px; color: #95a2ba; display: grid; gap: 8px; }
 .sidebar-foot .clock { display: flex; align-items: center; gap: 7px; color: #c3ccdc; }
 .user-tag { display: inline-block; font-size: 12px; font-weight: 600; letter-spacing: .02em; color: #d9e0ec; border: 1px solid rgba(255,255,255,.22); border-radius: 3px; padding: 1px 6px; width: max-content; }
 .link-btn { background: none; border: 0; padding: 0; cursor: pointer; color: inherit; text-align: left; display: inline-flex; gap: 6px; align-items: center; }
