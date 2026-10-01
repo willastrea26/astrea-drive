@@ -132,5 +132,28 @@ AD.store = (function () {
     return remove('documents', doc.id);
   }
 
-  return { load, all, get, insert, update, remove, log, on, uid, uploadDocument, signDocumentUrl, removeDocument };
+  // ---------- Vehicle photos (gallery) ----------------------------------
+  async function uploadVehiclePhoto(file, vehicleId) {
+    if (!file || !/^image\//.test(file.type)) throw new Error('Not an image file');
+    const path = `photos/${vehicleId}/${uid('pho')}-${safeName(file.name)}`;
+    const up = await sb().storage.from(BUCKET).upload(path, file, { contentType: file.type, upsert: false });
+    if (up.error) throw up.error;
+    const photo = { id: uid('pho'), path, ts: new Date().toISOString() };
+    const v = get('vehicles', vehicleId);
+    const photos = [...(v.photos || []), photo];
+    await update('vehicles', vehicleId, { photos });
+    return photo;
+  }
+
+  async function removeVehiclePhoto(vehicleId, photoId) {
+    const v = get('vehicles', vehicleId);
+    const removed = (v.photos || []).find((p) => p.id === photoId);
+    const photos = (v.photos || []).filter((p) => p.id !== photoId);
+    if (removed && removed.path) {
+      try { await sb().storage.from(BUCKET).remove([removed.path]); } catch (e) { /* best effort */ }
+    }
+    await update('vehicles', vehicleId, { photos });
+  }
+
+  return { load, all, get, insert, update, remove, log, on, uid, uploadDocument, signDocumentUrl, removeDocument, uploadVehiclePhoto, removeVehiclePhoto };
 })();

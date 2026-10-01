@@ -1709,6 +1709,38 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 .veh-photo:hover .veh-photo-clear { opacity: 1; }
 .veh-photo-clear .ico { width: 14px; height: 14px; }
 
+/* Photo gallery grid */
+.pg-grid {
+  display: grid; gap: 12px;
+  grid-template-columns: repeat(3, 1fr);
+  min-height: 120px;
+  border-radius: var(--r-lg);
+  transition: outline-color .15s;
+}
+.pg-grid.pg-1 { grid-template-columns: 1fr; max-width: 520px; }
+.pg-grid.pg-few { grid-template-columns: repeat(2, 1fr); }
+.pg-grid.pg-over { outline: 2px dashed var(--mint); outline-offset: 6px; }
+.pg-tile {
+  aspect-ratio: 4/3; border-radius: var(--r-lg); overflow: hidden;
+  background: var(--paper-2); border: 1px solid var(--rule);
+  cursor: pointer; position: relative;
+}
+.pg-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pg-del {
+  position: absolute; top: 8px; right: 8px; width: 28px; height: 28px; border-radius: 50%; border: 0;
+  background: rgba(8,20,32,.72); color: #fff; cursor: pointer; display: grid; place-items: center;
+  opacity: 0; transition: opacity .15s;
+}
+.pg-tile:hover .pg-del { opacity: 1; }
+.pg-del .ico { width: 14px; height: 14px; }
+.pg-shimmer {
+  width: 100%; height: 100%;
+  background: linear-gradient(110deg, var(--paper-2) 30%, var(--hover) 50%, var(--paper-2) 70%);
+  background-size: 200% 100%; animation: pg-shimmer 1.5s ease-in-out infinite;
+}
+@keyframes pg-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+.pg-err { display: grid; place-items: center; width: 100%; height: 100%; color: var(--muted); font-size: 13px; }
+
 /* Tab bar with the period picker on the right */
 .veh-tabbar { display: flex; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; }
 .veh-tabbar .tabs { flex: 1; min-width: 0; }
@@ -1790,6 +1822,8 @@ h1, h2, h3 { letter-spacing: -0.02em; }
   .strip-5 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .rev-split { flex-direction: column; align-items: stretch; }
   .rev-donut { align-self: center; }
+  .pg-grid { grid-template-columns: repeat(2, 1fr); }
+  .pg-grid.pg-1 { grid-template-columns: 1fr; }
 }
 
 /* =====================================================================

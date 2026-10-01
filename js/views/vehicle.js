@@ -10,6 +10,7 @@ AD.views.vehicle = (function () {
     { key: 'service', label: 'Maintenance' },
     { key: 'defects', label: 'Defects' },
     { key: 'documents', label: 'Documents' },
+    { key: 'photos', label: 'Photos' },
     { key: 'revenue', label: 'Revenue' }
   ];
   const RANGES = [
@@ -58,7 +59,7 @@ AD.views.vehicle = (function () {
     const docs = AD.store.all('documents').filter((x) => x.vehicleId === v.id);
     const upcoming = isVac ? L.bookingsFor(v.id).filter((b) => Date.parse(b.end) > Date.now()) : [];
     const openCount = defects.filter((d) => d.status !== 'Resolved').length;
-    const counts = { service: services.length, defects: openCount, documents: docs.length, bookings: upcoming.filter((b) => b.status !== 'cancelled').length };
+    const counts = { service: services.length, defects: openCount, documents: docs.length, photos: (v.photos || []).length, bookings: upcoming.filter((b) => b.status !== 'cancelled').length };
 
     el.classList.toggle('anim-in', fresh);
     fresh = false;
@@ -116,6 +117,9 @@ AD.views.vehicle = (function () {
     tb.querySelectorAll('[data-resolve]').forEach((b) => (b.onclick = () => AD.resolveDefect(b.dataset.resolve)));
     tb.querySelectorAll('[data-photos]').forEach((b) => (b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); AD.viewDefectPhotos(b.dataset.photos); }));
     tb.querySelectorAll('[data-booking]').forEach((b) => (b.onclick = () => AD.go('calendar', { view: 'day', date: T.dateKey(AD.store.get('bookings', b.dataset.booking).start), open: b.dataset.booking })));
+
+    // Photos tab
+    if (tab === 'photos') bindGallery(el, v);
 
     // Documents tab
     const uploadBtn = tb.querySelector('[data-upload]');
@@ -250,9 +254,118 @@ AD.views.vehicle = (function () {
     });
   }
 
+  // ---------- Photo gallery ----------
+  function compressBlob(file, maxDim, quality) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+          const c = document.createElement('canvas');
+          c.width = Math.round(img.width * scale);
+          c.height = Math.round(img.height * scale);
+          c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+          c.toBlob((blob) => blob ? resolve(new File([blob], file.name, { type: 'image/jpeg' })) : reject(new Error('Resize failed')), 'image/jpeg', quality);
+        };
+        img.onerror = () => reject(new Error('Invalid image'));
+        img.src = reader.result;
+      };
+      reader.onerror = () => reject(new Error('Could not read file'));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function photosTab(v) {
+    const photos = v.photos || [];
+    const cls = photos.length === 1 ? ' pg-1' : photos.length <= 4 ? ' pg-few' : '';
+    return `
+      <div class="tab-tools">
+        <span class="t2">${photos.length} photo${photos.length === 1 ? '' : 's'}</span>
+        <button class="btn btn-sm btn-primary" id="pg-add-btn">${I.plus} Add photos</button>
+        <input type="file" id="pg-input" accept="image/*" multiple hidden>
+      </div>
+      <div class="pg-grid${cls}" id="pg-grid">
+        ${photos.length
+          ? photos.map((p) => `<div class="pg-tile pg-loading" data-pid="${p.id}"><div class="pg-shimmer"></div></div>`).join('')
+          : `<p class="empty">No photos yet. Click "Add photos" or drag images here.</p>`}
+      </div>`;
+  }
+
+  async function doUpload(files, vehicleId) {
+    let ok = 0;
+    for (const f of files) {
+      try {
+        const blob = await compressBlob(f, 1400, 0.82);
+        await AD.store.uploadVehiclePhoto(blob, vehicleId);
+        ok++;
+      } catch (err) {
+        toast('Failed: ' + (f.name || 'photo') + ' — ' + err.message, 'error');
+      }
+    }
+    if (ok) toast(`${ok} photo${ok === 1 ? '' : 's'} uploaded`);
+    return ok;
+  }
+
+  async function bindGallery(el, v) {
+    const photos = v.photos || [];
+    const addBtn = el.querySelector('#pg-add-btn');
+    const input = el.querySelector('#pg-input');
+    const grid = el.querySelector('#pg-grid');
+
+    addBtn.onclick = () => input.click();
+    input.onchange = async () => {
+      const files = Array.from(input.files || []).filter((f) => /^image\//.test(f.type));
+      if (!files.length) return;
+      addBtn.disabled = true; addBtn.textContent = 'Uploading…';
+      if (await doUpload(files, v.id)) draw();
+    };
+
+    ['dragenter', 'dragover'].forEach((ev) => grid.addEventListener(ev, (e) => { e.preventDefault(); grid.classList.add('pg-over'); }));
+    ['dragleave', 'drop'].forEach((ev) => grid.addEventListener(ev, (e) => { e.preventDefault(); if (ev === 'dragleave' && grid.contains(e.relatedTarget)) return; grid.classList.remove('pg-over'); }));
+    grid.addEventListener('drop', async (e) => {
+      const files = Array.from(e.dataTransfer.files || []).filter((f) => /^image\//.test(f.type));
+      if (!files.length) return;
+      addBtn.disabled = true; addBtn.textContent = 'Uploading…';
+      if (await doUpload(files, v.id)) draw();
+    });
+
+    const urls = [];
+    for (const p of photos) {
+      const tile = grid.querySelector(`[data-pid="${p.id}"]`);
+      if (!tile) continue;
+      try {
+        const url = await AD.store.signDocumentUrl(p.path);
+        urls.push(url);
+        tile.innerHTML = `<img src="${esc(url)}" alt="Vehicle photo" loading="lazy"><button class="pg-del" data-pdel="${p.id}" title="Delete photo">${I.x}</button>`;
+        tile.classList.remove('pg-loading');
+        const idx = urls.length - 1;
+        tile.onclick = (e) => { if (!e.target.closest('.pg-del')) AD.ui.photoLightbox(urls, idx); };
+      } catch (e) {
+        tile.innerHTML = '<span class="pg-err">Could not load</span>';
+        tile.classList.remove('pg-loading');
+        urls.push('');
+      }
+    }
+
+    grid.querySelectorAll('[data-pdel]').forEach((btn) => {
+      btn.onclick = async (e) => {
+        e.stopPropagation();
+        const ok = await AD.ui.confirm({ title: 'Delete photo?', message: 'This photo will be permanently removed.', confirmText: 'Delete', danger: true });
+        if (!ok) return;
+        try {
+          await AD.store.removeVehiclePhoto(v.id, btn.dataset.pdel);
+          toast('Photo deleted');
+          draw();
+        } catch (err) { toast('Could not delete: ' + err.message, 'error'); }
+      };
+    });
+  }
+
   // ---------- Tabs ----------
   function tabBody(v, services, defects, docs, upcoming) {
     if (tab === 'overview') return overview(v, services, defects);
+    if (tab === 'photos') return photosTab(v);
     if (tab === 'revenue') return revenueTab(v);
 
     if (tab === 'service') return `
