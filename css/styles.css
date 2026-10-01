@@ -1589,20 +1589,26 @@ input::placeholder { color: var(--faint); }
 .data td.col-action { text-align: right; }
 
 /* Needs attention cell: leading icon beside one line per issue */
-/* Needs-attention chips: green / amber / red pills with icon + short text */
-.attn-row { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+/* Needs-attention chips: progressive emphasis. Green blends in as a plain
+   inline item with a small coloured icon; amber bolds the text in amber;
+   red adds a pill background so overdue items pop out of the row. */
+.attn-row { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; row-gap: 4px; }
 .attn-chip {
   display: inline-flex; align-items: center; gap: 5px;
-  padding: 3px 10px 3px 8px; border-radius: 999px;
-  font-size: 12.5px; font-weight: 600; line-height: 1.3;
-  border: 1px solid; white-space: nowrap;
+  font-size: 12.5px; font-weight: 500; line-height: 1.4;
+  white-space: nowrap; color: var(--muted);
 }
 .attn-chip-ico { display: inline-flex; }
 .attn-chip-ico .ico { width: 13px; height: 13px; stroke-width: 2.2; }
 .attn-chip-txt { font-variant-numeric: tabular-nums; }
-.attn-green { color: #0f6b4b; background: #e7f6ee; border-color: #b9e0cb; }
-.attn-amber { color: var(--amber); background: var(--amber-tint); border-color: #e9c88a; }
-.attn-red   { color: var(--red); background: var(--red-tint); border-color: #ebb3b6; }
+.attn-green .attn-chip-ico { color: var(--green); }
+.attn-amber { color: var(--amber); font-weight: 600; }
+.attn-amber .attn-chip-ico { color: var(--amber); }
+.attn-red {
+  color: var(--red); font-weight: 700;
+  background: var(--red-tint); padding: 2px 9px 2px 7px; border-radius: 999px;
+}
+.attn-red .attn-chip-ico { color: var(--red); }
 .col-attn { vertical-align: top; }
 .data td.col-attn { padding-top: 14px; }
 
