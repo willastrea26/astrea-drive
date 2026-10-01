@@ -157,7 +157,8 @@ AD.views.fleet = (function () {
       </div>
       <div class="table-wrap"><table class="data">
         <thead><tr>
-          <th style="width:150px">Fleet ID</th>
+          <th class="col-thumb" aria-hidden="true"></th>
+          <th style="width:110px">Fleet ID</th>
           <th class="col-opt">Registration</th>
           <th class="col-model">Make / model</th>
           <th class="col-opt col-wide">Type</th>
@@ -215,10 +216,8 @@ AD.views.fleet = (function () {
       const art = AD.art.forVehicle(v, 44) || `<span class="fleet-thumb-icon">${I.truck}</span>`;
       const docCount = allDocs.filter((d) => d.vehicleId === v.id && d.storagePath).length;
       return `<tr class="row-link" data-id="${v.id}" title="Open ${v.id}">
-        <td><span class="fleet-id-cell">
-          <span class="fleet-thumb">${art}</span>
-          <span><a class="id" href="#/vehicle/${v.id}">${esc(v.id)}</a><span class="t2 only-mobile">${esc(v.rego)}</span></span>
-        </span></td>
+        <td class="col-thumb"><span class="fleet-thumb">${art}</span></td>
+        <td><a class="id" href="#/vehicle/${v.id}">${esc(v.id)}</a><span class="t2 only-mobile">${esc(v.rego)}</span></td>
         <td class="col-opt">${esc(v.rego)}</td>
         <td>${esc(v.make || '')} ${esc(model || '')}<span class="t2">${esc(v.year || '')}${spec ? ' · ' + esc(spec) : ''}</span>${alerts ? `<span class="t2 only-mobile">${alerts}</span>` : ''}</td>
         <td class="col-opt col-wide">${esc(v.type)}</td>
@@ -233,7 +232,7 @@ AD.views.fleet = (function () {
         <td class="col-action col-opt col-wide">
           <button class="row-menu" data-edit="${v.id}" title="Edit ${esc(v.id)}" aria-label="Edit ${esc(v.id)}">${I.dots}</button>
         </td></tr>`;
-    }).join('') || `<tr><td colspan="${isHired ? 8 : 9}" class="empty">No vehicles match these filters.</td></tr>`;
+    }).join('') || `<tr><td colspan="${isHired ? 9 : 10}" class="empty">No vehicles match these filters.</td></tr>`;
 
     body.querySelectorAll('tr[data-id]').forEach((tr) => tr.addEventListener('click', (e) => {
       if (e.target.closest('[data-edit]')) { AD.vehicleForm(AD.store.get('vehicles', tr.dataset.id)); return; }
