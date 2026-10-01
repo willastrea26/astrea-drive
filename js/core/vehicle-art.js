@@ -102,6 +102,29 @@ AD.art = (function () {
     <g fill="#8a95a5"><circle cx="21" cy="46.5" r="2.8"/><circle cx="80" cy="46.5" r="2.8"/><circle cx="94" cy="46.5" r="2.8"/></g>
   </symbol>`;
 
+  // Sedan silhouette (Astrea Car). The hired variant below shares every path
+  // except the body/stroke colours — change one, change both.
+  const carBody = (body, stroke, mark_tone) => `
+    <ellipse cx="60" cy="54.6" rx="48" ry="3" fill="#101D35" opacity=".16"/>
+    <path d="M 9 44 L 7.5 41 Q 7 38 10 36.5 L 24 31 L 36 23 Q 42 18 50 17.5 L 72 17.5 Q 82 18.5 89 24 L 107 32 Q 112 33 112.5 37 L 112 41 L 111 44 L 104 44 A 10 10 0 0 0 86 44 L 34 44 A 10 10 0 0 0 16 44 Z"
+          fill="${body}" stroke="${stroke}" stroke-width=".9" stroke-linejoin="round"/>
+    <path d="M 37 23.5 Q 42 19 50 19 L 58.5 19 L 58.5 29 L 32 29 Z" fill="#1a3550"/>
+    <rect x="59.5" y="19" width="10" height="10" fill="#1a3550"/>
+    <path d="M 70.5 19 L 80 19 Q 85 19.5 89 25 L 89 29 L 70.5 29 Z" fill="#1a3550"/>
+    <rect x="58.5" y="19" width="1" height="10" fill="#2a3f55"/>
+    <rect x="69.5" y="19" width="1" height="10" fill="#2a3f55"/>
+    <path d="M59 29 L59 42 M70 29 L70 42" stroke="${stroke}" stroke-width=".7"/>
+    <rect x="48" y="34.3" width="6" height="1.4" rx=".6" fill="${stroke}"/>
+    <rect x="75" y="34.3" width="6" height="1.4" rx=".6" fill="${stroke}"/>
+    ${mark(mark_tone, 42, 36, 14)}
+    <path d="M 9 36.5 L 15 36.3 L 15.5 38 L 10.5 39.5 Z" fill="#f0f4f8"/>
+    <path d="M 106 36.5 L 112 37 L 112 39.5 L 106.5 39.5 Z" fill="#c93f3f"/>
+    <g fill="#161b24"><circle cx="25" cy="46.5" r="8"/><circle cx="95" cy="46.5" r="8"/></g>
+    <g fill="#4a5568"><circle cx="25" cy="46.5" r="4.8"/><circle cx="95" cy="46.5" r="4.8"/></g>
+    <g fill="#1a2130"><circle cx="25" cy="46.5" r="1.8"/><circle cx="95" cy="46.5" r="1.8"/></g>`;
+  const CAR     = `<symbol id="art-car"     viewBox="0 0 120 60">${carBody('#4a90c4', '#2a5c82', 'white')}</symbol>`;
+  const CAR_RED = `<symbol id="art-car-red" viewBox="0 0 120 60">${carBody('#c23b3b', '#7a2626', 'white')}</symbol>`;
+
   const DIG = `
   <symbol id="art-dig" viewBox="0 0 120 60">
     <ellipse cx="62" cy="54.6" rx="42" ry="3" fill="#101D35" opacity=".16"/>
@@ -139,7 +162,7 @@ AD.art = (function () {
   // Inject the shared symbols once per document.
   if (!document.getElementById('art-vac')) {
     document.body.insertAdjacentHTML('afterbegin',
-      `<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>${VAC}${UTE}${TIP}${DIG}</defs></svg>`);
+      `<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>${VAC}${UTE}${TIP}${DIG}${CAR}${CAR_RED}</defs></svg>`);
   }
 
   const open = (width, label) => {
@@ -158,15 +181,21 @@ AD.art = (function () {
 
   const plain = (id) => (width = 88, label = '') => `${open(width, label)}<use href="#${id}"/></svg>`;
   const ute = plain('art-ute'), tip = plain('art-tip'), dig = plain('art-dig');
+  const car = plain('art-car'), carRed = plain('art-car-red');
 
   /** Illustration for a vehicle record, keyed on its fleet type. '' if we have no art for that type. */
   const BY_TYPE = {
     'Vac truck': (v, width, label) => vac(num(v.id), width, label || `${v.id} vac truck`),
     'Ute': (v, width, label) => ute(width, label || `${v.id} ute`),
     'Tipper truck': (v, width, label) => tip(width, label || `${v.id} tipper`),
-    'Excavator': (v, width, label) => dig(width, label || `${v.id} excavator`)
+    'Excavator': (v, width, label) => dig(width, label || `${v.id} excavator`),
+    'Car': (v, width, label) => car(width, label || `${v.id} car`),
+    'Van': (v, width, label) => car(width, label || `${v.id} van`)
   };
-  const forVehicle = (v, width = 88, label = '') => (BY_TYPE[v.type] ? BY_TYPE[v.type](v, width, label) : '');
+  const forVehicle = (v, width = 88, label = '') => {
+    if (v.hired) return carRed(width, label || `${v.id || v.rego} hired`);
+    return BY_TYPE[v.type] ? BY_TYPE[v.type](v, width, label) : '';
+  };
 
-  return { vac, ute, tip, dig, num, forVehicle };
+  return { vac, ute, tip, dig, car, carRed, num, forVehicle };
 })();
