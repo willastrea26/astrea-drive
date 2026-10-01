@@ -1591,12 +1591,20 @@ input::placeholder { color: var(--faint); }
 /* Needs attention cell: leading icon beside one line per issue */
 /* Needs-attention chips: progressive emphasis. Green blends in as a plain
    inline item with a small coloured icon; amber bolds the text in amber;
-   red adds a pill background so overdue items pop out of the row. */
-.attn-row { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; row-gap: 4px; }
+   red adds a pill background so overdue items pop out of the row.
+   Laid out on a 3-column grid so each chip sits in the same x-position
+   across every row — the eye scans straight down one column at a time. */
+.attn-row {
+  display: grid;
+  grid-template-columns: 120px 115px auto;
+  align-items: center;
+  column-gap: 10px; row-gap: 4px;
+}
 .attn-chip {
   display: inline-flex; align-items: center; gap: 5px;
   font-size: 12.5px; font-weight: 500; line-height: 1.4;
   white-space: nowrap; color: var(--muted);
+  justify-self: start;
 }
 .attn-chip-ico { display: inline-flex; }
 .attn-chip-ico .ico { width: 13px; height: 13px; stroke-width: 2.2; }

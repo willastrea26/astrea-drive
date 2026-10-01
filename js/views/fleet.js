@@ -166,7 +166,7 @@ AD.views.fleet = (function () {
             ? '<th class="col-opt col-wide">Hire company</th>'
             : '<th class="col-opt">Assigned driver</th><th class="num col-opt col-wide">Odometer</th>'}
           <th>Status</th>
-          ${isHired ? '<th class="col-opt" style="min-width:140px">Documents</th>' : '<th class="col-opt" style="min-width:200px">Needs attention</th>'}
+          ${isHired ? '<th class="col-opt" style="min-width:140px">Documents</th>' : '<th class="col-opt" style="min-width:360px">Needs attention</th>'}
           <th class="col-action col-opt col-wide"><span class="hide">Actions</span></th>
         </tr></thead>
         <tbody id="f-body"></tbody>
