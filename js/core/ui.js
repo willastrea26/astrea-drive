@@ -56,37 +56,55 @@ AD.ui = (function () {
   const dash = '<span class="dash" aria-hidden="true">—</span><span class="sr-only">Not recorded</span>';
 
   /**
-   * Vehicle-level alerts (service, registration, open defects) as a leading
-   * icon plus one line per issue. Shared by the fleet register and dashboard.
-   * Returns '' when nothing needs attention.
+   * Vehicle-level alerts shown as three colour-coded chips: service, rego,
+   * defects. Green when well clear, amber when due within 30 days (or 1000
+   * km for service), red when overdue or within 7 days (200 km). Shared by
+   * the fleet register and dashboard.
    */
   function attentionFlags(v) {
     const L = AD.logic, T = AD.time, I = AD.icons;
     const s = L.serviceState(v), r = L.regoState(v), defects = L.openDefects(v.id);
-    const flag = (tone, text) => `<span class="flag ${tone ? 'flag-' + tone : ''}">${esc(text)}</span>`;
-    const defectTone = defects.some((d) => d.priority === 'Critical' || d.priority === 'High') ? 'red'
-      : defects.some((d) => d.priority === 'Medium') ? 'amber' : '';
-    const regoDate = T.fmtKey(v.regoExpiry).slice(0, 5);
-    const regoDays = Math.abs(r.days);
-    const regoLine = r.state === 'overdue'
-      ? flag('red', `Rego expired ${regoDate} · ${regoDays}d ago`)
-      : flag(r.state === 'soon' ? L.attentionTone(r.state, r.days) : 'muted', `Rego due ${regoDate} · ${r.days}d`);
-    const svcDate = T.fmtKey(v.nextServiceDate).slice(0, 5);
-    const serviceLine = s.state === 'overdue'
-      ? flag('red', `Service overdue · ${-s.daysLeft}d`)
-      : s.state === 'soon'
-        ? flag(L.attentionTone(s.state, s.daysLeft, s.kmLeft), `Service due ${svcDate} · ${s.daysLeft}d`)
-        : flag('muted', `Service due ${svcDate} · ${s.daysLeft}d`);
-    const lines = [
-      serviceLine,
-      regoLine,
-      defects.length ? flag(defectTone, `${defects.length} open defect${defects.length > 1 ? 's' : ''}`) : ''
-    ].filter(Boolean);
-    const hasIssue = s.state !== 'ok' || r.state !== 'ok' || defects.length;
-    const red = s.state === 'overdue' || r.state === 'overdue' || defectTone === 'red';
-    const icon = red ? I.alert : s.state !== 'ok' ? I.wrench : I.calendar;
-    const iconTone = red ? 'flag-red' : hasIssue ? 'flag-amber' : 'flag-muted';
-    return `<span class="attn-cell"><span class="attn-icon ${iconTone}">${icon}</span><span class="attn-lines">${lines.join('')}</span></span>`;
+
+    const urgency = (days, km = Infinity) => {
+      if (days < 0 || km <= 0) return 'red';
+      if (days <= 7 || km <= 200) return 'red';
+      if (days <= 30 || km <= 1000) return 'amber';
+      return 'green';
+    };
+
+    const chip = (tone, icon, text, title) =>
+      `<span class="attn-chip attn-${tone}" title="${esc(title)}">
+        <span class="attn-chip-ico">${icon}</span><span class="attn-chip-txt">${esc(text)}</span>
+      </span>`;
+
+    // Service
+    const svcTone = urgency(s.daysLeft, s.kmLeft);
+    const svcTxt = s.daysLeft < 0 ? `Service ${-s.daysLeft}d late`
+      : s.daysLeft === 0 ? 'Service due today'
+      : `Service ${s.daysLeft}d`;
+    const svcTitle = `Next service ${T.fmtKey(v.nextServiceDate)} or ${L.fmtKm(v.nextServiceKm)} (${L.fmtKm(Math.max(s.kmLeft, 0))} to go)`;
+
+    // Rego
+    const regoTone = urgency(r.days);
+    const regoTxt = r.days < 0 ? `Rego ${-r.days}d late`
+      : r.days === 0 ? 'Rego expires today'
+      : `Rego ${r.days}d`;
+    const regoTitle = `Registration expires ${T.fmtKey(v.regoExpiry)}`;
+
+    // Defects
+    const hasHigh = defects.some((d) => d.priority === 'Critical' || d.priority === 'High');
+    const hasMed  = defects.some((d) => d.priority === 'Medium');
+    const defTone = !defects.length ? 'green' : hasHigh ? 'red' : hasMed ? 'amber' : 'amber';
+    const defTxt = !defects.length ? 'No defects'
+      : `${defects.length} defect${defects.length > 1 ? 's' : ''}`;
+    const defTitle = !defects.length ? 'No open defects' : `${defects.length} open defect${defects.length > 1 ? 's' : ''}`;
+    const defIcon = !defects.length ? I.checkCircle : I.alert;
+
+    return `<span class="attn-row">
+      ${chip(svcTone, I.wrench, svcTxt, svcTitle)}
+      ${chip(regoTone, I.calendar, regoTxt, regoTitle)}
+      ${chip(defTone, defIcon, defTxt, defTitle)}
+    </span>`;
   }
 
   /** Link every form label to its control so screen readers announce it. */

@@ -234,6 +234,8 @@ table.data { width: 100%; border-collapse: collapse; font-size: 14.5px; }
 .data .id { font-weight: 700; font-size: 15px; color: var(--ink); white-space: nowrap; }
 .data a.id:hover { color: var(--blue); text-decoration: none; }
 .col-thumb { width: 58px; padding-right: 4px !important; }
+/* Fleet rows: vertically centre every cell so one tall column doesn't push the rest off-centre */
+#f-body td { vertical-align: middle; }
 .fleet-thumb { display: block; width: 50px; }
 .fleet-thumb .veh-svg { display: block; width: 100%; height: auto; }
 .fleet-thumb-icon { display: flex; align-items: center; justify-content: center; width: 100%; aspect-ratio: 2 / 1; color: var(--muted); }
@@ -1587,14 +1589,20 @@ input::placeholder { color: var(--faint); }
 .data td.col-action { text-align: right; }
 
 /* Needs attention cell: leading icon beside one line per issue */
-.attn-cell { display: flex; align-items: flex-start; gap: 8px; }
-.attn-icon { flex: none; display: flex; padding-top: 1px; }
-.attn-icon .ico { width: 16px; height: 16px; }
-.attn-icon.flag-red { color: var(--red); }
-.attn-icon.flag-amber { color: var(--amber); }
-.attn-icon.flag-muted { color: var(--muted); }
-.attn-lines { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.attn-lines .flag { font-size: 13.5px; white-space: normal; }
+/* Needs-attention chips: green / amber / red pills with icon + short text */
+.attn-row { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.attn-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 10px 3px 8px; border-radius: 999px;
+  font-size: 12.5px; font-weight: 600; line-height: 1.3;
+  border: 1px solid; white-space: nowrap;
+}
+.attn-chip-ico { display: inline-flex; }
+.attn-chip-ico .ico { width: 13px; height: 13px; stroke-width: 2.2; }
+.attn-chip-txt { font-variant-numeric: tabular-nums; }
+.attn-green { color: #0f6b4b; background: #e7f6ee; border-color: #b9e0cb; }
+.attn-amber { color: var(--amber); background: var(--amber-tint); border-color: #e9c88a; }
+.attn-red   { color: var(--red); background: var(--red-tint); border-color: #ebb3b6; }
 .col-attn { vertical-align: top; }
 .data td.col-attn { padding-top: 14px; }
 
