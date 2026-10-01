@@ -65,7 +65,7 @@ AD.views.vehicle = (function () {
 
     el.innerHTML = `
       <nav class="crumbs" aria-label="Breadcrumb">
-        <a href="#/fleet">Fleet register</a>${I.chevR}<span aria-current="page">${esc(v.id)}</span>
+        <a href="#/fleet${v.hired ? '?section=hired' : ''}">${v.hired ? 'Hired fleet' : 'Fleet register'}</a>${I.chevR}<span aria-current="page">${esc(v.id)}</span>
       </nav>
 
       <header class="veh-hero">
@@ -73,7 +73,7 @@ AD.views.vehicle = (function () {
         <div class="veh-ident">
           <h1>${esc(v.id)}</h1>
           <p class="veh-model">${esc(v.make)} ${esc(v.model.split(' — ')[0])}</p>
-          ${vehicleBadge(v.status)}
+          ${v.hired ? `<span class="flag flag-muted">Hired · ${esc(v.hireCompany || 'Unknown company')}</span>` : vehicleBadge(v.status)}
         </div>
         <dl class="veh-facts">
           <div><dt>Rego</dt><dd>${esc(v.rego)}</dd></div>

@@ -6,7 +6,7 @@ AD.SERVICE_TYPES = ['Scheduled service', 'Major service', 'Major service + vac p
 AD.serviceForm = function (vehicleId) {
   const { esc, options, formData, showErrors, modal, toast } = AD.ui;
   const T = AD.time, L = AD.logic;
-  const vehicles = AD.store.all('vehicles').slice().sort((a, b) => a.id.localeCompare(b.id));
+  const vehicles = AD.store.all('vehicles').filter((v) => !v.hired).slice().sort((a, b) => a.id.localeCompare(b.id));
   const today = T.todayKey();
 
   let map = null;
@@ -191,7 +191,8 @@ AD.views.maintenance = (function () {
 
   function draw() {
     const el = root;
-    const all = AD.store.all('vehicles').map((v) => ({ v, s: L.serviceState(v) }));
+    // Owned fleet only — hired vehicles are serviced by their hire company, not us.
+    const all = AD.store.all('vehicles').filter((v) => !v.hired).map((v) => ({ v, s: L.serviceState(v) }));
     const order = { overdue: 0, soon: 1, ok: 2 };
     all.sort((a, b) => order[a.s.state] - order[b.s.state] || a.s.daysLeft - b.s.daysLeft);
     const overdue = all.filter((x) => x.s.state === 'overdue');
