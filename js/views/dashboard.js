@@ -57,18 +57,6 @@ AD.views.dashboard = (function () {
     </svg>`;
   }
 
-  /** Vertical column chart — one column per bucket, label then value beneath. */
-  function colChart(parts) {
-    const max = Math.max(...parts.map(p => p.value), 1);
-    return `<div class="kpi-cols" role="img" aria-label="${esc(parts.map(p => `${p.label}: ${p.value}`).join(', '))}">
-      ${parts.map(p => `<div class="kpi-col" title="${esc(p.label)}: ${p.value}">
-        <span class="kpi-col-track"><i style="height:${p.value ? Math.max((p.value / max) * 100, 7) : 0}%;background:${p.color}"></i></span>
-        <span class="kpi-col-lbl"><i style="background:${p.color}"></i>${esc(p.label)}</span>
-        <span class="kpi-col-val">${p.value}</span>
-      </div>`).join('')}
-    </div>`;
-  }
-
   function segBar(parts) {
     const live = parts.filter(p => p.value);
     const desc = live.map(p => `${p.value} ${p.label}`).join(', ');
@@ -182,13 +170,36 @@ AD.views.dashboard = (function () {
 
     // Summary visuals
     const byStatus = V.VEHICLE.map((s) => ({ ...s, value: vehicles.filter((v) => v.status === s.key).length }));
-    const svcSoon = svc.filter((x) => x.s.state !== 'overdue' && x.s.daysLeft <= 7).length;
-    const svcLater = svc.length - overdue - svcSoon;
-    const svcParts = [
-      { label: 'Overdue', value: overdue, color: 'var(--st-critical)' },
-      { label: 'Due < 7 days', value: svcSoon, color: 'var(--st-warning)' },
-      { label: 'Due > 7 days', value: svcLater, color: 'var(--viz-low)' }
+
+    // Service & registration health across the whole fleet, bucketed for the
+    // rings: red = overdue/expired, orange = due within 2 weeks, green = clear.
+    const SOON_DAYS = 14;
+    const svcHealth = { overdue: 0, soon: 0, ok: 0 };
+    vehicles.forEach((v) => {
+      const s = L.serviceState(v);
+      if (s.state === 'overdue') svcHealth.overdue++;
+      else if (s.daysLeft <= SOON_DAYS || s.kmLeft <= 500) svcHealth.soon++;
+      else svcHealth.ok++;
+    });
+    const regoHealth = { overdue: 0, soon: 0, ok: 0 };
+    vehicles.forEach((v) => {
+      const r = L.regoState(v);
+      if (r.state === 'overdue') regoHealth.overdue++;
+      else if (r.days <= SOON_DAYS) regoHealth.soon++;
+      else regoHealth.ok++;
+    });
+    const svcRing = [
+      { label: 'Overdue', value: svcHealth.overdue, color: 'var(--st-critical)' },
+      { label: 'Within 2 weeks', value: svcHealth.soon, color: 'var(--st-warning)' },
+      { label: 'Scheduled', value: svcHealth.ok, color: 'var(--st-good)' }
     ];
+    const regoRing = [
+      { label: 'Expired', value: regoHealth.overdue, color: 'var(--st-critical)' },
+      { label: 'Within 2 weeks', value: regoHealth.soon, color: 'var(--st-warning)' },
+      { label: 'Current', value: regoHealth.ok, color: 'var(--st-good)' }
+    ];
+    const svcDue = svcHealth.overdue + svcHealth.soon;
+    const regoDue = regoHealth.overdue + regoHealth.soon;
     const priParts = [
       { label: 'Critical', value: critical, color: 'var(--st-critical)' },
       { label: 'High', value: high, color: 'var(--st-serious)' },
@@ -225,15 +236,23 @@ AD.views.dashboard = (function () {
           legend: legendGrid(byStatus.filter(p => p.value), 'kpi-legend-stack'),
           foot: trendTag(utilTrend, 'vs last week')
         })}
-        ${card({
-          go: ['maintenance', { filter: 'due' }], icon: kpiIco(I.wrench, overdue ? 'red' : 'amber'),
-          label: 'Servicing due', value: svc.length,
-          viz: colChart(svcParts)
+        ${donutCard({
+          go: ['maintenance', { filter: 'due' }],
+          icon: kpiIco(I.wrench, svcHealth.overdue ? 'red' : svcHealth.soon ? 'amber' : 'green'),
+          label: 'Servicing',
+          ring: donutRing(svcRing, svcDue, 'due'),
+          legend: legendGrid(svcRing.filter((p) => p.value), 'kpi-legend-stack'),
+          foot: svcHealth.overdue ? `<span class="flag flag-red">${svcHealth.overdue} overdue</span>`
+            : svcHealth.soon ? `<span class="flag flag-amber">${svcHealth.soon} within 2 weeks</span>` : 'All up to date'
         })}
-        ${card({
-          go: ['defects', { status: 'open' }], icon: kpiIco(I.alert, critical ? 'red' : 'amber'),
-          label: 'Open defects', value: defects.length,
-          viz: segBar(priParts) + legendGrid(priParts)
+        ${donutCard({
+          go: ['fleet', { flag: 'rego' }],
+          icon: kpiIco(I.calendar, regoHealth.overdue ? 'red' : regoHealth.soon ? 'amber' : 'green'),
+          label: 'Registration',
+          ring: donutRing(regoRing, regoDue, 'due'),
+          legend: legendGrid(regoRing.filter((p) => p.value), 'kpi-legend-stack'),
+          foot: regoHealth.overdue ? `<span class="flag flag-red">${regoHealth.overdue} expired</span>`
+            : regoHealth.soon ? `<span class="flag flag-amber">${regoHealth.soon} within 2 weeks</span>` : 'All current'
         })}
       </div>
 
