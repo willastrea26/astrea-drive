@@ -116,6 +116,25 @@ AD.views.vehicle = (function () {
     tb.querySelectorAll('[data-resolve]').forEach((b) => (b.onclick = () => AD.resolveDefect(b.dataset.resolve)));
     tb.querySelectorAll('[data-photos]').forEach((b) => (b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); AD.viewDefectPhotos(b.dataset.photos); }));
     tb.querySelectorAll('[data-booking]').forEach((b) => (b.onclick = () => AD.go('calendar', { view: 'day', date: T.dateKey(AD.store.get('bookings', b.dataset.booking).start), open: b.dataset.booking })));
+
+    // Documents tab
+    const uploadBtn = tb.querySelector('[data-upload]');
+    if (uploadBtn) uploadBtn.onclick = () => AD.documentForm(v.id, () => draw());
+    tb.querySelectorAll('[data-open]').forEach((b) => (b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); AD.openDocument(AD.store.get('documents', b.dataset.open)); }));
+    tb.querySelectorAll('[data-download]').forEach((b) => (b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); AD.downloadDocument(AD.store.get('documents', b.dataset.download)); }));
+    tb.querySelectorAll('[data-delete]').forEach((b) => (b.onclick = async (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const doc = AD.store.get('documents', b.dataset.delete);
+      if (!doc) return;
+      const ok = await AD.ui.confirm({ title: 'Delete document?', message: `Delete <b>${esc(doc.name)}</b>${doc.storagePath ? ' and the attached file' : ''}? This can’t be undone.`, confirmText: 'Delete', danger: true });
+      if (!ok) return;
+      try {
+        await AD.store.removeDocument(doc);
+        await AD.store.log(`Document deleted from ${v.id}: ${doc.name}`, v.id);
+      } catch (err) { return toast('Could not delete: ' + err.message, 'error'); }
+      toast(`${doc.name} deleted`);
+      draw();
+    }));
   }
 
   // ---------- Photo drop zone ----------
@@ -249,11 +268,35 @@ AD.views.vehicle = (function () {
         <td class="col-action">${d.status !== 'Resolved' ? `<button class="btn btn-link" data-resolve="${d.id}">Resolve</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="5" class="empty">No defects reported.</td></tr>'}
       </tbody></table></div>`;
 
-    if (tab === 'documents') return `
-      <div class="tab-tools"><p class="note">Placeholder entries only — file upload isn’t built yet, so these can’t be opened.</p></div>
-      <div class="table-wrap"><table class="data"><thead><tr><th>Document</th><th>Category</th><th>File</th></tr></thead><tbody>
-      ${docs.map((d) => `<tr><td>${esc(d.name)}<span class="t2">Placeholder</span></td><td>${esc(d.category)}</td><td class="muted">No file attached</td></tr>`).join('')}
+    if (tab === 'documents') {
+      const sorted = docs.slice().sort((a, b) => {
+        const au = a.uploadedAt || '', bu = b.uploadedAt || '';
+        if (au !== bu) return bu.localeCompare(au);
+        return (a.name || '').localeCompare(b.name || '');
+      });
+      return `
+      <div class="tab-tools">
+        <span class="t2">${sorted.length} document${sorted.length === 1 ? '' : 's'} on file</span>
+        <button class="btn btn-sm btn-primary" data-upload>${I.plus} Upload document</button>
+      </div>
+      <div class="table-wrap"><table class="data"><thead><tr>
+        <th>Document</th><th>Category</th><th class="num col-opt">Size</th><th class="col-opt">Uploaded</th><th class="col-action"><span class="hide">Actions</span></th>
+      </tr></thead><tbody>
+      ${sorted.map((d) => {
+        const hasFile = !!d.storagePath;
+        const sub = hasFile && d.uploadedBy ? `<span class="t2">${esc(d.uploadedBy)}</span>` : (!hasFile ? '<span class="t2 muted">Placeholder — no file attached</span>' : '');
+        return `<tr${hasFile ? ` class="row-link" data-open="${d.id}" title="Open ${esc(d.name)}"` : ''}>
+          <td>${hasFile ? `<a class="id" href="#" data-open="${d.id}">${esc(d.name)}</a>` : esc(d.name)}${sub}</td>
+          <td>${esc(d.category || '—')}</td>
+          <td class="num col-opt">${hasFile ? AD.fmtBytes(d.sizeBytes) : dash}</td>
+          <td class="col-opt nowrap">${hasFile && d.uploadedAt ? T.fmtKey(d.uploadedAt.slice(0, 10)) : dash}</td>
+          <td class="col-action">
+            ${hasFile ? `<button class="btn btn-link" data-download="${d.id}">Download</button>` : ''}
+            <button class="btn btn-link btn-danger-ghost" data-delete="${d.id}">${hasFile ? 'Delete' : 'Remove'}</button>
+          </td></tr>`;
+      }).join('') || '<tr><td colspan="5" class="empty">No documents yet. Click “Upload document” to add one.</td></tr>'}
       </tbody></table></div>`;
+    }
 
     return `
       <div class="tab-tools"><span class="t2">Current and upcoming bookings — shared with Calendar and Tracker</span><a class="btn btn-sm btn-secondary" href="#/calendar?new=1&truck=${v.id}">${I.plus} New booking</a></div>

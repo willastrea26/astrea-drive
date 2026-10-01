@@ -86,5 +86,51 @@ AD.store = (function () {
 
   function on(fn) { listeners.add(fn); return () => listeners.delete(fn); }
 
-  return { load, all, get, insert, update, remove, log, on, uid };
+  // ---------- Document storage -----------------------------------------
+  // Files live in the private 'documents' bucket in Supabase Storage. The
+  // documents table row holds the metadata; the file is pulled through a
+  // short-lived signed URL only when someone asks to open or download it.
+  const BUCKET = 'documents';
+  const safeName = (name) => (name || 'file').replace(/[^\w.\-]+/g, '_').slice(0, 80);
+
+  async function uploadDocument(file, { vehicleId, name, category }) {
+    const path = `${vehicleId}/${uid('doc')}-${safeName(file.name)}`;
+    const up = await sb().storage.from(BUCKET).upload(path, file, { contentType: file.type || 'application/octet-stream', upsert: false });
+    if (up.error) throw up.error;
+    let who = '';
+    try { const { data } = await sb().auth.getUser(); who = (data && data.user && data.user.email) || ''; } catch (e) { /* leave blank */ }
+    const rec = {
+      vehicleId, name: name || file.name, category: category || '', placeholder: false,
+      storagePath: path, contentType: file.type || 'application/octet-stream',
+      sizeBytes: file.size || 0, uploadedAt: new Date().toISOString(), uploadedBy: who
+    };
+    try {
+      return await insert('documents', rec, 'doc');
+    } catch (dbErr) {
+      // Metadata insert failed — don't orphan the blob.
+      try { await sb().storage.from(BUCKET).remove([path]); } catch (e) { /* best effort */ }
+      throw dbErr;
+    }
+  }
+
+  /** Short-lived signed URL for a file in the private bucket. */
+  async function signDocumentUrl(storagePath, expiresInSec = 300) {
+    const { data, error } = await sb().storage.from(BUCKET).createSignedUrl(storagePath, expiresInSec);
+    if (error) throw error;
+    return data.signedUrl;
+  }
+
+  /** Remove the row AND the backing file (if any). Order: file first — if that
+   *  fails, we keep the row so the user sees something to retry; if it succeeds
+   *  but the row delete fails, the row is just an orphan metadata entry which
+   *  the UI already treats as "no file attached". */
+  async function removeDocument(doc) {
+    if (doc.storagePath) {
+      const { error } = await sb().storage.from(BUCKET).remove([doc.storagePath]);
+      if (error && error.statusCode !== '404' && error.statusCode !== 404) throw error;
+    }
+    return remove('documents', doc.id);
+  }
+
+  return { load, all, get, insert, update, remove, log, on, uid, uploadDocument, signDocumentUrl, removeDocument };
 })();
