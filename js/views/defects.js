@@ -5,7 +5,7 @@ AD.DEFECT_PRIORITIES = ['Low', 'Medium', 'High', 'Critical'];
 AD.DEFECT_STATUSES = ['Open', 'In progress', 'Resolved'];
 
 AD.defectForm = function (vehicleId) {
-  const { options, formData, showErrors, modal, toast } = AD.ui;
+  const { options, formData, showErrors, modal, toast, photoPicker } = AD.ui;
   const T = AD.time;
   const vehicles = AD.store.all('vehicles').slice().sort((a, b) => a.id.localeCompare(b.id));
   const today = T.todayKey();
@@ -17,6 +17,10 @@ AD.defectForm = function (vehicleId) {
           <select name="vehicleId">${options(vehicles.map((v) => [v.id, `${v.id} · ${v.rego} · ${v.type}`]), vehicleId, 'Select a vehicle')}</select></div>
         <div class="field full"><label>Description <span class="req">*</span></label>
           <textarea name="description" rows="3" placeholder="What’s wrong, where on the vehicle, and any safety impact"></textarea></div>
+        <div class="field full">
+          <label>Photos <span class="help" style="font-weight:400;color:var(--muted)">(optional, up to 8)</span></label>
+          <div id="defect-photos"></div>
+        </div>
         <div class="field"><label>Priority</label><select name="priority">${options(AD.DEFECT_PRIORITIES, 'Medium')}</select>
           <div class="help">Critical = unsafe to operate.</div></div>
         <div class="field"><label>Status</label><select name="status">${options(['Open', 'In progress'], 'Open')}</select></div>
@@ -34,6 +38,7 @@ AD.defectForm = function (vehicleId) {
       el.querySelector('[data-close]').onclick = close;
       const upd = () => el.querySelector('#oos-wrap').classList.toggle('hide', f.priority.value !== 'Critical');
       f.priority.addEventListener('change', upd);
+      const picker = photoPicker(el.querySelector('#defect-photos'), [], { label: 'Defect photo' });
       const saveBtn = el.querySelector('[data-save]');
       saveBtn.onclick = async () => {
         const d = formData(f);
@@ -47,7 +52,8 @@ AD.defectForm = function (vehicleId) {
         try {
           await AD.store.insert('defects', {
             vehicleId: d.vehicleId, description: d.description, priority: d.priority, status: d.status,
-            reportedBy: d.reportedBy, reportedDate: d.reportedDate || today, resolvedDate: null, resolutionNotes: ''
+            reportedBy: d.reportedBy, reportedDate: d.reportedDate || today, resolvedDate: null, resolutionNotes: '',
+            photos: picker.get(), resolvedPhotos: []
           }, 'def');
           if (d.priority === 'Critical' && d.markOOS) await AD.store.update('vehicles', d.vehicleId, { status: 'Out of service' });
           await AD.store.log(`Defect reported on ${d.vehicleId}: ${d.description.slice(0, 60)} (${d.priority})`, d.vehicleId);
@@ -64,7 +70,7 @@ AD.defectForm = function (vehicleId) {
 };
 
 AD.resolveDefect = function (defectId) {
-  const { esc, modal, toast } = AD.ui;
+  const { esc, modal, toast, photoPicker } = AD.ui;
   const T = AD.time;
   const d = AD.store.get('defects', defectId);
   if (!d) return;
@@ -72,19 +78,26 @@ AD.resolveDefect = function (defectId) {
     title: `Resolve defect — ${d.vehicleId}`,
     body: `
       <p class="modal-lede" style="color:var(--ink)">${esc(d.description)}</p>
-      <form novalidate><div class="field"><label>Resolution notes</label><textarea name="notes" rows="3" placeholder="What was done to fix it"></textarea></div></form>
+      <form novalidate>
+        <div class="field"><label>Resolution notes</label><textarea name="notes" rows="3" placeholder="What was done to fix it"></textarea></div>
+        <div class="field">
+          <label>Resolution photos <span class="help" style="font-weight:400;color:var(--muted)">(optional, up to 8)</span></label>
+          <div id="resolve-photos"></div>
+        </div>
+      </form>
       <div class="form-actions">
         <button class="btn btn-ghost" data-close type="button">Cancel</button>
         <button class="btn btn-primary" data-save type="button">${AD.icons.check} Mark as resolved</button>
       </div>`,
     onMount(el, close) {
       el.querySelector('[data-close]').onclick = close;
+      const picker = photoPicker(el.querySelector('#resolve-photos'), d.resolvedPhotos || [], { label: 'Resolution photo' });
       const saveBtn = el.querySelector('[data-save]');
       saveBtn.onclick = async () => {
         const notes = el.querySelector('textarea').value.trim();
         saveBtn.disabled = true;
         try {
-          await AD.store.update('defects', d.id, { status: 'Resolved', resolvedDate: T.todayKey(), resolutionNotes: notes });
+          await AD.store.update('defects', d.id, { status: 'Resolved', resolvedDate: T.todayKey(), resolutionNotes: notes, resolvedPhotos: picker.get() });
           await AD.store.log(`Defect resolved on ${d.vehicleId}: ${d.description.slice(0, 60)}`, d.vehicleId);
         } catch (err) {
           saveBtn.disabled = false;
@@ -96,6 +109,26 @@ AD.resolveDefect = function (defectId) {
       };
     }
   });
+};
+
+// Shared across the Defects page and the vehicle Defects tab: open the lightbox
+// with the defect's reported photos first, then any resolution photos. Does
+// nothing when there are no photos (callers hide the button in that case).
+AD.viewDefectPhotos = function (defectId, startWith = 'reported') {
+  const d = AD.store.get('defects', defectId);
+  if (!d) return;
+  const reported = (d.photos || []);
+  const resolved = (d.resolvedPhotos || []);
+  const all = reported.concat(resolved);
+  if (!all.length) return;
+  AD.ui.photoLightbox(all, startWith === 'resolved' ? reported.length : 0);
+};
+
+/** HTML for a small camera chip showing the defect's photo count (empty string if none). */
+AD.defectPhotoChip = function (d) {
+  const n = (d.photos || []).length + (d.resolvedPhotos || []).length;
+  if (!n) return '';
+  return `<button type="button" class="photo-chip" data-photos="${d.id}" title="${n} photo${n === 1 ? '' : 's'}" aria-label="View ${n} photo${n === 1 ? '' : 's'}">${AD.icons.camera}<span>${n}</span></button>`;
 };
 
 AD.views.defects = (function () {
@@ -150,7 +183,8 @@ AD.views.defects = (function () {
         ${!resolved ? `<button class="btn btn-link" data-resolve="${d.id}">Resolve</button>` : `<button class="btn btn-link" data-reopen="${d.id}">Reopen</button>`}`;
       return `<tr class="${resolved ? 'muted-row' : ''}">
       <td><a class="id" href="#/vehicle/${d.vehicleId}?tab=defects">${esc(d.vehicleId)}</a></td>
-      <td>${esc(d.description)}${resolved ? `<span class="t2">Resolved ${T.fmtKey(d.resolvedDate)}${d.resolutionNotes ? ' — ' + esc(d.resolutionNotes) : ''}</span>` : ''}
+      <td><span class="defect-desc">${esc(d.description)} ${AD.defectPhotoChip(d)}</span>
+        ${resolved ? `<span class="t2">Resolved ${T.fmtKey(d.resolvedDate)}${d.resolutionNotes ? ' — ' + esc(d.resolutionNotes) : ''}</span>` : ''}
         <span class="t2 only-mobile">${defectBadge(d.status)} · Reported ${T.fmtKey(d.reportedDate)} · ${esc(d.reportedBy)}</span>
         <span class="m-actions">${actions}</span></td>
       <td>${priorityBadge(d.priority, resolved)}</td>
@@ -159,6 +193,7 @@ AD.views.defects = (function () {
       <td class="col-action col-opt">${actions}</td></tr>`;
     }).join('') || '<tr><td colspan="6" class="empty">No defects match these filters.</td></tr>';
 
+    body.querySelectorAll('[data-photos]').forEach((b) => (b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); AD.viewDefectPhotos(b.dataset.photos); }));
     body.querySelectorAll('[data-resolve]').forEach((b) => (b.onclick = () => AD.resolveDefect(b.dataset.resolve)));
     body.querySelectorAll('[data-prog]').forEach((b) => (b.onclick = async () => {
       try {

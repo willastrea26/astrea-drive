@@ -35,6 +35,7 @@ AD.icons = (function () {
     pie: svg('<circle cx="12" cy="12" r="8.5"/><path d="M12 3.5V12l6 6"/>'),
     firstAid: svg('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M12 9v6M9 12h6"/>'),
     fireExt: svg('<rect x="7" y="9" width="8" height="12" rx="2.5"/><path d="M11 9V6a2 2 0 0 1 4 0v1"/><path d="M15 6h3"/><path d="M9.5 13.5h5"/>'),
-    garage: svg('<path d="M3 21V10.5L12 4l9 6.5V21"/><path d="M3 21h18"/><path d="M9 21v-7h6v7"/>')
+    garage: svg('<path d="M3 21V10.5L12 4l9 6.5V21"/><path d="M3 21h18"/><path d="M9 21v-7h6v7"/>'),
+    camera: svg('<path d="M4 8h3l2-2.5h6L17 8h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13" r="3.5"/>')
   };
 })();

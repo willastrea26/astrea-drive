@@ -219,6 +219,103 @@ AD.ui = (function () {
       return `<option value="${esc(v)}" ${String(v) === String(selected) ? 'selected' : ''}>${esc(l)}</option>`;
     }).join('');
 
+  /**
+   * Downscale an image file to at most `max` px on the longest edge and return
+   * a JPEG data URL. Rejects non-images and unreadable files via toast + the
+   * returned promise rejecting, so callers can abort cleanly.
+   */
+  function compressImage(file, max = 1200, quality = 0.78) {
+    return new Promise((resolve, reject) => {
+      if (!file || !/^image\//.test(file.type)) { toast('That file is not an image'); return reject(new Error('not-image')); }
+      const reader = new FileReader();
+      reader.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          const scale = Math.min(1, max / Math.max(img.width, img.height));
+          const c = document.createElement('canvas');
+          c.width = Math.round(img.width * scale);
+          c.height = Math.round(img.height * scale);
+          c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+          resolve(c.toDataURL('image/jpeg', quality));
+        };
+        img.onerror = () => { toast('That image could not be read'); reject(new Error('image-decode')); };
+        img.src = reader.result;
+      };
+      reader.onerror = () => { toast('That file could not be read'); reject(new Error('file-read')); };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  /**
+   * Multi-photo picker: renders inside `host`, wraps `initial` in a working
+   * array, and calls `onChange(array)` whenever photos are added or removed.
+   * Click a thumb to open the lightbox.
+   */
+  function photoPicker(host, initial, { onChange, label = 'Photos', max = 8 } = {}) {
+    const photos = Array.isArray(initial) ? initial.slice() : [];
+    host.innerHTML = `
+      <div class="photo-picker">
+        <div class="photo-grid" role="list"></div>
+        <button type="button" class="photo-add" data-add>${AD.icons.plus}<span>Add photo</span></button>
+        <input type="file" accept="image/*" multiple hidden>
+      </div>`;
+    const grid = host.querySelector('.photo-grid');
+    const input = host.querySelector('input[type=file]');
+    const addBtn = host.querySelector('[data-add]');
+
+    function render() {
+      grid.innerHTML = photos.map((src, i) => `
+        <div class="photo-thumb" role="listitem">
+          <img src="${esc(src)}" alt="${esc(label)} ${i + 1}" data-view="${i}">
+          <button type="button" class="photo-rm" data-rm="${i}" title="Remove" aria-label="Remove photo ${i + 1}">${AD.icons.x}</button>
+        </div>`).join('');
+      addBtn.disabled = photos.length >= max;
+      addBtn.classList.toggle('is-full', photos.length >= max);
+      grid.querySelectorAll('[data-view]').forEach((im) => im.onclick = () => photoLightbox(photos, Number(im.dataset.view)));
+      grid.querySelectorAll('[data-rm]').forEach((b) => b.onclick = () => { photos.splice(Number(b.dataset.rm), 1); render(); onChange && onChange(photos.slice()); });
+    }
+    addBtn.onclick = () => input.click();
+    input.onchange = async () => {
+      for (const f of Array.from(input.files || [])) {
+        if (photos.length >= max) { toast(`At most ${max} photos.`); break; }
+        try { photos.push(await compressImage(f)); } catch (e) { /* already toasted */ }
+      }
+      input.value = '';
+      render();
+      onChange && onChange(photos.slice());
+    };
+    render();
+    return { get: () => photos.slice(), set: (next) => { photos.length = 0; photos.push(...(next || [])); render(); } };
+  }
+
+  /** Simple lightbox: shows a photo array with prev/next arrows + close. */
+  function photoLightbox(photos, startIndex = 0) {
+    if (!photos || !photos.length) return;
+    let i = Math.max(0, Math.min(startIndex, photos.length - 1));
+    const root = $('#modal-root');
+    root.innerHTML = `
+      <div class="modal-backdrop" data-lb-close></div>
+      <div class="lightbox" role="dialog" aria-modal="true" aria-label="Photo viewer">
+        <button class="lb-btn lb-close" data-lb-close aria-label="Close">${AD.icons.x}</button>
+        ${photos.length > 1 ? `<button class="lb-btn lb-prev" data-lb-prev aria-label="Previous photo">${AD.icons.chevL}</button>` : ''}
+        <img class="lb-img" alt="">
+        ${photos.length > 1 ? `<button class="lb-btn lb-next" data-lb-next aria-label="Next photo">${AD.icons.chevR}</button>` : ''}
+        <span class="lb-count"></span>
+      </div>`;
+    root.classList.add('open');
+    document.body.classList.add('modal-open');
+    const img = $('.lb-img', root);
+    const count = $('.lb-count', root);
+    const draw = () => { img.src = photos[i]; count.textContent = photos.length > 1 ? `${i + 1} of ${photos.length}` : ''; };
+    const close = () => { root.classList.remove('open'); root.innerHTML = ''; document.body.classList.remove('modal-open'); document.removeEventListener('keydown', onKey); };
+    const onKey = (e) => { if (e.key === 'Escape') close(); else if (e.key === 'ArrowRight' && photos.length > 1) { i = (i + 1) % photos.length; draw(); } else if (e.key === 'ArrowLeft' && photos.length > 1) { i = (i - 1 + photos.length) % photos.length; draw(); } };
+    $$('[data-lb-close]', root).forEach((b) => b.addEventListener('click', close));
+    const nextBtn = $('[data-lb-next]', root); if (nextBtn) nextBtn.onclick = () => { i = (i + 1) % photos.length; draw(); };
+    const prevBtn = $('[data-lb-prev]', root); if (prevBtn) prevBtn.onclick = () => { i = (i - 1 + photos.length) % photos.length; draw(); };
+    document.addEventListener('keydown', onKey);
+    draw();
+  }
+
   function relTime(iso) {
     const mins = Math.round((Date.now() - Date.parse(iso)) / 60000);
     if (mins < 1) return 'Just now';
@@ -230,6 +327,7 @@ AD.ui = (function () {
 
   return {
     esc, $, $$, badge, vehicleBadge, priorityBadge, defectBadge, stateBadge, bookingBadge, scheduleBadge, BOOKING_LABEL,
-    pageHeader, sectionHead, dash, attentionFlags, labelFields, modal, closeModal, confirm, toast, formData, showErrors, options, relTime
+    pageHeader, sectionHead, dash, attentionFlags, labelFields, modal, closeModal, confirm, toast, formData, showErrors, options, relTime,
+    compressImage, photoPicker, photoLightbox
   };
 })();

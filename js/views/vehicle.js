@@ -114,6 +114,7 @@ AD.views.vehicle = (function () {
     tb.querySelector('[data-record]') && (tb.querySelector('[data-record]').onclick = () => AD.serviceForm(v.id));
     tb.querySelector('[data-report]') && (tb.querySelector('[data-report]').onclick = () => AD.defectForm(v.id));
     tb.querySelectorAll('[data-resolve]').forEach((b) => (b.onclick = () => AD.resolveDefect(b.dataset.resolve)));
+    tb.querySelectorAll('[data-photos]').forEach((b) => (b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); AD.viewDefectPhotos(b.dataset.photos); }));
     tb.querySelectorAll('[data-booking]').forEach((b) => (b.onclick = () => AD.go('calendar', { view: 'day', date: T.dateKey(AD.store.get('bookings', b.dataset.booking).start), open: b.dataset.booking })));
   }
 
@@ -244,7 +245,7 @@ AD.views.vehicle = (function () {
     if (tab === 'defects') return `
       <div class="tab-tools"><span class="t2">Open defects first</span><button class="btn btn-sm btn-secondary" data-report>${I.plus} Report defect</button></div>
       <div class="table-wrap"><table class="data"><thead><tr><th>Reported</th><th>Description</th><th>Priority</th><th>Status</th><th class="col-action"><span class="hide">Action</span></th></tr></thead><tbody>
-      ${defects.map((d) => `<tr class="${d.status === 'Resolved' ? 'muted-row' : ''}"><td class="nowrap">${T.fmtKey(d.reportedDate)}<span class="t2">${esc(d.reportedBy)}</span></td><td>${esc(d.description)}${d.status === 'Resolved' ? `<span class="t2">Resolved ${T.fmtKey(d.resolvedDate)}${d.resolutionNotes ? ' — ' + esc(d.resolutionNotes) : ''}</span>` : ''}</td><td>${priorityBadge(d.priority, d.status === 'Resolved')}</td><td>${defectBadge(d.status)}</td>
+      ${defects.map((d) => `<tr class="${d.status === 'Resolved' ? 'muted-row' : ''}"><td class="nowrap">${T.fmtKey(d.reportedDate)}<span class="t2">${esc(d.reportedBy)}</span></td><td><span class="defect-desc">${esc(d.description)} ${AD.defectPhotoChip(d)}</span>${d.status === 'Resolved' ? `<span class="t2">Resolved ${T.fmtKey(d.resolvedDate)}${d.resolutionNotes ? ' — ' + esc(d.resolutionNotes) : ''}</span>` : ''}</td><td>${priorityBadge(d.priority, d.status === 'Resolved')}</td><td>${defectBadge(d.status)}</td>
         <td class="col-action">${d.status !== 'Resolved' ? `<button class="btn btn-link" data-resolve="${d.id}">Resolve</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="5" class="empty">No defects reported.</td></tr>'}
       </tbody></table></div>`;
 

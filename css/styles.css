@@ -437,6 +437,39 @@ label.check { display: flex; gap: 8px; align-items: center; font-weight: 400; co
 .wk-pin-badge { position: absolute; top: -4px; right: -6px; background: var(--red); color: #fff; font-size: 11px; font-weight: 700; line-height: 1; padding: 3px 5px; border-radius: 999px; border: 2px solid #fff; }
 .wk-pop { font-size: 14px; }
 
+/* ============ Photo picker + lightbox (defects, extendable to other forms) ============ */
+.photo-picker { display: block; }
+.photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
+.photo-grid:empty { display: none; }
+.photo-thumb { position: relative; aspect-ratio: 1 / 1; border-radius: 8px; overflow: hidden; border: 1px solid var(--rule); background: var(--paper-2); }
+.photo-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; cursor: zoom-in; }
+.photo-rm { position: absolute; top: 4px; right: 4px; width: 24px; height: 24px; border-radius: 999px; border: 0; background: rgba(16,29,53,.72); color: #fff; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+.photo-rm:hover { background: rgba(16,29,53,.9); }
+.photo-rm .ico { width: 14px; height: 14px; }
+.photo-add { margin-top: 8px; display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; border-radius: 6px; border: 1px dashed var(--rule-strong); background: transparent; color: var(--ink-2); cursor: pointer; font: inherit; }
+.photo-add:hover { border-color: var(--blue); color: var(--blue); }
+.photo-add .ico { width: 16px; height: 16px; }
+.photo-add.is-full, .photo-add:disabled { opacity: .4; cursor: not-allowed; }
+.photo-grid:not(:empty) + .photo-add { margin-top: 8px; }
+
+/* Camera chip beside the defect description */
+.defect-desc { display: inline-flex; align-items: center; gap: 6px; }
+.photo-chip { display: inline-flex; align-items: center; gap: 3px; padding: 2px 7px 2px 5px; border-radius: 999px; border: 1px solid var(--rule); background: var(--paper-2); color: var(--ink-2); font-size: 12px; font-weight: 600; cursor: pointer; line-height: 1.3; vertical-align: baseline; }
+.photo-chip:hover { color: var(--blue); border-color: var(--blue); }
+.photo-chip .ico { width: 13px; height: 13px; }
+
+/* Lightbox: full-screen image viewer */
+.lightbox { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 32px 56px; pointer-events: none; }
+.lightbox > * { pointer-events: auto; }
+.lb-img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 6px; box-shadow: 0 20px 60px rgba(0,0,0,.6); }
+.lb-btn { position: absolute; width: 44px; height: 44px; border-radius: 999px; border: 0; background: rgba(16,29,53,.75); color: #fff; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.lb-btn:hover { background: rgba(16,29,53,.95); }
+.lb-btn .ico { width: 22px; height: 22px; }
+.lb-close { top: 20px; right: 20px; }
+.lb-prev { left: 20px; top: 50%; transform: translateY(-50%); }
+.lb-next { right: 20px; top: 50%; transform: translateY(-50%); }
+.lb-count { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); color: #fff; font-size: 13px; background: rgba(16,29,53,.75); padding: 4px 10px; border-radius: 999px; }
+
 /* ============ Utilities ============ */
 .muted { color: var(--muted); }
 .small { font-size: 13.5px; }
