@@ -1084,6 +1084,8 @@ input[type=text], input[type=number], input[type=date], input[type=datetime-loca
 .kpi-green { background: var(--mint-tint); color: var(--mint-strong); }
 .kpi-amber { background: var(--amber-tint); color: var(--amber); }
 .kpi-red { background: var(--red-tint); color: var(--red); }
+.kpi-violet { background: #f0ebfb; color: #6d35d4; }
+.kpi-teal { background: var(--teal-tint); color: var(--teal); }
 .strip-item .k { text-transform: uppercase; font-size: 12.5px; letter-spacing: .04em; font-weight: 700; }
 
 /* Driver avatar */
@@ -1552,6 +1554,8 @@ input::placeholder { color: var(--faint); }
 .kpi-green { background: #1d9c74; color: #fff; }
 .kpi-amber { background: #d9902a; color: #fff; }
 .kpi-red { background: #c93f3f; color: #fff; }
+.kpi-violet { background: #7a54cf; color: #fff; }
+.kpi-teal { background: #1a8597; color: #fff; }
 
 /* Dashboard bits that assumed a light ground */
 .sched-tab.on { background: var(--mint); color: var(--on-mint); }

@@ -231,14 +231,14 @@ AD.views.dashboard = (function () {
           foot: `${vac.length} vac trucks · ${vehicles.length - vac.length} other vehicles`
         })}
         ${donutCard({
-          go: ['fleet', { status: 'Available' }], icon: kpiIco(I.pie, 'blue'), label: 'Availability',
+          go: ['fleet', { status: 'Available' }], icon: kpiIco(I.checkCircle, 'green'), label: 'Availability',
           ring: donutRing(byStatus, `${Math.round((available.length / (vehicles.length || 1)) * 100)}%`, 'available'),
           legend: legendGrid(byStatus.filter(p => p.value), 'kpi-legend-stack'),
           foot: trendTag(utilTrend, 'vs last week')
         })}
         ${donutCard({
           go: ['maintenance', { filter: 'due' }],
-          icon: kpiIco(I.wrench, svcHealth.overdue ? 'red' : svcHealth.soon ? 'amber' : 'green'),
+          icon: kpiIco(I.wrench, 'amber'),
           label: 'Servicing',
           ring: donutRing(svcRing, svcDue, 'due'),
           legend: legendGrid(svcRing.filter((p) => p.value), 'kpi-legend-stack'),
@@ -247,7 +247,7 @@ AD.views.dashboard = (function () {
         })}
         ${donutCard({
           go: ['fleet', { flag: 'rego' }],
-          icon: kpiIco(I.calendar, regoHealth.overdue ? 'red' : regoHealth.soon ? 'amber' : 'green'),
+          icon: kpiIco(I.file, 'violet'),
           label: 'Registration',
           ring: donutRing(regoRing, regoDue, 'due'),
           legend: legendGrid(regoRing.filter((p) => p.value), 'kpi-legend-stack'),
