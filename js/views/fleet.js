@@ -213,7 +213,7 @@ AD.views.fleet = (function () {
     body.innerHTML = list.map((v) => {
       const alerts = isHired ? '' : AD.ui.attentionFlags(v);
       const [model, spec] = (v.model || '').split(' — ');
-      const art = AD.art.forVehicle(v, 44) || `<span class="fleet-thumb-icon">${I.truck}</span>`;
+      const art = AD.art.forVehicle(v, 52) || `<span class="fleet-thumb-icon">${I.truck}</span>`;
       const docCount = allDocs.filter((d) => d.vehicleId === v.id && d.storagePath).length;
       return `<tr class="row-link" data-id="${v.id}" title="Open ${v.id}">
         <td class="col-thumb"><span class="fleet-thumb">${art}</span></td>

@@ -28,7 +28,7 @@ window.AD = window.AD || {};
 AD.art = (function () {
   // 320x75 artwork, so height is width * 0.2344.
   const mark = (tone, x, y, w) =>
-    `<image href="assets/wordmark-${tone}.png" x="${x}" y="${y}" width="${w}" height="${(w * 0.2344).toFixed(2)}"/>`;
+    `<image href="assets/wordmark-${tone}.png" x="${x}" y="${y}" width="${w}" height="${(w * 0.2344).toFixed(2)}" preserveAspectRatio="xMidYMid meet"/>`;
 
   // Truck palettes (vac/ute/tip): body colour, panel stroke, trim stripe,
   // and the wordmark tone that reads against that body.
@@ -39,141 +39,87 @@ AD.art = (function () {
   const PAL_EXC_BLUE = { body: '#7cc4e8', stroke: '#4a91b8', mark: 'white' };
   const PAL_EXC_RED  = { body: '#c23b3b', stroke: '#7a2626', mark: 'white' };
 
-  const vacSymbol = (id, p) => `
+  const vacSymbol = (id, p) => {
+    const owned = p.mark === 'blue';
+    const tankFill = owned ? `url(#${id}-tank)` : p.body;
+    const tankStroke = owned ? '#7d8998' : p.stroke;
+
+    return `
   <symbol id="${id}" viewBox="0 0 120 60">
+    <defs>
+      <linearGradient id="${id}-tank" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#f7f9fb"/>
+        <stop offset=".18" stop-color="#c6ced8"/>
+        <stop offset=".5" stop-color="#eef2f5"/>
+        <stop offset=".82" stop-color="#9ba7b5"/>
+        <stop offset="1" stop-color="#d7dde4"/>
+      </linearGradient>
+      <pattern id="${id}-plate" width="3.2" height="3.2" patternUnits="userSpaceOnUse">
+        <path d="M-1 1 L1 -1 M0 3.2 L3.2 0 M2.2 4.2 L4.2 2.2" stroke="#ffffff" stroke-width=".35" opacity=".45"/>
+        <path d="M-1 2.2 L1 4.2 M0 0 L3.2 3.2 M2.2 -1 L4.2 1" stroke="#697687" stroke-width=".28" opacity=".28"/>
+      </pattern>
+    </defs>
+
     <!-- Ground shadow -->
     <ellipse cx="60" cy="54.6" rx="52" ry="3" fill="#101D35" opacity=".16"/>
 
-    <!-- === WHEELS (behind body) === -->
-    <!-- Front wheel cx=18 -->
-    <circle cx="18" cy="46.5" r="6.5" fill="#161b24"/>
-    <circle cx="18" cy="46.5" r="3.9" fill="#8a95a5"/>
-    <circle cx="18" cy="46.5" r="1.5" fill="#1a2130"/>
-    <circle cx="15.5" cy="44.5" r=".4" fill="#1a2130"/>
-    <circle cx="20.5" cy="44.5" r=".4" fill="#1a2130"/>
-    <circle cx="15.5" cy="48.5" r=".4" fill="#1a2130"/>
-    <circle cx="20.5" cy="48.5" r=".4" fill="#1a2130"/>
-    <circle cx="18" cy="42.8" r=".4" fill="#1a2130"/>
-    <circle cx="18" cy="50.2" r=".4" fill="#1a2130"/>
+    <!-- Wheels and heavy chassis -->
+    <rect x="6" y="39.5" width="110" height="4.2" rx="1" fill="#252d3a"/>
+    <g fill="#141a23"><circle cx="20" cy="46.5" r="7.2"/><circle cx="83" cy="46.5" r="7.2"/><circle cx="100" cy="46.5" r="7.2"/></g>
+    <g fill="#8d98a6"><circle cx="20" cy="46.5" r="4.1"/><circle cx="83" cy="46.5" r="4.1"/><circle cx="100" cy="46.5" r="4.1"/></g>
+    <g fill="#273140"><circle cx="20" cy="46.5" r="1.6"/><circle cx="83" cy="46.5" r="1.6"/><circle cx="100" cy="46.5" r="1.6"/></g>
+    <path d="M76 41.5 V45 M92 41.5 V45 M109 40.5 V45" stroke="#151b24" stroke-width="1.5"/>
 
-    <!-- Rear wheel 1 cx=88 -->
-    <circle cx="88" cy="46.5" r="6.5" fill="#161b24"/>
-    <circle cx="88" cy="46.5" r="3.9" fill="#8a95a5"/>
-    <circle cx="88" cy="46.5" r="1.5" fill="#1a2130"/>
-    <circle cx="85.5" cy="44.5" r=".4" fill="#1a2130"/>
-    <circle cx="90.5" cy="44.5" r=".4" fill="#1a2130"/>
-    <circle cx="85.5" cy="48.5" r=".4" fill="#1a2130"/>
-    <circle cx="90.5" cy="48.5" r=".4" fill="#1a2130"/>
-    <circle cx="88" cy="42.8" r=".4" fill="#1a2130"/>
-    <circle cx="88" cy="50.2" r=".4" fill="#1a2130"/>
+    <!-- Stainless vacuum tank and lower checkerplate cabinets -->
+    <rect x="34" y="13.8" width="79" height="27" rx="12.5" fill="${tankFill}" stroke="${tankStroke}" stroke-width="1"/>
+    ${owned ? `<rect x="36" y="15.1" width="73" height="23.8" rx="11" fill="url(#${id}-plate)" opacity=".38"/>` : ''}
+    <path d="M46 15 V39 M94 15 V39" stroke="${tankStroke}" stroke-width="1.1" opacity=".72"/>
+    <path d="M39 18.1 H104" stroke="#ffffff" stroke-width="1.2" opacity=".55"/>
+    <rect x="39" y="33.5" width="56" height="7.5" rx="1.3" fill="${owned ? '#aeb7c2' : p.body}" stroke="${tankStroke}" stroke-width=".7"/>
+    ${owned ? `<rect x="40" y="34.2" width="54" height="6" rx=".8" fill="url(#${id}-plate)" opacity=".62"/>` : ''}
+    <path d="M52 34 V40.5 M67 34 V40.5 M82 34 V40.5" stroke="${tankStroke}" stroke-width=".55" opacity=".65"/>
 
-    <!-- Rear wheel 2 cx=103 -->
-    <circle cx="103" cy="46.5" r="6.5" fill="#161b24"/>
-    <circle cx="103" cy="46.5" r="3.9" fill="#8a95a5"/>
-    <circle cx="103" cy="46.5" r="1.5" fill="#1a2130"/>
-    <circle cx="100.5" cy="44.5" r=".4" fill="#1a2130"/>
-    <circle cx="105.5" cy="44.5" r=".4" fill="#1a2130"/>
-    <circle cx="100.5" cy="48.5" r=".4" fill="#1a2130"/>
-    <circle cx="105.5" cy="48.5" r=".4" fill="#1a2130"/>
-    <circle cx="103" cy="42.8" r=".4" fill="#1a2130"/>
-    <circle cx="103" cy="50.2" r=".4" fill="#1a2130"/>
+    <!-- Rear tank door, guard rail and vacuum outlet assembly -->
+    <ellipse cx="110" cy="27.2" rx="5.5" ry="11.7" fill="${owned ? '#b8c1cc' : p.body}" stroke="${tankStroke}" stroke-width="1"/>
+    ${owned ? `<ellipse cx="110" cy="27.2" rx="4.2" ry="9.6" fill="url(#${id}-plate)" opacity=".55"/>` : ''}
+    <circle cx="110" cy="30" r="1.8" fill="#5e6a79"/>
+    <path d="M110 31.5 C114 34 115 39 111 42" fill="none" stroke="#151b24" stroke-width="2.2" stroke-linecap="round"/>
+    <path d="M105 13 V8 H114 V39" fill="none" stroke="#3f4a59" stroke-width="1"/>
+    <rect x="107" y="40" width="10" height="4" rx=".6" fill="#3b4554"/>
+    <path d="M107.5 40.5 H116.5 M110 40.5 V43.5 M113 40.5 V43.5" stroke="#f6c845" stroke-width=".8"/>
+    <rect x="114" y="18" width="1.6" height="3.8" rx=".4" fill="#cf4545"/>
 
-    <!-- === CHASSIS FRAME === -->
-    <rect x="5" y="39.5" width="110" height="2" rx=".4" fill="${p.stroke}"/>
+    <!-- White cab, matching the real Astrea truck -->
+    <path d="M5 42 V27 Q5 23 8 19 L12.5 12.5 Q14 10.5 17 10.5 H30 Q33.5 10.5 33.5 14 V42 H28 A8 8 0 0 0 12 42 Z"
+          fill="${p.body}" stroke="${p.stroke}" stroke-width="1" stroke-linejoin="round"/>
+    <path d="M9.5 22 L13.5 15 Q14.2 13.7 16 13.7 H23.5 V22 Z" fill="#26344f"/>
+    <rect x="25" y="13.7" width="6.2" height="8.3" rx=".8" fill="#26344f"/>
+    <path d="M24 13.7 V22" stroke="#17243a" stroke-width="1"/>
+    <path d="M20 23 V40" stroke="${p.stroke}" stroke-width=".65"/>
+    <rect x="22" y="28.5" width="5" height="1" rx=".4" fill="${p.stroke}"/>
+    <path d="M10 18 L6.5 17 L6 19.5 L9 20" fill="#293240"/>
+    <rect x="3" y="38.5" width="8" height="4" rx="1" fill="#28313f"/>
+    <path d="M5 31.5 L8.5 30.8 V34.5 L5 35.5 Z" fill="#eef3f7"/>
+    <rect x="5" y="36" width="2.5" height="1" rx=".3" fill="#f4c54c"/>
+    <rect x="29.5" y="7" width="1.4" height="4" rx=".4" fill="#4a5568"/>
+    <ellipse cx="30.2" cy="7" rx="1" ry=".35" fill="#f3a51c"/>
+    <!-- Astrea A on the cab door, as on the reference truck -->
+    <path d="M13.5 36.7 L17 27.5 L20.5 36.7 M15.1 33 H18.9" fill="none" stroke="${p.mark === 'blue' ? '#2463EB' : '#ffffff'}" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>
 
-    <!-- Mud flaps -->
-    <rect x="25.5" y="40" width="1.5" height="5" rx=".3" fill="#161b24" opacity=".6"/>
-    <rect x="94.5" y="40" width="1.5" height="5" rx=".3" fill="#161b24" opacity=".6"/>
+    <!-- Long Cappellotto-style overhead boom and hoses -->
+    <path d="M34 10 L43 4.5 L92 4.5 L96 8.5 L92 11 L43 9 L36 14 Z" fill="#aab4c0" stroke="#5d6877" stroke-width=".9" stroke-linejoin="round"/>
+    <path d="M42 6.2 H91" stroke="#eef2f5" stroke-width="1" opacity=".8"/>
+    <path d="M90 5 L96 12 L95 16" fill="none" stroke="#343e4c" stroke-width="2.2" stroke-linecap="round"/>
+    <circle cx="94" cy="8.5" r="2.2" fill="#596574" stroke="#303947" stroke-width=".7"/>
+    <path d="M92 3.3 C77 .5 53 .5 39 3.5 C34 4.8 32 8 32 12.5" fill="none" stroke="#151b24" stroke-width="1.7" stroke-linecap="round"/>
+    <path d="M87 2.4 C71 0 52 1 42 3" fill="none" stroke="#4b5665" stroke-width=".8" stroke-linecap="round"/>
+    <path d="M34 9 C31 13 31 16 34 20" fill="none" stroke="#171d26" stroke-width="2.4" stroke-linecap="round"/>
+    <rect x="32" y="18" width="4" height="5" rx="1" fill="#3e4856"/>
 
-    <!-- Front bumper step -->
-    <rect x="3.5" y="37.5" width="3" height="4" rx=".5" fill="#4a5568"/>
-    <rect x="3.5" y="37.5" width="3" height="1" rx=".3" fill="#5a6577"/>
-
-    <!-- Rear bumper guard -->
-    <rect x="113.5" y="30" width="2" height="11.5" rx=".4" fill="#4a5568"/>
-
-    <!-- === VACUUM TANK (cylindrical) === -->
-    <rect x="31" y="15" width="83" height="24" rx="12" fill="${p.body}" stroke="${p.stroke}" stroke-width=".9"/>
-
-    <!-- Tank cylindrical highlight (top) -->
-    <rect x="42" y="16.5" width="62" height="2.5" rx="1" fill="#ffffff" opacity=".07"/>
-
-    <!-- Tank cylindrical shadow (bottom) -->
-    <rect x="42" y="35.5" width="62" height="2.5" rx="1" fill="#000000" opacity=".05"/>
-
-    <!-- Tank banding straps -->
-    <rect x="47" y="15.5" width="1" height="23" rx=".3" fill="${p.trim}" opacity=".55"/>
-    <rect x="64" y="15.5" width="1" height="23" rx=".3" fill="${p.trim}" opacity=".55"/>
-    <rect x="81" y="15.5" width="1" height="23" rx=".3" fill="${p.trim}" opacity=".55"/>
-    <rect x="98" y="15.5" width="1" height="23" rx=".3" fill="${p.trim}" opacity=".55"/>
-
-    <!-- Tank horizontal trim stripe -->
-    <rect x="32" y="26" width="81" height="1.8" rx=".6" fill="${p.trim}"/>
-
-    <!-- Rear outlet valve -->
-    <circle cx="113" cy="27" r="2" fill="${p.stroke}" opacity=".4"/>
-    <circle cx="113" cy="27" r=".9" fill="#4a5568"/>
-
-    <!-- Tank access ladder rungs -->
-    <rect x="58" y="37" width="3" height=".9" rx=".3" fill="${p.stroke}" opacity=".4"/>
-    <rect x="58" y="34.5" width="3" height=".9" rx=".3" fill="${p.stroke}" opacity=".4"/>
-    <rect x="58" y="32" width="3" height=".9" rx=".3" fill="${p.stroke}" opacity=".4"/>
-
-    <!-- === CAB BODY (with front wheel arch cutout) === -->
-    <path d="M29 41.5 L26 41.5 A8 4 0 0 0 10 41.5 L5 41.5 L5 15 Q5 13 7.5 13 L27 13 Q29 13 29 15 Z" fill="${p.body}" stroke="${p.stroke}" stroke-width=".9" stroke-linejoin="round"/>
-
-    <!-- Cab windshield (front pane) -->
-    <path d="M6.5 15 Q6.5 14.2 7.5 14.2 L14 14.2 L14 25.5 L6.5 25.5 Z" fill="#26344f"/>
-
-    <!-- Cab side window -->
-    <rect x="15.5" y="14.2" width="12" height="11.3" rx=".5" fill="#26344f"/>
-
-    <!-- B-pillar divider -->
-    <rect x="14.5" y="14.2" width="1" height="11.3" fill="#2a3f55"/>
-
-    <!-- Door panel line -->
-    <line x1="21" y1="25.5" x2="21" y2="39" stroke="${p.stroke}" stroke-width=".7"/>
-
-    <!-- Door handle -->
-    <rect x="22" y="30.5" width="4.5" height="1.2" rx=".5" fill="${p.stroke}"/>
-
-    <!-- Side mirror stub -->
-    <rect x="3.5" y="18" width="2" height="3.5" rx=".6" fill="${p.stroke}"/>
-
-    <!-- Headlight -->
-    <path d="M5 32.5 L3.5 33.5 L3.5 36.5 L5 37.5 Z" fill="#f0f4f8"/>
-
-    <!-- Indicator light -->
-    <rect x="5" y="30.5" width="1.5" height="1.5" rx=".3" fill="#f5a623"/>
-
-    <!-- Taillight (rear of tank) -->
-    <rect x="114" y="20" width="1.5" height="3.5" rx=".5" fill="#c93f3f"/>
-
-    <!-- Cab vent grille -->
-    <line x1="7.5" y1="28" x2="7.5" y2="31" stroke="${p.stroke}" stroke-width=".4" opacity=".45"/>
-    <line x1="8.7" y1="28" x2="8.7" y2="31" stroke="${p.stroke}" stroke-width=".4" opacity=".45"/>
-    <line x1="9.9" y1="28" x2="9.9" y2="31" stroke="${p.stroke}" stroke-width=".4" opacity=".45"/>
-
-    <!-- Exhaust stack on cab -->
-    <rect x="27" y="9.5" width="1.2" height="4.5" rx=".4" fill="#4a5568"/>
-    <ellipse cx="27.6" cy="9.5" rx=".8" ry=".3" fill="#4a5568"/>
-
-    <!-- === BOOM AND SUCTION HOSE === -->
-    <!-- Boom mast (vertical post) -->
-    <rect x="31" y="5" width="2.2" height="11" rx=".6" fill="#4a5568"/>
-
-    <!-- Boom pivot head -->
-    <circle cx="32.1" cy="5" r="1.5" fill="#4a5568"/>
-
-    <!-- Suction hose curving over -->
-    <path d="M32 5 C38 1 50 1 56 5.5 Q59 8 58 12.5" stroke="#4a5568" stroke-width="1.8" fill="none" stroke-linecap="round"/>
-
-    <!-- Hose nozzle -->
-    <rect x="56.5" y="11.5" width="3" height="5" rx=".8" fill="#4a5568"/>
-
-    <!-- === WORDMARK === -->
-    ${mark(p.mark, 36, 20, 10)}
+    <!-- Large, legible Astrea tank branding -->
+    ${mark(p.mark, 48, 21.2, 31)}
   </symbol>`;
+  };
 
   const uteSymbol = (id, p) => `
   <symbol id="${id}" viewBox="0 0 120 60">
@@ -250,7 +196,7 @@ AD.art = (function () {
     <rect x="104" y="42" width="2" height="2.5" rx=".3" fill="#2a3140" opacity=".6"/>
 
     <!-- wordmark on front door -->
-    ${mark(p.mark, 36, 35, 11)}
+    ${mark(p.mark, 32.8, 33.8, 16.5)}
 
     <!-- wheels: 3-layer (tire / mid ring / hub) -->
     <g fill="#161b24"><circle cx="28" cy="46.5" r="8"/><circle cx="94" cy="46.5" r="8"/></g>
@@ -335,7 +281,7 @@ AD.art = (function () {
     </g>
 
     <!-- Wordmark on cab door -->
-    ${mark(p.mark, 10, 29, 21)}
+    ${mark(p.mark, 8.5, 28.5, 24)}
 
     <!-- Front bumper/step -->
     <rect x="3" y="39.5" width="7" height="4.5" rx="1" fill="#1d2330"/>
@@ -538,7 +484,7 @@ AD.art = (function () {
     <circle cx="62" cy="40.5" r="2.2" fill="${p.stroke}" opacity=".25"/>
 
     <!-- Wordmark on engine hood -->
-    ${mark(p.mark, 68, 32, 12)}
+    ${mark(p.mark, 66, 31.2, 20)}
 
     <!-- === BOOM ARM (beam shape) === -->
     <path d="M44 23.5 L19 7.5 L17 10 L42 27 Z" fill="${p.body}" stroke="${p.stroke}" stroke-width=".7" stroke-linejoin="round"/>
@@ -691,7 +637,7 @@ AD.art = (function () {
     <circle cx="103" cy="46.5" r="1.8" fill="#1a2130"/>
 
     <!-- Wordmark on trailer body -->
-    ${mark(p.mark, 52, 36, 14)}
+    ${mark(p.mark, 47, 35, 24)}
   </symbol>`;
 
   // Sedan silhouette (Astrea Car / hired car). Blue variant for owned, red for hired.
@@ -707,7 +653,7 @@ AD.art = (function () {
     <path d="M59 29 L59 42 M70 29 L70 42" stroke="${stroke}" stroke-width=".7"/>
     <rect x="48" y="34.3" width="6" height="1.4" rx=".6" fill="${stroke}"/>
     <rect x="75" y="34.3" width="6" height="1.4" rx=".6" fill="${stroke}"/>
-    ${mark(mark_tone, 42, 36, 14)}
+    ${mark(mark_tone, 39.5, 34.8, 18)}
     <path d="M 9 36.5 L 15 36.3 L 15.5 38 L 10.5 39.5 Z" fill="#f0f4f8"/>
     <path d="M 106 36.5 L 112 37 L 112 39.5 L 106.5 39.5 Z" fill="#c93f3f"/>
     <g fill="#161b24"><circle cx="25" cy="46.5" r="8"/><circle cx="95" cy="46.5" r="8"/></g>
@@ -746,7 +692,7 @@ AD.art = (function () {
   /** Vac truck with the fleet number on the tank (owned fleet only). */
   function vac(number, width = 88, label = '') {
     return `${open(width, label)}<use href="#art-vac"/>
-      <text x="75" y="27.4" class="vac-num" text-anchor="middle" dominant-baseline="central">${number}</text></svg>`;
+      <text x="91" y="28.3" class="vac-num" text-anchor="middle" dominant-baseline="central">${number}</text></svg>`;
   }
 
   const plain = (id) => (width = 88, label = '') => `${open(width, label)}<use href="#${id}"/></svg>`;

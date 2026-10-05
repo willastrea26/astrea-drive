@@ -233,10 +233,10 @@ table.data { width: 100%; border-collapse: collapse; font-size: 14.5px; }
 .data tbody td.truck-cell.span { background: var(--paper) !important; }
 .data .id { font-weight: 700; font-size: 15px; color: var(--ink); white-space: nowrap; }
 .data a.id:hover { color: var(--blue); text-decoration: none; }
-.col-thumb { width: 58px; padding-right: 4px !important; }
+.col-thumb { width: 66px; padding-right: 4px !important; }
 /* Fleet rows: vertically centre every cell so one tall column doesn't push the rest off-centre */
 #f-body td { vertical-align: middle; }
-.fleet-thumb { display: block; width: 50px; }
+.fleet-thumb { display: block; width: 58px; }
 .fleet-thumb .veh-svg { display: block; width: 100%; height: auto; }
 .fleet-thumb-icon { display: flex; align-items: center; justify-content: center; width: 100%; aspect-ratio: 2 / 1; color: var(--muted); }
 .fleet-thumb-icon .ico { width: 20px; height: 20px; }
@@ -855,7 +855,7 @@ input[type=text], input[type=number], input[type=date], input[type=datetime-loca
 .tm-wrap:focus-visible { outline: none; }
 .tm { position: relative; width: 88px; height: 64px; }
 .tm .veh-svg { position: absolute; left: 0; top: 0; overflow: visible; filter: drop-shadow(0 1px 1.5px rgba(16, 29, 53, .28)); }
-.vac-num { font-family: var(--font-display); font-weight: 800; font-size: 21px; fill: #101d35; letter-spacing: -0.4px; }
+.vac-num { font-family: var(--font-display); font-weight: 800; font-size: 14px; fill: #101d35; letter-spacing: -0.25px; paint-order: stroke; stroke: rgba(255, 255, 255, .75); stroke-width: .7px; }
 .tm-stem { position: absolute; left: 43px; top: 43px; width: 2px; height: 12px; background: #101d35; opacity: .5; border-radius: 1px; }
 .tm-anchor { position: absolute; left: 39px; top: 55px; width: 10px; height: 10px; border-radius: 50%; background: #101d35; box-shadow: 0 0 0 2px #fff; }
 .tm-status {
