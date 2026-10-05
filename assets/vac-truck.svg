@@ -48,8 +48,6 @@
   <rect x="5" y="36" width="2.5" height="1" rx=".3" fill="#f4c54c"/>
   <rect x="29.5" y="7" width="1.4" height="4" rx=".4" fill="#4a5568"/>
   <ellipse cx="30.2" cy="7" rx="1" ry=".35" fill="#f3a51c"/>
-  <path d="M13.5 36.7L17 27.5 20.5 36.7M15.1 33H18.9" fill="none" stroke="#2463eb" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>
-
   <path d="M34 10L43 4.5H92L96 8.5 92 11 43 9 36 14Z" fill="#aab4c0" stroke="#5d6877" stroke-width=".9"/>
   <path d="M42 6.2H91" stroke="#eef2f5" opacity=".8"/>
   <path d="M90 5L96 12 95 16" fill="none" stroke="#343e4c" stroke-width="2.2" stroke-linecap="round"/>

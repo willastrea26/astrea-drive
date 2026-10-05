@@ -103,9 +103,6 @@ AD.art = (function () {
     <rect x="5" y="36" width="2.5" height="1" rx=".3" fill="#f4c54c"/>
     <rect x="29.5" y="7" width="1.4" height="4" rx=".4" fill="#4a5568"/>
     <ellipse cx="30.2" cy="7" rx="1" ry=".35" fill="#f3a51c"/>
-    <!-- Astrea A on the cab door, as on the reference truck -->
-    <path d="M13.5 36.7 L17 27.5 L20.5 36.7 M15.1 33 H18.9" fill="none" stroke="${p.mark === 'blue' ? '#2463EB' : '#ffffff'}" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>
-
     <!-- Long Cappellotto-style overhead boom and hoses -->
     <path d="M34 10 L43 4.5 L92 4.5 L96 8.5 L92 11 L43 9 L36 14 Z" fill="#aab4c0" stroke="#5d6877" stroke-width=".9" stroke-linejoin="round"/>
     <path d="M42 6.2 H91" stroke="#eef2f5" stroke-width="1" opacity=".8"/>
