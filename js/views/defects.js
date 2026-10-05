@@ -254,12 +254,33 @@ AD.views.defects = (function () {
     const vehicles = AD.store.all('vehicles').map((v) => v.id).sort();
     const open = L.openDefects();
     const urgent = open.filter((d) => d.priority === 'Critical' || d.priority === 'High').length;
+    const allDefects = AD.store.all('defects');
+    const statusCounts = {
+      Open: allDefects.filter((d) => d.status === 'Open').length,
+      'In progress': allDefects.filter((d) => d.status === 'In progress').length,
+      Resolved: allDefects.filter((d) => d.status === 'Resolved').length
+    };
+    const totalDefects = allDefects.length;
+    const statusVisual = [
+      ['Open', 'open'], ['In progress', 'progress'], ['Resolved', 'resolved']
+    ].map(([label, tone]) => {
+      const count = statusCounts[label];
+      const pct = totalDefects ? Math.round((count / totalDefects) * 100) : 0;
+      return `<button type="button" class="defect-status-item defect-status-${tone}${st.status === label ? ' is-active' : ''}" data-status-view="${label}" aria-pressed="${st.status === label}">
+        <span class="defect-status-label"><i></i>${label}</span><strong>${count}</strong>
+        <span class="defect-status-track"><i style="width:${pct}%"></i></span><small>${pct}% of all defects</small>
+      </button>`;
+    }).join('');
     el.innerHTML = `
       ${pageHeader({
         title: 'Defects',
         sub: `${open.length} open${urgent ? ` · <span class="flag flag-red">${urgent} high or critical</span>` : ''}`,
         actions: `<button class="btn btn-primary" id="new-def">${I.plus} Report defect</button>`
       })}
+      <section class="defect-status-summary" aria-label="Defects by status">
+        <div class="defect-status-heading"><div><h2>Defects by status</h2><span>Current register breakdown</span></div><b>${totalDefects} total</b></div>
+        <div class="defect-status-items">${statusVisual}</div>
+      </section>
       <div class="toolbar">
         <select id="d-status" aria-label="Status">${options([['open', 'Open and in progress'], ['Open', 'Open'], ['In progress', 'In progress'], ['Resolved', 'Resolved'], ['all', 'All statuses']], st.status)}</select>
         <select id="d-priority" aria-label="Priority">${options(AD.DEFECT_PRIORITIES, st.priority, 'All priorities')}</select>
@@ -268,8 +289,20 @@ AD.views.defects = (function () {
       </div>
       <div class="defect-grid" id="d-grid" role="list" aria-live="polite"></div>`;
     el.querySelector('#new-def').onclick = () => AD.defectForm(st.vehicle);
+    const syncStatusVisual = () => el.querySelectorAll('[data-status-view]').forEach((b) => {
+      const active = st.status === b.dataset.statusView;
+      b.classList.toggle('is-active', active);
+      b.setAttribute('aria-pressed', String(active));
+    });
     [['#d-status', 'status'], ['#d-priority', 'priority'], ['#d-vehicle', 'vehicle']].forEach(([s, k]) =>
-      el.querySelector(s).addEventListener('change', (e) => { st[k] = e.target.value; AD.setParams(st); rows(); }));
+      el.querySelector(s).addEventListener('change', (e) => { st[k] = e.target.value; AD.setParams(st); rows(); syncStatusVisual(); }));
+    el.querySelectorAll('[data-status-view]').forEach((b) => (b.onclick = () => {
+      st.status = b.dataset.statusView;
+      el.querySelector('#d-status').value = st.status;
+      AD.setParams(st);
+      rows();
+      syncStatusVisual();
+    }));
     rows();
     if (params.new) { AD.setParams(Object.assign({}, st)); AD.defectForm(''); }
   }

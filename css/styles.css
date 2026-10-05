@@ -467,6 +467,32 @@ label.check { display: flex; gap: 8px; align-items: center; font-weight: 400; co
 .photo-chip .ico { width: 13px; height: 13px; }
 
 /* Defect register — visual tiles keep the evidence photo and severity primary. */
+.defect-status-summary {
+  margin-bottom: 18px; padding: 18px; border: 1px solid var(--rule); border-radius: var(--r-lg);
+  background: var(--paper); box-shadow: var(--shadow-1);
+}
+.defect-status-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
+.defect-status-heading h2 { margin: 0 0 2px; color: var(--ink); font-size: 16px; }
+.defect-status-heading span { color: var(--muted); font-size: 12.5px; }
+.defect-status-heading b { color: var(--ink-2); font-size: 13px; }
+.defect-status-items { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.defect-status-item {
+  --status-color: var(--slate);
+  min-width: 0; display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 7px 10px;
+  padding: 12px; border: 1px solid var(--rule); border-radius: var(--r); background: var(--paper-2);
+  color: var(--ink); text-align: left; cursor: pointer; transition: border-color .15s, box-shadow .15s, transform .15s;
+}
+.defect-status-item:hover { border-color: var(--status-color); transform: translateY(-1px); }
+.defect-status-item.is-active { border-color: var(--status-color); box-shadow: 0 0 0 2px color-mix(in srgb, var(--status-color) 20%, transparent); }
+.defect-status-open { --status-color: #d9902a; }
+.defect-status-progress { --status-color: var(--blue); }
+.defect-status-resolved { --status-color: var(--green); }
+.defect-status-label { min-width: 0; display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 650; }
+.defect-status-label i { flex: 0 0 auto; width: 9px; height: 9px; border-radius: 50%; background: var(--status-color); }
+.defect-status-item strong { color: var(--ink); font-size: 21px; line-height: 1; }
+.defect-status-track { grid-column: 1 / -1; height: 6px; overflow: hidden; border-radius: 999px; background: var(--rule); }
+.defect-status-track i { display: block; height: 100%; border-radius: inherit; background: var(--status-color); }
+.defect-status-item small { grid-column: 1 / -1; color: var(--muted); font-size: 11.5px; }
 .defect-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
@@ -602,6 +628,8 @@ label.check { display: flex; gap: 8px; align-items: center; font-weight: 400; co
 .defect-grid-empty b { color: var(--ink-2); }
 
 @media (max-width: 640px) {
+  .defect-status-summary { padding: 14px; }
+  .defect-status-items { grid-template-columns: 1fr; }
   .defect-grid { grid-template-columns: 1fr; gap: 14px; }
   .defect-card-media { aspect-ratio: 4 / 3; }
   .defect-card-desc { min-height: 0; -webkit-line-clamp: 4; }
