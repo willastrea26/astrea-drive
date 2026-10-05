@@ -32,7 +32,8 @@ AD.serviceForm = function (vehicleId) {
         <div class="field"><label>Cost (AUD, inc. GST)</label><input type="number" name="cost" min="0" step="0.01" placeholder="0.00"></div>
         <div class="field"><label>&nbsp;</label><div class="help" id="svc-hint"></div></div>
         <div class="field"><label>Next service date <span class="req">*</span></label><input type="date" name="nextServiceDate"></div>
-        <div class="field"><label>Next service odometer (km) <span class="req">*</span></label><input type="number" name="nextServiceKm" min="0" step="1"></div>
+        <div class="field"><label>Next service odometer (km)</label><input type="number" name="nextServiceKm" min="0" step="1">
+          <label class="check"><input type="checkbox" name="nextServiceKmNA"> N/A — service by date only</label></div>
         <div class="field full"><label>Notes</label><textarea name="notes" rows="2" placeholder="Work carried out, parts replaced…"></textarea></div>
         <div class="field full hide" id="ret-wrap"><label class="check"><input type="checkbox" name="returnAvail" checked> Set vehicle status back to <b>Available</b> (currently In workshop)</label></div>
       </form>
@@ -43,6 +44,17 @@ AD.serviceForm = function (vehicleId) {
     onMount(el, close) {
       const f = el.querySelector('form');
       el.querySelector('[data-close]').onclick = close;
+      const syncKm = () => {
+        f.nextServiceKm.disabled = f.nextServiceKmNA.checked;
+        if (f.nextServiceKmNA.checked) f.nextServiceKm.value = '';
+      };
+      f.nextServiceKmNA.addEventListener('change', () => {
+        syncKm();
+        if (!f.nextServiceKmNA.checked && !f.nextServiceKm.value && f.odometer.value) {
+          const v = AD.store.get('vehicles', f.vehicleId.value);
+          if (v) f.nextServiceKm.value = Number(f.odometer.value) + (v.serviceIntervalKm || 10000);
+        }
+      });
 
       const mapEl = el.querySelector('#svc-map');
       map = AD.maps.create(mapEl, mapEl.parentElement, { scrollWheelZoom: true });
@@ -117,8 +129,12 @@ AD.serviceForm = function (vehicleId) {
         const { y, m, d: dd } = T.parseKey(d);
         const next = new Date(Date.UTC(y, m - 1 + (v.serviceIntervalMonths || 6), dd));
         f.nextServiceDate.value = next.toISOString().slice(0, 10);
-        f.nextServiceKm.value = v.odometer + (v.serviceIntervalKm || 10000);
-        el.querySelector('#svc-hint').textContent = `Interval: every ${(v.serviceIntervalKm || 10000).toLocaleString('en-AU')} km or ${v.serviceIntervalMonths || 6} months. Current odometer ${L.fmtKm(v.odometer)}.`;
+        f.nextServiceKmNA.checked = v.nextServiceKm == null;
+        f.nextServiceKm.value = f.nextServiceKmNA.checked ? '' : v.odometer + (v.serviceIntervalKm || 10000);
+        syncKm();
+        el.querySelector('#svc-hint').textContent = f.nextServiceKmNA.checked
+          ? `Date-only servicing every ${v.serviceIntervalMonths || 6} months. Current odometer ${L.fmtKm(v.odometer)}.`
+          : `Interval: every ${(v.serviceIntervalKm || 10000).toLocaleString('en-AU')} km or ${v.serviceIntervalMonths || 6} months. Current odometer ${L.fmtKm(v.odometer)}.`;
         const shops = L.workshopsFor(v.type);
         // Preserve the vehicle's current workshop selection when the form opens for a vehicle already in the shop.
         const preferred = f.workshopSel.value || (v.workshopId && shops.some((s) => s.id === v.workshopId) ? v.workshopId : '');
@@ -131,7 +147,7 @@ AD.serviceForm = function (vehicleId) {
       f.workshopSel.addEventListener('change', () => { toggleWkOther(); drawWorkshopMap(); updateMapHelp(); });
       f.odometer.addEventListener('input', () => {
         const v = AD.store.get('vehicles', f.vehicleId.value);
-        if (v && f.odometer.value) f.nextServiceKm.value = Number(f.odometer.value) + (v.serviceIntervalKm || 10000);
+        if (v && f.odometer.value && !f.nextServiceKmNA.checked) f.nextServiceKm.value = Number(f.odometer.value) + (v.serviceIntervalKm || 10000);
       });
       fill();
 
@@ -148,7 +164,7 @@ AD.serviceForm = function (vehicleId) {
         else if (v && v.lastServiceKm && odo < v.lastServiceKm) err.odometer = `Lower than the last service (${L.fmtKm(v.lastServiceKm)}).`;
         if (!d.nextServiceDate) err.nextServiceDate = 'Enter the next service date.';
         else if (d.date && d.nextServiceDate <= d.date) err.nextServiceDate = 'Must be after the service date.';
-        if (d.nextServiceKm === '' || !(Number(d.nextServiceKm) > odo)) err.nextServiceKm = 'Must be higher than the service odometer.';
+        if (!d.nextServiceKmNA && (d.nextServiceKm === '' || !(Number(d.nextServiceKm) > odo))) err.nextServiceKm = 'Must be higher than the service odometer, or choose N/A.';
         if (d.cost !== '' && !(Number(d.cost) >= 0)) err.cost = 'Enter a valid amount.';
         if (!showErrors(f, err)) return;
 
@@ -161,7 +177,7 @@ AD.serviceForm = function (vehicleId) {
             vehicleId: v.id, date: d.date, odometer: Math.round(odo), type: d.type,
             workshop: workshopName, cost: d.cost === '' ? 0 : Number(d.cost), notes: d.notes
           }, 'svc');
-          const patch = { lastServiceDate: d.date, lastServiceKm: Math.round(odo), nextServiceDate: d.nextServiceDate, nextServiceKm: Math.round(Number(d.nextServiceKm)) };
+          const patch = { lastServiceDate: d.date, lastServiceKm: Math.round(odo), nextServiceDate: d.nextServiceDate, nextServiceKm: d.nextServiceKmNA ? null : Math.round(Number(d.nextServiceKm)) };
           if (odo > v.odometer) patch.odometer = Math.round(odo);
           if (v.status === 'In workshop' && d.returnAvail) patch.status = 'Available';
           await AD.store.update('vehicles', v.id, patch);
@@ -211,7 +227,7 @@ AD.views.maintenance = (function () {
     el.innerHTML = `
       ${pageHeader({
         title: 'Maintenance',
-        sub: `Due means within ${L.SOON_DAYS} days or ${L.SOON_KM.toLocaleString('en-AU')} km of the next service`,
+        sub: `Due means within ${L.SOON_DAYS} days${all.some(({ s }) => s.hasKm) ? ` or ${L.SOON_KM.toLocaleString('en-AU')} km of the next service` : ''}`,
         actions: `<button class="btn btn-primary" id="rec">${I.plus} Record completed service</button>`
       })}
 
@@ -232,8 +248,8 @@ AD.views.maintenance = (function () {
             <td><a class="id" href="#/vehicle/${v.id}">${esc(v.id)}</a><span class="t2">${esc(v.type)}</span></td>
             <td class="nowrap col-opt">${v.lastServiceDate ? T.fmtKey(v.lastServiceDate) : dash}<span class="t2">${v.lastServiceKm ? L.fmtKm(v.lastServiceKm) : ''}</span></td>
             <td class="nowrap">${T.fmtKey(v.nextServiceDate)}</td>
-            <td class="num col-opt">${L.fmtKm(v.nextServiceKm)}<span class="t2">now ${L.fmtKm(v.odometer)}</span></td>
-            <td class="num">${s.daysLeft < 0 ? late(`${-s.daysLeft} days late`) : `${s.daysLeft} days`}<span class="t2">${s.kmLeft < 0 ? late(`${L.fmtKm(-s.kmLeft)} over`) : L.fmtKm(s.kmLeft)}</span></td>
+            <td class="num col-opt">${s.hasKm ? L.fmtKm(v.nextServiceKm) : 'N/A'}<span class="t2">${s.hasKm ? `now ${L.fmtKm(v.odometer)}` : 'date only'}</span></td>
+            <td class="num">${s.daysLeft < 0 ? late(`${-s.daysLeft} days late`) : `${s.daysLeft} days`}<span class="t2">${s.hasKm ? (s.kmLeft < 0 ? late(`${L.fmtKm(-s.kmLeft)} over`) : L.fmtKm(s.kmLeft)) : 'No km limit'}</span></td>
             <td>${s.state === 'ok' ? AD.ui.badge('Not due', 'green muted') : AD.ui.badge(s.label, L.attentionTone(s.state, s.daysLeft, s.kmLeft) || 'ink')}</td>
             <td class="col-action col-opt"><button class="btn btn-link" data-rec="${v.id}">Record service</button></td>
           </tr>`).join('') || '<tr><td colspan="7" class="empty">Nothing in this list.</td></tr>'}

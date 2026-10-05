@@ -82,7 +82,9 @@ AD.ui = (function () {
     const svcTxt = s.daysLeft < 0 ? `Service ${-s.daysLeft}d late`
       : s.daysLeft === 0 ? 'Service due today'
       : `Service ${s.daysLeft}d`;
-    const svcTitle = `Next service ${T.fmtKey(v.nextServiceDate)} or ${L.fmtKm(v.nextServiceKm)} (${L.fmtKm(Math.max(s.kmLeft, 0))} to go)`;
+    const svcTitle = s.hasKm
+      ? `Next service ${T.fmtKey(v.nextServiceDate)} or ${L.fmtKm(v.nextServiceKm)} (${L.fmtKm(Math.max(s.kmLeft, 0))} to go)`
+      : `Next service ${T.fmtKey(v.nextServiceDate)} (date only)`;
 
     // Rego
     const regoTone = urgency(r.days);

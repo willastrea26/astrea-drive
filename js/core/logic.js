@@ -15,16 +15,17 @@ AD.logic = (function () {
   function serviceState(v) {
     const today = T.todayKey();
     const daysLeft = T.daysBetween(today, v.nextServiceDate);
-    const kmLeft = v.nextServiceKm - v.odometer;
+    const hasKm = v.nextServiceKm !== null && v.nextServiceKm !== '' && Number.isFinite(Number(v.nextServiceKm));
+    const kmLeft = hasKm ? Number(v.nextServiceKm) - Number(v.odometer || 0) : Infinity;
     if (daysLeft < 0 || kmLeft <= 0) {
       const why = daysLeft < 0 ? `${-daysLeft} day${daysLeft === -1 ? '' : 's'} overdue` : `${fmtKm(-kmLeft)} over`;
-      return { state: 'overdue', daysLeft, kmLeft, label: 'Overdue', why };
+      return { state: 'overdue', daysLeft, kmLeft, hasKm, label: 'Overdue', why };
     }
     if (daysLeft <= SOON_DAYS || kmLeft <= SOON_KM) {
       const why = daysLeft <= SOON_DAYS ? (daysLeft === 0 ? 'Due today' : `Due in ${daysLeft} day${daysLeft === 1 ? '' : 's'}`) : `${fmtKm(kmLeft)} to go`;
-      return { state: 'soon', daysLeft, kmLeft, label: 'Due soon', why };
+      return { state: 'soon', daysLeft, kmLeft, hasKm, label: 'Due soon', why };
     }
-    return { state: 'ok', daysLeft, kmLeft, label: 'OK', why: `In ${daysLeft} days` };
+    return { state: 'ok', daysLeft, kmLeft, hasKm, label: 'OK', why: `In ${daysLeft} days` };
   }
 
   function regoState(v) {
@@ -66,7 +67,7 @@ AD.logic = (function () {
     return S().all('vehicles').filter((v) => v.status === 'In workshop' && v.workshopId === workshopId);
   }
 
-  function fmtKm(n) { return Math.round(n).toLocaleString('en-AU') + ' km'; }
+  function fmtKm(n) { return n === null || n === '' || !Number.isFinite(Number(n)) ? 'N/A' : Math.round(Number(n)).toLocaleString('en-AU') + ' km'; }
   function fmtAUD(n) { return Number(n || 0).toLocaleString('en-AU', { style: 'currency', currency: 'AUD' }); }
 
   function driverName(id) {

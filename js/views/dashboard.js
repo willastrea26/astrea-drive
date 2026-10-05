@@ -281,7 +281,8 @@ AD.views.dashboard = (function () {
             const byKm = s.daysLeft >= 0 && (s.kmLeft <= 0 || (s.state === 'soon' && s.daysLeft > L.SOON_DAYS));
             const deadline = byKm ? L.fmtKm(v.nextServiceKm) : T.fmtKey(v.nextServiceDate);
             const rel = byKm ? (s.kmLeft <= 0 ? `${L.fmtKm(-s.kmLeft)} over` : `${L.fmtKm(s.kmLeft)} to go`) : relDays(s.daysLeft);
-            const detail = byKm ? `Odometer ${L.fmtKm(v.odometer)} · date limit ${T.fmtKey(v.nextServiceDate)}` : `Or at ${L.fmtKm(v.nextServiceKm)} · now ${L.fmtKm(v.odometer)}`;
+            const detail = byKm ? `Odometer ${L.fmtKm(v.odometer)} · date limit ${T.fmtKey(v.nextServiceDate)}`
+              : s.hasKm ? `Or at ${L.fmtKm(v.nextServiceKm)} · now ${L.fmtKm(v.odometer)}` : `Date-only service schedule · now ${L.fmtKm(v.odometer)}`;
             return attentionRow(v, s.state === 'overdue' ? 'Service overdue' : 'Service due', L.attentionTone(s.state, s.daysLeft, s.kmLeft), detail, deadline, rel);
           }).join('')}</ul>`
             : '<p class="empty">Nothing due in the next 30 days.</p>'}

@@ -46,7 +46,8 @@ AD.vehicleForm = function (vehicle, onSaved) {
         <div class="field"><label>Odometer (km) <span class="req">*</span></label><input type="number" name="odometer" value="${esc(v.odometer)}" min="0" step="1"></div>
         <div class="field"><label>Registration expiry <span class="req">*</span></label><input type="date" name="regoExpiry" value="${esc(v.regoExpiry)}"></div>
         <div class="field"><label>Next service date <span class="req">*</span></label><input type="date" name="nextServiceDate" value="${esc(v.nextServiceDate)}"></div>
-        <div class="field"><label>Next service odometer (km) <span class="req">*</span></label><input type="number" name="nextServiceKm" value="${esc(v.nextServiceKm)}" min="0" step="1"></div>
+        <div class="field"><label>Next service odometer (km)</label><input type="number" name="nextServiceKm" value="${v.nextServiceKm == null ? '' : esc(v.nextServiceKm)}" min="0" step="1">
+          <label class="check"><input type="checkbox" name="nextServiceKmNA" ${v.nextServiceKm == null ? 'checked' : ''}> N/A — service by date only</label></div>
         <div class="form-section-title full"><b>Identifiers and notes</b><span>Optional fleet reference details</span></div>
         <div class="field"><label>VIN</label><input type="text" name="vin" value="${esc(v.vin || '')}" maxlength="20"></div>
         <div class="field"><label>Variant / spec</label><input type="text" name="variant" value="${esc(v.variant || '')}"></div>
@@ -63,6 +64,15 @@ AD.vehicleForm = function (vehicle, onSaved) {
     onMount(el, close) {
       const form = el.querySelector('form');
       el.querySelector('[data-close]').onclick = close;
+      const kmInput = form.elements.nextServiceKm;
+      const kmNA = form.elements.nextServiceKmNA;
+      const syncKm = () => {
+        kmInput.disabled = kmNA.checked;
+        if (kmNA.checked) kmInput.value = '';
+        else if (!kmInput.value) kmInput.value = v.nextServiceKm == null ? Number(v.odometer || 0) + Number(v.serviceIntervalKm || 10000) : v.nextServiceKm;
+      };
+      kmNA.addEventListener('change', syncKm);
+      syncKm();
       const saveBtn = el.querySelector('[data-save]');
       saveBtn.onclick = async () => {
         const d = formData(form);
@@ -80,13 +90,13 @@ AD.vehicleForm = function (vehicle, onSaved) {
         if (d.odometer === '' || !(odo >= 0)) err.odometer = 'Enter a valid odometer reading.';
         if (!d.regoExpiry) err.regoExpiry = 'Registration expiry is required.';
         if (!d.nextServiceDate) err.nextServiceDate = 'Next service date is required.';
-        if (d.nextServiceKm === '' || !(Number(d.nextServiceKm) >= 0)) err.nextServiceKm = 'Enter a valid odometer value.';
+        if (!d.nextServiceKmNA && (d.nextServiceKm === '' || !(Number(d.nextServiceKm) >= 0))) err.nextServiceKm = 'Enter a valid odometer value or choose N/A.';
         if (!showErrors(form, err)) return;
 
         const rec = {
           rego: d.rego.toUpperCase(), make: d.make, model: d.model, type: d.type, year: Number(d.year) || null,
           driverId: hiredMode ? '' : d.driverId, status: d.status, odometer: Math.round(odo), regoExpiry: d.regoExpiry,
-          nextServiceDate: d.nextServiceDate, nextServiceKm: Math.round(Number(d.nextServiceKm)), notes: d.notes,
+          nextServiceDate: d.nextServiceDate, nextServiceKm: d.nextServiceKmNA ? null : Math.round(Number(d.nextServiceKm)), notes: d.notes,
           vin: d.vin || null, variant: d.variant || null, linktTag: d.linktTag || null,
           wrdtPlantNo: d.wrdtPlantNo || null, evieFob: d.evieFob || null, evieCard: d.evieCard || null,
           hired: hiredMode, hireCompany: hiredMode ? (d.hireCompany || '') : ''

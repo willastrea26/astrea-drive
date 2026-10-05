@@ -453,7 +453,7 @@ AD.views.vehicle = (function () {
             <div><dt>Assigned driver</dt><dd>${v.driverId ? esc(L.driverName(v.driverId)) : '<span class="muted" style="font-weight:400">Unassigned</span>'}</dd></div>
             <div><dt>Charge-out rate</dt><dd>${aud0(L.hourlyRate(v))}/hr</dd></div>
             <div><dt>Registration expiry</dt><dd>${T.fmtKey(v.regoExpiry)}<span class="sub ${flagTone(L.attentionTone(r.state, r.days))}">${esc(r.state === 'ok' ? 'Current — ' + r.why : r.why)}</span></dd></div>
-            <div><dt>Next service</dt><dd>${T.fmtKey(v.nextServiceDate)} or ${L.fmtKm(v.nextServiceKm)}<span class="sub ${flagTone(L.attentionTone(s.state, s.daysLeft, s.kmLeft))}">${esc(s.why.charAt(0).toUpperCase() + s.why.slice(1))}</span></dd></div>
+            <div><dt>Next service</dt><dd>${T.fmtKey(v.nextServiceDate)}${s.hasKm ? ` or ${L.fmtKm(v.nextServiceKm)}` : ' · date only'}<span class="sub ${flagTone(L.attentionTone(s.state, s.daysLeft, s.kmLeft))}">${esc(s.why.charAt(0).toUpperCase() + s.why.slice(1))}</span></dd></div>
             ${v.status === 'In workshop' && v.workshopId ? `<div><dt>Currently at</dt><dd>${esc((AD.store.get('workshops', v.workshopId) || {}).name || 'Unknown workshop')}</dd></div>` : ''}
           </dl>
           ${detailsFacts(v)}
