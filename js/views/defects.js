@@ -154,9 +154,7 @@ AD.views.defects = (function () {
         <select id="d-vehicle" aria-label="Vehicle">${options(vehicles, st.vehicle, 'All vehicles')}</select>
         <span class="count" id="d-count"></span>
       </div>
-      <div class="table-wrap"><table class="data">
-        <thead><tr><th style="width:96px">Vehicle</th><th>Description</th><th>Priority</th><th class="col-opt">Status</th><th class="col-opt">Reported</th><th class="col-action col-opt"><span class="hide">Actions</span></th></tr></thead>
-        <tbody id="d-body"></tbody></table></div>`;
+      <div class="defect-grid" id="d-grid" role="list" aria-live="polite"></div>`;
     el.querySelector('#new-def').onclick = () => AD.defectForm(st.vehicle);
     [['#d-status', 'status'], ['#d-priority', 'priority'], ['#d-vehicle', 'vehicle']].forEach(([s, k]) =>
       el.querySelector(s).addEventListener('change', (e) => { st[k] = e.target.value; AD.setParams(st); rows(); }));
@@ -176,33 +174,58 @@ AD.views.defects = (function () {
     }).sort((a, b) => (a.status === 'Resolved') - (b.status === 'Resolved') || P[a.priority] - P[b.priority] || b.reportedDate.localeCompare(a.reportedDate));
 
     root.querySelector('#d-count').textContent = `${list.length} defect${list.length === 1 ? '' : 's'}`;
-    const body = root.querySelector('#d-body');
-    body.innerHTML = list.map((d) => {
+    const grid = root.querySelector('#d-grid');
+    grid.innerHTML = list.map((d) => {
       const resolved = d.status === 'Resolved';
-      const actions = `${d.status === 'Open' ? `<button class="btn btn-link" data-prog="${d.id}">Start work</button>` : ''}
-        ${!resolved ? `<button class="btn btn-link" data-resolve="${d.id}">Resolve</button>` : `<button class="btn btn-link" data-reopen="${d.id}">Reopen</button>`}`;
-      return `<tr class="${resolved ? 'muted-row' : ''}">
-      <td><a class="id" href="#/vehicle/${d.vehicleId}?tab=defects">${esc(d.vehicleId)}</a></td>
-      <td><span class="defect-desc">${esc(d.description)} ${AD.defectPhotoChip(d)}</span>
-        ${resolved ? `<span class="t2">Resolved ${T.fmtKey(d.resolvedDate)}${d.resolutionNotes ? ' — ' + esc(d.resolutionNotes) : ''}</span>` : ''}
-        <span class="t2 only-mobile">${defectBadge(d.status)} · Reported ${T.fmtKey(d.reportedDate)} · ${esc(d.reportedBy)}</span>
-        <span class="m-actions">${actions}</span></td>
-      <td>${priorityBadge(d.priority, resolved)}</td>
-      <td class="col-opt">${defectBadge(d.status)}</td>
-      <td class="nowrap col-opt">${T.fmtKey(d.reportedDate)}<span class="t2">${esc(d.reportedBy)}</span></td>
-      <td class="col-action col-opt">${actions}</td></tr>`;
-    }).join('') || '<tr><td colspan="6" class="empty">No defects match these filters.</td></tr>';
+      const vehicle = AD.store.get('vehicles', d.vehicleId);
+      const reportedPhotos = d.photos || [];
+      const resolvedPhotos = d.resolvedPhotos || [];
+      const photoCount = reportedPhotos.length + resolvedPhotos.length;
+      const firstPhoto = reportedPhotos[0] || resolvedPhotos[0] || '';
+      const priorityClass = String(d.priority || 'medium').toLowerCase();
+      const media = firstPhoto
+        ? `<button type="button" class="defect-card-media" data-photos="${d.id}" aria-label="View ${photoCount} photo${photoCount === 1 ? '' : 's'} for ${esc(d.vehicleId)} defect">
+            <img src="${esc(firstPhoto)}" alt="${esc(d.vehicleId)} defect: ${esc(d.description)}" loading="lazy" decoding="async">
+            <span class="defect-photo-count">${I.camera}<b>${photoCount}</b> photo${photoCount === 1 ? '' : 's'}</span>
+          </button>`
+        : `<div class="defect-card-media defect-card-media-empty" aria-label="No defect photo uploaded">
+            ${I.camera}<span>No photo uploaded</span>
+          </div>`;
+      const actions = `${d.status === 'Open' ? `<button type="button" class="btn btn-secondary btn-sm" data-prog="${d.id}">Start work</button>` : ''}
+        ${!resolved ? `<button type="button" class="btn btn-primary btn-sm" data-resolve="${d.id}">${I.check} Resolve</button>` : `<button type="button" class="btn btn-secondary btn-sm" data-reopen="${d.id}">Reopen</button>`}`;
+      return `<article class="defect-card defect-card-${priorityClass}${resolved ? ' is-resolved' : ''}" role="listitem">
+        ${media}
+        <div class="defect-card-body">
+          <div class="defect-card-head">
+            <div class="defect-card-vehicle">
+              <a class="id" href="#/vehicle/${d.vehicleId}?tab=defects">${esc(d.vehicleId)}</a>
+              ${vehicle && vehicle.rego ? `<span>${esc(vehicle.rego)}</span>` : ''}
+            </div>
+            ${priorityBadge(d.priority, resolved)}
+          </div>
+          <p class="defect-card-desc" title="${esc(d.description)}">${esc(d.description)}</p>
+          <dl class="defect-card-meta">
+            <div><dt>Status</dt><dd>${defectBadge(d.status)}</dd></div>
+            <div><dt>Reported</dt><dd>${T.fmtKey(d.reportedDate)}</dd></div>
+            <div><dt>Reported by</dt><dd>${esc(d.reportedBy)}</dd></div>
+            ${vehicle && vehicle.type ? `<div><dt>Vehicle type</dt><dd>${esc(vehicle.type)}</dd></div>` : ''}
+          </dl>
+          ${resolved ? `<div class="defect-resolution"><b>Resolved ${T.fmtKey(d.resolvedDate)}</b>${d.resolutionNotes ? `<span>${esc(d.resolutionNotes)}</span>` : ''}</div>` : ''}
+        </div>
+        <div class="defect-card-actions">${actions}</div>
+      </article>`;
+    }).join('') || `<div class="defect-grid-empty">${I.search}<b>No defects found</b><span>No defects match these filters.</span></div>`;
 
-    body.querySelectorAll('[data-photos]').forEach((b) => (b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); AD.viewDefectPhotos(b.dataset.photos); }));
-    body.querySelectorAll('[data-resolve]').forEach((b) => (b.onclick = () => AD.resolveDefect(b.dataset.resolve)));
-    body.querySelectorAll('[data-prog]').forEach((b) => (b.onclick = async () => {
+    grid.querySelectorAll('[data-photos]').forEach((b) => (b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); AD.viewDefectPhotos(b.dataset.photos); }));
+    grid.querySelectorAll('[data-resolve]').forEach((b) => (b.onclick = () => AD.resolveDefect(b.dataset.resolve)));
+    grid.querySelectorAll('[data-prog]').forEach((b) => (b.onclick = async () => {
       try {
         const d = await AD.store.update('defects', b.dataset.prog, { status: 'In progress' });
         await AD.store.log(`Work started on ${d.vehicleId} defect: ${d.description.slice(0, 50)}`, d.vehicleId);
         toast(`Defect on ${d.vehicleId} set to In progress`);
       } catch (err) { toast('Could not update defect: ' + err.message, 'error'); }
     }));
-    body.querySelectorAll('[data-reopen]').forEach((b) => (b.onclick = async () => {
+    grid.querySelectorAll('[data-reopen]').forEach((b) => (b.onclick = async () => {
       try {
         const d = await AD.store.update('defects', b.dataset.reopen, { status: 'Open', resolvedDate: null, resolutionNotes: '' });
         await AD.store.log(`Defect reopened on ${d.vehicleId}`, d.vehicleId);
