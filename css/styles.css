@@ -549,6 +549,25 @@ label.check { display: flex; gap: 8px; align-items: center; font-weight: 400; co
   font-weight: 600;
   line-height: 1.4;
 }
+.defect-card-title {
+  width: 100%; padding: 0; border: 0; background: none; cursor: pointer;
+  text-align: left; font-family: inherit;
+}
+.defect-card-title:hover { color: var(--blue); text-decoration: underline; text-underline-offset: 3px; }
+.defect-card-title:focus-visible { border-radius: 4px; outline: 2px solid var(--blue); outline-offset: 3px; }
+.defect-detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding-bottom: 16px; border-bottom: 1px solid var(--rule); }
+.defect-detail-head > div { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.defect-detail-head .id { font-size: 18px; }
+.defect-detail-head span:not(.flag) { color: var(--muted); font-size: 13px; }
+.defect-detail-section { display: grid; gap: 10px; margin-top: 20px; }
+.defect-detail-section h3 { display: flex; align-items: baseline; gap: 7px; margin: 0; font-size: 15px; }
+.defect-detail-section h3 span { color: var(--muted); font-size: 12px; font-weight: 600; }
+.defect-detail-description { margin: 0; color: var(--ink); font-size: 15px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.defect-detail-meta { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 20px 0 0; }
+.defect-detail-meta > div { padding: 12px; border: 1px solid var(--rule); border-radius: var(--r); background: var(--paper-2); }
+.defect-detail-meta dt { margin-bottom: 5px; color: var(--muted); font-size: 12px; }
+.defect-detail-meta dd { margin: 0; color: var(--ink); font-size: 14px; font-weight: 650; }
+.defect-detail-no-photos { margin-top: 20px; padding: 22px; border: 1px dashed var(--rule); border-radius: var(--r); color: var(--muted); text-align: center; }
 .defect-card-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 16px; margin: 0; }
 .defect-card-meta > div { min-width: 0; }
 .defect-card-meta dt { margin-bottom: 2px; color: var(--muted); font-size: 12px; }
@@ -585,6 +604,8 @@ label.check { display: flex; gap: 8px; align-items: center; font-weight: 400; co
   .defect-grid { grid-template-columns: 1fr; gap: 14px; }
   .defect-card-media { aspect-ratio: 4 / 3; }
   .defect-card-desc { min-height: 0; -webkit-line-clamp: 4; }
+  .defect-detail-head { flex-direction: column; }
+  .defect-detail-meta { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 /* Lightbox: full-screen image viewer */

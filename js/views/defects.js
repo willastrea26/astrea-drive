@@ -124,6 +124,53 @@ AD.viewDefectPhotos = function (defectId, startWith = 'reported') {
   AD.ui.photoLightbox(all, startWith === 'resolved' ? reported.length : 0);
 };
 
+/** Open the complete defect record from a register tile. */
+AD.viewDefect = function (defectId) {
+  const { esc, modal, priorityBadge, defectBadge } = AD.ui;
+  const T = AD.time;
+  const d = AD.store.get('defects', defectId);
+  if (!d) return;
+  const vehicle = AD.store.get('vehicles', d.vehicleId);
+  const reported = d.photos || [];
+  const resolved = d.resolvedPhotos || [];
+  const allPhotos = reported.concat(resolved);
+  const photoSection = (title, photos, offset) => photos.length ? `
+    <section class="defect-detail-section">
+      <h3>${title} <span>${photos.length}</span></h3>
+      <div class="pg-grid ${photos.length === 1 ? 'pg-1' : photos.length < 3 ? 'pg-few' : ''}">
+        ${photos.map((src, i) => `<button type="button" class="pg-tile" data-photo-index="${offset + i}" aria-label="View ${title.toLowerCase()} ${i + 1}"><img src="${esc(src)}" alt="${esc(title)} ${i + 1}" loading="lazy" decoding="async"></button>`).join('')}
+      </div>
+    </section>` : '';
+
+  modal({
+    title: `Defect — ${d.vehicleId}`,
+    wide: true,
+    body: `
+      <div class="defect-detail-head">
+        <div><a class="id" href="#/vehicle/${d.vehicleId}?tab=defects" data-close>${esc(d.vehicleId)}</a>${vehicle && vehicle.rego ? `<span>${esc(vehicle.rego)}</span>` : ''}${vehicle && vehicle.type ? `<span>${esc(vehicle.type)}</span>` : ''}</div>
+        <div>${priorityBadge(d.priority, d.status === 'Resolved')} ${defectBadge(d.status)}</div>
+      </div>
+      <section class="defect-detail-section">
+        <h3>Description</h3>
+        <p class="defect-detail-description">${esc(d.description)}</p>
+      </section>
+      <dl class="defect-detail-meta">
+        <div><dt>Status</dt><dd>${defectBadge(d.status)}</dd></div>
+        <div><dt>Priority</dt><dd>${priorityBadge(d.priority, d.status === 'Resolved')}</dd></div>
+        <div><dt>Reported</dt><dd>${T.fmtKey(d.reportedDate)}</dd></div>
+        <div><dt>Reported by</dt><dd>${esc(d.reportedBy)}</dd></div>
+        ${d.resolvedDate ? `<div><dt>Resolved</dt><dd>${T.fmtKey(d.resolvedDate)}</dd></div>` : ''}
+      </dl>
+      ${photoSection('Reported photos', reported, 0)}
+      ${d.resolutionNotes || resolved.length ? `<section class="defect-detail-section"><h3>Resolution</h3>${d.resolutionNotes ? `<p class="defect-detail-description">${esc(d.resolutionNotes)}</p>` : '<p class="muted">No resolution notes recorded.</p>'}</section>` : ''}
+      ${photoSection('Resolution photos', resolved, reported.length)}
+      ${!allPhotos.length ? '<div class="defect-detail-no-photos">No photos uploaded for this defect.</div>' : ''}`,
+    onMount(el) {
+      el.querySelectorAll('[data-photo-index]').forEach((b) => (b.onclick = () => AD.ui.photoLightbox(allPhotos, Number(b.dataset.photoIndex))));
+    }
+  });
+};
+
 /** HTML for a small camera chip showing the defect's photo count (empty string if none). */
 AD.defectPhotoChip = function (d) {
   const n = (d.photos || []).length + (d.resolvedPhotos || []).length;
@@ -203,7 +250,7 @@ AD.views.defects = (function () {
             </div>
             ${priorityBadge(d.priority, resolved)}
           </div>
-          <p class="defect-card-desc" title="${esc(d.description)}">${esc(d.description)}</p>
+          <button type="button" class="defect-card-desc defect-card-title" data-detail="${d.id}" title="Open full defect details">${esc(d.description)}</button>
           <dl class="defect-card-meta">
             <div><dt>Status</dt><dd>${defectBadge(d.status)}</dd></div>
             <div><dt>Reported</dt><dd>${T.fmtKey(d.reportedDate)}</dd></div>
@@ -217,6 +264,7 @@ AD.views.defects = (function () {
     }).join('') || `<div class="defect-grid-empty">${I.search}<b>No defects found</b><span>No defects match these filters.</span></div>`;
 
     grid.querySelectorAll('[data-photos]').forEach((b) => (b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); AD.viewDefectPhotos(b.dataset.photos); }));
+    grid.querySelectorAll('[data-detail]').forEach((b) => (b.onclick = () => AD.viewDefect(b.dataset.detail)));
     grid.querySelectorAll('[data-resolve]').forEach((b) => (b.onclick = () => AD.resolveDefect(b.dataset.resolve)));
     grid.querySelectorAll('[data-prog]').forEach((b) => (b.onclick = async () => {
       try {
