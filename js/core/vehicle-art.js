@@ -120,89 +120,70 @@ AD.art = (function () {
 
   const uteSymbol = (id, p) => `
   <symbol id="${id}" viewBox="0 0 120 60">
-    <ellipse cx="60" cy="54.6" rx="48" ry="3" fill="#101D35" opacity=".16"/>
+    <defs>
+      <linearGradient id="${id}-glass" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#16243a"/><stop offset="1" stop-color="#31445c"/>
+      </linearGradient>
+      <linearGradient id="${id}-rim" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#dce2e9"/><stop offset=".5" stop-color="#778494"/><stop offset="1" stop-color="#c4ccd5"/>
+      </linearGradient>
+    </defs>
 
-    <!-- chassis rail -->
-    <rect x="10" y="41.5" width="100" height="3.8" rx="1.2" fill="#1d2330"/>
+    <!-- Ground and chassis -->
+    <ellipse cx="60" cy="54.7" rx="51" ry="3" fill="#101D35" opacity=".16"/>
+    <rect x="8" y="41" width="105" height="4.2" rx="1.3" fill="#202936"/>
 
-    <!-- body: bonnet, cab, tray â€” single closed path -->
-    <path d="M7 37.5 L8.5 31.5 Q9 30 10.5 29.8 L30 27.5 L38 20 Q39.5 18.2 42 18 L68 18 Q70 18 71.5 20 L74 24 L75.5 28.5 L110.5 28.5 L110.5 42
-             L103 42 A 8.5 8.5 0 0 0 85 42
-             L37 42 A 8.5 8.5 0 0 0 19 42
-             L7 42 Z"
-          fill="${p.body}" stroke="${p.stroke}" stroke-width=".9" stroke-linejoin="round"/>
+    <!-- Modern dual-cab pickup body with an open tub (no canopy) -->
+    <path d="M5.5 40.5 L6.8 33.2 Q7.2 30.8 10 30.2 L29.5 27.1 L37.8 17.8 Q39.4 15.8 42.2 15.8 H65.4 Q68.5 15.8 70.3 18.3 L76 27.7 H112.8 V42
+             H103.2 A9.3 9.3 0 0 0 84.6 42
+             H37.5 A9.3 9.3 0 0 0 18.9 42
+             H7 Q5.5 42 5.5 40.5 Z"
+          fill="${p.body}" stroke="${p.stroke}" stroke-width="1" stroke-linejoin="round"/>
 
-    <!-- tray bed floor -->
-    <rect x="76" y="28.5" width="34.5" height="1.2" fill="${p.stroke}" opacity=".3"/>
+    <!-- Open pickup tub: dark bed opening, painted rails and tailgate -->
+    <path d="M76 27.7 H112.8 V30.2 H77.2 Z" fill="#222c39"/>
+    <path d="M76 27.7 H112.8" stroke="${p.body}" stroke-width="2.2"/>
+    <path d="M76.2 29.5 V41.5 M111.5 29.6 V41.5" stroke="${p.stroke}" stroke-width=".8"/>
+    <path d="M78 32 H110.5 M79 39.5 H110" stroke="${p.stroke}" stroke-width=".55" opacity=".55"/>
+    <path d="M109.5 30.5 V40.3" stroke="${p.stroke}" stroke-width=".9" opacity=".75"/>
 
-    <!-- tray side rail (raised) -->
-    <path d="M76.5 28.5 V23.5 H110.5 V28.5" fill="none" stroke="${p.stroke}" stroke-width=".8" stroke-linejoin="round"/>
-    <!-- tray headboard -->
-    <rect x="75.5" y="18" width="1.8" height="24" rx=".4" fill="${p.stroke}" opacity=".5"/>
-    <!-- tailgate -->
-    <rect x="109.5" y="23.5" width="1.5" height="18.5" rx=".4" fill="${p.stroke}" opacity=".4"/>
-    <!-- tray side panel lines -->
-    <path d="M85 23.5 V28.5 M93 23.5 V28.5 M101 23.5 V28.5" stroke="${p.stroke}" stroke-width=".5" opacity=".4"/>
-    <!-- tray rail top -->
-    <rect x="76.5" y="22.8" width="34" height="1.2" rx=".4" fill="${p.stroke}" opacity=".25"/>
+    <!-- Dark tinted glass and substantial pillars -->
+    <path d="M31.8 27.1 L39.1 18.4 Q40 17.3 42 17.3 H47.5 V27.1 Z" fill="url(#${id}-glass)"/>
+    <path d="M49.2 17.3 H58.5 V27.1 H49.2 Z" fill="url(#${id}-glass)"/>
+    <path d="M60.3 17.3 H65.2 Q66.7 17.3 67.6 18.8 L72.4 27.1 H60.3 Z" fill="url(#${id}-glass)"/>
+    <path d="M48.3 16.9 V27.5 M59.4 16.9 V27.5" stroke="#111c2d" stroke-width="1.2"/>
+    <path d="M72.8 26.8 L76 29" stroke="${p.stroke}" stroke-width="1"/>
 
-    <!-- trim stripe along beltline -->
-    <rect x="10" y="28" width="66" height="1.2" rx=".4" fill="${p.trim}"/>
+    <!-- Four-door panel lines, handles and side step -->
+    <path d="M35.8 29 V41.4 M48.5 28.8 V41.4 M60 28.8 V41.4 M75.5 28.5 V41.4" stroke="${p.stroke}" stroke-width=".7"/>
+    <rect x="43.1" y="30.3" width="4.6" height="1.05" rx=".5" fill="#667486"/>
+    <rect x="55.2" y="30.3" width="4.4" height="1.05" rx=".5" fill="#667486"/>
+    <rect x="36.5" y="42.5" width="40" height="1.8" rx=".8" fill="#313b49"/>
+    <rect x="39" y="42.7" width="35" height=".45" fill="#aeb8c6" opacity=".7"/>
 
-    <!-- windshield (A-pillar raked) -->
-    <path d="M31.5 27.5 L38.5 19.5 Q39.5 18.5 41 18.5 L47.5 18.5 V27.5 Z" fill="#26344f"/>
-    <!-- front side window -->
-    <rect x="49" y="18.5" width="11" height="9" rx=".8" fill="#26344f"/>
-    <!-- rear side window -->
-    <rect x="61.5" y="18.5" width="9.5" height="9" rx=".8" fill="#26344f"/>
-    <!-- B-pillar -->
-    <rect x="48" y="18.5" width="1" height="9" fill="#1e2d45"/>
-    <!-- C-pillar -->
-    <rect x="60.5" y="18.5" width="1" height="9" fill="#1e2d45"/>
+    <!-- Ranger-style front detail -->
+    <path d="M7.3 32.9 L15.3 31.2 L15.8 34.3 L8.2 35.2 Z" fill="#eaf1f7" stroke="#8390a0" stroke-width=".45"/>
+    <path d="M7 35.8 H12.5 V39.4 H6.2" fill="#27313e"/>
+    <path d="M6.7 36.4 H10.9 M6.5 37.5 H10.5 M6.4 38.6 H10.1" stroke="#7c8998" stroke-width=".45"/>
+    <rect x="5" y="39.4" width="10" height="3.1" rx="1" fill="#202936"/>
+    <path d="M30.9 24 L27.6 22.8 L27 25.3 L30.3 26" fill="#202936" stroke="#111823" stroke-width=".5"/>
+    <path d="M8 35 L9.6 34.7 L9.9 36 L8.2 36.2 Z" fill="#f4b943"/>
 
-    <!-- door panel divider lines -->
-    <path d="M48.5 29.2 V41.5" stroke="${p.stroke}" stroke-width=".7"/>
-    <path d="M61 29.2 V41.5" stroke="${p.stroke}" stroke-width=".7"/>
-    <path d="M75 20 V41.5" stroke="${p.stroke}" stroke-width=".7"/>
+    <!-- Rear lights and bumper step -->
+    <path d="M111.2 30 H113.7 V36.2 H111.2 Z" fill="#b9343d"/>
+    <path d="M111.2 34.4 H113.7" stroke="#f4b943" stroke-width="1"/>
+    <rect x="108.2" y="40.3" width="6.5" height="2.8" rx=".7" fill="#202936"/>
 
-    <!-- door handles -->
-    <rect x="42" y="33" width="5" height="1.3" rx=".6" fill="${p.stroke}"/>
-    <rect x="54" y="33" width="5" height="1.3" rx=".6" fill="${p.stroke}"/>
+    <!-- Exact Astrea wordmark, prominent on the front door -->
+    ${mark(p.mark, 36.8, 34, 18.5)}
 
-    <!-- mirror stub -->
-    <path d="M31 24 L28.5 23 L28 25.5 L30.5 26" fill="#2a3140" stroke="#1d2330" stroke-width=".4"/>
-
-    <!-- headlight -->
-    <path d="M8.5 32 L14 31 L14.5 33.5 L9.5 35 Z" fill="#f0f4f8"/>
-    <!-- front indicator -->
-    <path d="M8 35.5 L9.5 35.2 L9.8 36.8 L8.2 37 Z" fill="#f5c542" opacity=".8"/>
-
-    <!-- taillight -->
-    <path d="M110 30 L111.5 30 L111.5 34.5 L110 34.5 Z" fill="#c93f3f"/>
-    <!-- rear indicator -->
-    <path d="M110 35 L111.5 35 L111.5 37 L110 37 Z" fill="#f5c542" opacity=".7"/>
-
-    <!-- front bumper bar -->
-    <rect x="5.5" y="38" width="8.5" height="4" rx="1" fill="#1d2330"/>
-    <!-- rear bumper step -->
-    <rect x="107" y="39" width="5" height="3" rx=".8" fill="#1d2330"/>
-
-    <!-- mud flap front -->
-    <rect x="14" y="42" width="2" height="2.5" rx=".3" fill="#2a3140" opacity=".6"/>
-    <!-- mud flap rear -->
-    <rect x="104" y="42" width="2" height="2.5" rx=".3" fill="#2a3140" opacity=".6"/>
-
-    <!-- wordmark on front door -->
-    ${mark(p.mark, 32.8, 33.8, 16.5)}
-
-    <!-- wheels: 3-layer (tire / mid ring / hub) -->
-    <g fill="#161b24"><circle cx="28" cy="46.5" r="8"/><circle cx="94" cy="46.5" r="8"/></g>
-    <g fill="#4a5568"><circle cx="28" cy="46.5" r="4.8"/><circle cx="94" cy="46.5" r="4.8"/></g>
-    <g fill="#1a2130"><circle cx="28" cy="46.5" r="1.8"/><circle cx="94" cy="46.5" r="1.8"/></g>
-    <!-- wheel nuts (5 per wheel on the mid ring) -->
-    <g fill="#1a2130" opacity=".7">
-      <circle cx="28" cy="43.2" r=".55"/><circle cx="25.1" cy="45.4" r=".55"/><circle cx="25.9" cy="48.6" r=".55"/><circle cx="30.1" cy="48.6" r=".55"/><circle cx="30.9" cy="45.4" r=".55"/>
-      <circle cx="94" cy="43.2" r=".55"/><circle cx="91.1" cy="45.4" r=".55"/><circle cx="91.9" cy="48.6" r=".55"/><circle cx="96.1" cy="48.6" r=".55"/><circle cx="96.9" cy="45.4" r=".55"/>
+    <!-- Large road wheels with alloy rims -->
+    <g fill="#121923"><circle cx="28.2" cy="46.5" r="8.5"/><circle cx="94" cy="46.5" r="8.5"/></g>
+    <g fill="url(#${id}-rim)" stroke="#596575" stroke-width=".45"><circle cx="28.2" cy="46.5" r="5.15"/><circle cx="94" cy="46.5" r="5.15"/></g>
+    <g fill="#283241"><circle cx="28.2" cy="46.5" r="1.65"/><circle cx="94" cy="46.5" r="1.65"/></g>
+    <g stroke="#4b5665" stroke-width=".65" opacity=".9">
+      <path d="M28.2 41.8 V44.8 M23.7 45 L26.5 46 M25.5 50.2 L27.3 47.8 M30.9 50.2 L29.1 47.8 M32.7 45 L29.9 46"/>
+      <path d="M94 41.8 V44.8 M89.5 45 L92.3 46 M91.3 50.2 L93.1 47.8 M96.7 50.2 L94.9 47.8 M98.5 45 L95.7 46"/>
     </g>
   </symbol>`;
 
