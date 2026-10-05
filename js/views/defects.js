@@ -147,7 +147,7 @@ AD.viewDefect = function (defectId) {
     wide: true,
     body: `
       <div class="defect-detail-head">
-        <div><a class="id" href="#/vehicle/${d.vehicleId}?tab=defects" data-close>${esc(d.vehicleId)}</a>${vehicle && vehicle.rego ? `<span>${esc(vehicle.rego)}</span>` : ''}${vehicle && vehicle.type ? `<span>${esc(vehicle.type)}</span>` : ''}</div>
+        <div><span class="id">${esc(d.vehicleId)}</span>${vehicle && vehicle.rego ? `<span>${esc(vehicle.rego)}</span>` : ''}${vehicle && vehicle.type ? `<span>${esc(vehicle.type)}</span>` : ''}</div>
         <div>${priorityBadge(d.priority, d.status === 'Resolved')} ${defectBadge(d.status)}</div>
       </div>
       <section class="defect-detail-section">
@@ -240,17 +240,17 @@ AD.views.defects = (function () {
           </div>`;
       const actions = `${d.status === 'Open' ? `<button type="button" class="btn btn-secondary btn-sm" data-prog="${d.id}">Start work</button>` : ''}
         ${!resolved ? `<button type="button" class="btn btn-primary btn-sm" data-resolve="${d.id}">${I.check} Resolve</button>` : `<button type="button" class="btn btn-secondary btn-sm" data-reopen="${d.id}">Reopen</button>`}`;
-      return `<article class="defect-card defect-card-${priorityClass}${resolved ? ' is-resolved' : ''}" role="listitem">
+      return `<article class="defect-card defect-card-${priorityClass}${resolved ? ' is-resolved' : ''}" role="listitem" data-detail="${d.id}" tabindex="0" aria-label="Open full defect details for ${esc(d.vehicleId)}">
         ${media}
         <div class="defect-card-body">
           <div class="defect-card-head">
             <div class="defect-card-vehicle">
-              <a class="id" href="#/vehicle/${d.vehicleId}?tab=defects">${esc(d.vehicleId)}</a>
+              <span class="id">${esc(d.vehicleId)}</span>
               ${vehicle && vehicle.rego ? `<span>${esc(vehicle.rego)}</span>` : ''}
             </div>
             ${priorityBadge(d.priority, resolved)}
           </div>
-          <button type="button" class="defect-card-desc defect-card-title" data-detail="${d.id}" title="Open full defect details">${esc(d.description)}</button>
+          <p class="defect-card-desc defect-card-title" title="Open full defect details">${esc(d.description)}</p>
           <dl class="defect-card-meta">
             <div><dt>Status</dt><dd>${defectBadge(d.status)}</dd></div>
             <div><dt>Reported</dt><dd>${T.fmtKey(d.reportedDate)}</dd></div>
@@ -264,7 +264,19 @@ AD.views.defects = (function () {
     }).join('') || `<div class="defect-grid-empty">${I.search}<b>No defects found</b><span>No defects match these filters.</span></div>`;
 
     grid.querySelectorAll('[data-photos]').forEach((b) => (b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); AD.viewDefectPhotos(b.dataset.photos); }));
-    grid.querySelectorAll('[data-detail]').forEach((b) => (b.onclick = () => AD.viewDefect(b.dataset.detail)));
+    grid.querySelectorAll('article[data-detail]').forEach((card) => {
+      const open = () => AD.viewDefect(card.dataset.detail);
+      card.addEventListener('click', (e) => {
+        if (e.target.closest('button, a')) return;
+        open();
+      });
+      card.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        if (e.target.closest('button, a')) return;
+        e.preventDefault();
+        open();
+      });
+    });
     grid.querySelectorAll('[data-resolve]').forEach((b) => (b.onclick = () => AD.resolveDefect(b.dataset.resolve)));
     grid.querySelectorAll('[data-prog]').forEach((b) => (b.onclick = async () => {
       try {

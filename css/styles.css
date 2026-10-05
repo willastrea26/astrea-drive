@@ -486,6 +486,8 @@ label.check { display: flex; gap: 8px; align-items: center; font-weight: 400; co
   box-shadow: var(--shadow-1);
   transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
 }
+.defect-card[data-detail] { cursor: pointer; }
+.defect-card[data-detail]:focus-visible { outline: 3px solid var(--blue); outline-offset: 3px; }
 .defect-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-2); }
 .defect-card-critical { --defect-accent: var(--red); }
 .defect-card-high { --defect-accent: #d34a31; }
@@ -550,15 +552,14 @@ label.check { display: flex; gap: 8px; align-items: center; font-weight: 400; co
   line-height: 1.4;
 }
 .defect-card-title {
-  width: 100%; padding: 0; border: 0; background: none; cursor: pointer;
-  text-align: left; font-family: inherit;
+  width: 100%; cursor: pointer;
 }
 .defect-card-title:hover { color: var(--blue); text-decoration: underline; text-underline-offset: 3px; }
 .defect-card-title:focus-visible { border-radius: 4px; outline: 2px solid var(--blue); outline-offset: 3px; }
 .defect-detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding-bottom: 16px; border-bottom: 1px solid var(--rule); }
 .defect-detail-head > div { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .defect-detail-head .id { font-size: 18px; }
-.defect-detail-head span:not(.flag) { color: var(--muted); font-size: 13px; }
+.defect-detail-head > div > span:not(.flag):not(.id) { color: var(--muted); font-size: 13px; }
 .defect-detail-section { display: grid; gap: 10px; margin-top: 20px; }
 .defect-detail-section h3 { display: flex; align-items: baseline; gap: 7px; margin: 0; font-size: 15px; }
 .defect-detail-section h3 span { color: var(--muted); font-size: 12px; font-weight: 600; }
