@@ -228,7 +228,7 @@ AD.views.maintenance = (function () {
         <div class="table-wrap"><table class="data">
           <thead><tr><th style="width:110px">Vehicle</th><th class="col-opt">Last service</th><th>Next service</th><th class="num col-opt">Next at</th><th class="num">Remaining</th><th>Status</th><th class="col-action col-opt"><span class="hide">Action</span></th></tr></thead>
           <tbody>
-          ${list.map(({ v, s }) => `<tr class="row-link" data-vehicle="${esc(v.id)}" tabindex="0" title="Open ${esc(v.id)} vehicle profile" aria-label="Open ${esc(v.id)} vehicle profile">
+          ${list.map(({ v, s }) => `<tr class="row-link" data-id="${esc(v.id)}" title="Open ${esc(v.id)}">
             <td><a class="id" href="#/vehicle/${v.id}">${esc(v.id)}</a><span class="t2">${esc(v.type)}</span></td>
             <td class="nowrap col-opt">${v.lastServiceDate ? T.fmtKey(v.lastServiceDate) : dash}<span class="t2">${v.lastServiceKm ? L.fmtKm(v.lastServiceKm) : ''}</span></td>
             <td class="nowrap">${T.fmtKey(v.nextServiceDate)}</td>
@@ -260,19 +260,11 @@ AD.views.maintenance = (function () {
 
     el.querySelector('#rec').onclick = () => AD.serviceForm('');
     el.querySelectorAll('[data-rec]').forEach((b) => (b.onclick = () => AD.serviceForm(b.dataset.rec)));
-    el.querySelectorAll('tr[data-vehicle]').forEach((row) => {
-      const openVehicle = () => AD.go('vehicle/' + row.dataset.vehicle);
-      row.addEventListener('click', (e) => {
-        if (e.target.closest('a, button, input, select, textarea')) return;
-        openVehicle();
-      });
-      row.addEventListener('keydown', (e) => {
-        if (e.key !== 'Enter' && e.key !== ' ') return;
-        if (e.target.closest('a, button, input, select, textarea')) return;
-        e.preventDefault();
-        openVehicle();
-      });
-    });
+    el.querySelectorAll('tr[data-id]').forEach((row) => row.addEventListener('click', (e) => {
+      if (e.target.closest('[data-rec]')) return;
+      if (e.target.closest('a')) return;
+      AD.go('vehicle/' + row.dataset.id);
+    }));
     el.querySelectorAll('[data-f]').forEach((b) => (b.onclick = () => { filter = b.dataset.f; AD.setParams({ filter }); draw(); }));
     el.querySelectorAll('[data-veh]').forEach((b) => (b.onclick = () => AD.go('vehicle/' + b.dataset.veh)));
     el.querySelectorAll('[data-open]').forEach((b) => (b.onclick = () => {
