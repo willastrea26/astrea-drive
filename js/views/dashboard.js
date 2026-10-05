@@ -6,6 +6,7 @@ AD.views.dashboard = (function () {
   const L = AD.logic, T = AD.time, I = AD.icons;
   const LIST_MAX = 5;
   const USER_FIRST_NAME = 'Will';
+  const OWNED_SCHEDULE_VAC_IDS = new Set(Array.from({ length: 8 }, (_, i) => `AVT${String(i + 1).padStart(2, '0')}`));
   let root = null, day = '', schedFilter = 'all';
   // Charts animate in when the page is opened, not on every in-page redraw
   // (changing the schedule tab or date would otherwise replay the whole page).
@@ -136,6 +137,7 @@ AD.views.dashboard = (function () {
     const today = T.todayKey();
     const vehicles = AD.store.all('vehicles');
     const vac = L.vacTrucks();
+    const ownedScheduleVac = vac.filter((v) => !v.hired && OWNED_SCHEDULE_VAC_IDS.has(v.id));
     const available = vehicles.filter((v) => v.status === 'Available');
     const svc = vehicles.map((v) => ({ v, s: L.serviceState(v) })).filter((x) => x.s.state !== 'ok')
       .sort((a, b) => (a.s.state === b.s.state ? a.s.daysLeft - b.s.daysLeft : a.s.state === 'overdue' ? -1 : 1));
@@ -257,7 +259,7 @@ AD.views.dashboard = (function () {
       </div>
 
       <section class="section" aria-labelledby="sched-h">
-        ${schedule(vac, today)}
+        ${schedule(ownedScheduleVac, today)}
       </section>
 
       ${insights(vehicles, vac, priParts)}
