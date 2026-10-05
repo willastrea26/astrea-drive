@@ -261,6 +261,9 @@ AD.views.defects = (function () {
       Resolved: allDefects.filter((d) => d.status === 'Resolved').length
     };
     const totalDefects = allDefects.length;
+    const openPct = totalDefects ? Math.round((statusCounts.Open / totalDefects) * 100) : 0;
+    const openEnd = totalDefects ? ((statusCounts.Open / totalDefects) * 100).toFixed(3) : 0;
+    const progressEnd = totalDefects ? (((statusCounts.Open + statusCounts['In progress']) / totalDefects) * 100).toFixed(3) : 0;
     const statusVisual = [
       ['Open', 'open'], ['In progress', 'progress'], ['Resolved', 'resolved']
     ].map(([label, tone]) => {
@@ -268,7 +271,7 @@ AD.views.defects = (function () {
       const pct = totalDefects ? Math.round((count / totalDefects) * 100) : 0;
       return `<button type="button" class="defect-status-item defect-status-${tone}${st.status === label ? ' is-active' : ''}" data-status-view="${label}" aria-pressed="${st.status === label}">
         <span class="defect-status-label"><i></i>${label}</span><strong>${count}</strong>
-        <span class="defect-status-track"><i style="width:${pct}%"></i></span><small>${pct}% of all defects</small>
+        <span class="defect-status-track"><i style="width:${pct}%"></i></span><small>${count} ${count === 1 ? 'defect' : 'defects'} · ${pct}% of total</small>
       </button>`;
     }).join('');
     el.innerHTML = `
@@ -278,8 +281,13 @@ AD.views.defects = (function () {
         actions: `<button class="btn btn-primary" id="new-def">${I.plus} Report defect</button>`
       })}
       <section class="defect-status-summary" aria-label="Defects by status">
-        <div class="defect-status-heading"><div><h2>Defects by status</h2><span>Current register breakdown</span></div><b>${totalDefects} total</b></div>
-        <div class="defect-status-items">${statusVisual}</div>
+        <div class="defect-status-heading"><div><h2>Defects by status</h2><span>Live register overview · select a status to filter</span></div><b>${totalDefects} total</b></div>
+        <div class="defect-status-chart">
+          <div class="defect-status-donut${totalDefects ? '' : ' is-empty'}" style="--open-end:${openEnd}%;--progress-end:${progressEnd}%" role="img" aria-label="${statusCounts.Open} open, ${statusCounts['In progress']} in progress, ${statusCounts.Resolved} resolved">
+            <div><strong>${totalDefects}</strong><span>total defects</span></div>
+          </div>
+          <div class="defect-status-items">${statusVisual}</div>
+        </div>
       </section>
       <div class="toolbar">
         <select id="d-status" aria-label="Status">${options([['open', 'Open and in progress'], ['Open', 'Open'], ['In progress', 'In progress'], ['Resolved', 'Resolved'], ['all', 'All statuses']], st.status)}</select>
