@@ -111,6 +111,70 @@ AD.resolveDefect = function (defectId) {
   });
 };
 
+AD.editDefect = function (defectId) {
+  const { esc, options, formData, showErrors, modal, toast, photoPicker } = AD.ui;
+  const T = AD.time;
+  const d = AD.store.get('defects', defectId);
+  if (!d) return;
+  const vehicles = AD.store.all('vehicles').slice().sort((a, b) => a.id.localeCompare(b.id));
+  const today = T.todayKey();
+  modal({
+    title: `Edit defect — ${d.vehicleId}`,
+    wide: true,
+    body: `
+      <form class="form-grid" novalidate>
+        <div class="field full"><label>Vehicle <span class="req">*</span></label><select name="vehicleId">${options(vehicles.map((v) => [v.id, `${v.id} · ${v.rego} · ${v.type}`]), d.vehicleId)}</select></div>
+        <div class="field full"><label>Description <span class="req">*</span></label><textarea name="description" rows="4">${esc(d.description)}</textarea></div>
+        <div class="field full"><label>Reported photos <span class="help" style="font-weight:400;color:var(--muted)">(up to 8)</span></label><div id="edit-defect-photos"></div></div>
+        <div class="field"><label>Priority</label><select name="priority">${options(AD.DEFECT_PRIORITIES, d.priority)}</select></div>
+        <div class="field"><label>Status</label><select name="status">${options(AD.DEFECT_STATUSES, d.status)}</select></div>
+        <div class="field"><label>Reported by <span class="req">*</span></label><input type="text" name="reportedBy" value="${esc(d.reportedBy)}" list="edit-drv-list"><datalist id="edit-drv-list">${AD.store.all('drivers').map((x) => `<option value="${esc(x.name)}">`).join('')}</datalist></div>
+        <div class="field"><label>Date reported</label><input type="date" name="reportedDate" value="${esc(d.reportedDate || today)}" max="${today}"></div>
+        <div class="field"><label>Date resolved</label><input type="date" name="resolvedDate" value="${esc(d.resolvedDate || '')}" max="${today}"></div>
+        <div class="field full"><label>Resolution notes</label><textarea name="resolutionNotes" rows="3">${esc(d.resolutionNotes || '')}</textarea></div>
+        <div class="field full"><label>Resolution photos <span class="help" style="font-weight:400;color:var(--muted)">(up to 8)</span></label><div id="edit-resolution-photos"></div></div>
+      </form>
+      <div class="form-actions"><button class="btn btn-ghost" data-close type="button">Cancel</button><button class="btn btn-primary" data-save type="button">Save changes</button></div>`,
+    onMount(el, close) {
+      const f = el.querySelector('form');
+      const reportedPicker = photoPicker(el.querySelector('#edit-defect-photos'), d.photos || [], { label: 'Defect photo' });
+      const resolvedPicker = photoPicker(el.querySelector('#edit-resolution-photos'), d.resolvedPhotos || [], { label: 'Resolution photo' });
+      const resolvedDate = f.elements.resolvedDate;
+      f.elements.status.addEventListener('change', () => {
+        if (f.elements.status.value === 'Resolved' && !resolvedDate.value) resolvedDate.value = today;
+      });
+      el.querySelector('[data-close]').onclick = close;
+      const saveBtn = el.querySelector('[data-save]');
+      saveBtn.onclick = async () => {
+        const x = formData(f);
+        const errors = {};
+        if (!x.vehicleId) errors.vehicleId = 'Choose a vehicle.';
+        if (x.description.length < 5) errors.description = 'Describe the defect (at least a few words).';
+        if (!x.reportedBy) errors.reportedBy = 'Who reported it?';
+        if (x.reportedDate > today) errors.reportedDate = 'Can’t be in the future.';
+        if (x.resolvedDate > today) errors.resolvedDate = 'Can’t be in the future.';
+        if (!showErrors(f, errors)) return;
+        saveBtn.disabled = true;
+        try {
+          await AD.store.update('defects', d.id, {
+            vehicleId: x.vehicleId, description: x.description, priority: x.priority, status: x.status,
+            reportedBy: x.reportedBy, reportedDate: x.reportedDate || today,
+            resolvedDate: x.status === 'Resolved' ? (x.resolvedDate || today) : null,
+            resolutionNotes: x.resolutionNotes, photos: reportedPicker.get(), resolvedPhotos: resolvedPicker.get()
+          });
+          await AD.store.log(`Defect updated on ${x.vehicleId}: ${x.description.slice(0, 60)}`, x.vehicleId);
+        } catch (err) {
+          saveBtn.disabled = false;
+          toast('Could not update defect: ' + err.message, 'error');
+          return;
+        }
+        close();
+        toast(`Defect on ${x.vehicleId} updated`);
+      };
+    }
+  });
+};
+
 // Shared across the Defects page and the vehicle Defects tab: open the lightbox
 // with the defect's reported photos first, then any resolution photos. Does
 // nothing when there are no photos (callers hide the button in that case).
@@ -148,7 +212,7 @@ AD.viewDefect = function (defectId) {
     body: `
       <div class="defect-detail-head">
         <div><span class="id">${esc(d.vehicleId)}</span>${vehicle && vehicle.rego ? `<span>${esc(vehicle.rego)}</span>` : ''}${vehicle && vehicle.type ? `<span>${esc(vehicle.type)}</span>` : ''}</div>
-        <div>${priorityBadge(d.priority, d.status === 'Resolved')} ${defectBadge(d.status)}</div>
+        <div>${priorityBadge(d.priority, d.status === 'Resolved')} ${defectBadge(d.status)} <button type="button" class="btn btn-secondary btn-sm" data-edit-defect>Edit defect</button></div>
       </div>
       <section class="defect-detail-section">
         <h3>Description</h3>
@@ -167,6 +231,7 @@ AD.viewDefect = function (defectId) {
       ${!allPhotos.length ? '<div class="defect-detail-no-photos">No photos uploaded for this defect.</div>' : ''}`,
     onMount(el) {
       el.querySelectorAll('[data-photo-index]').forEach((b) => (b.onclick = () => AD.ui.photoLightbox(allPhotos, Number(b.dataset.photoIndex))));
+      el.querySelector('[data-edit-defect]').onclick = () => AD.editDefect(d.id);
     }
   });
 };
@@ -238,7 +303,7 @@ AD.views.defects = (function () {
         : `<div class="defect-card-media defect-card-media-empty" aria-label="No defect photo uploaded">
             ${I.camera}<span>No photo uploaded</span>
           </div>`;
-      const actions = `${d.status === 'Open' ? `<button type="button" class="btn btn-secondary btn-sm" data-prog="${d.id}">Start work</button>` : ''}
+      const actions = `<button type="button" class="btn btn-ghost btn-sm" data-edit="${d.id}">Edit</button>${d.status === 'Open' ? `<button type="button" class="btn btn-secondary btn-sm" data-prog="${d.id}">Start work</button>` : ''}
         ${!resolved ? `<button type="button" class="btn btn-primary btn-sm" data-resolve="${d.id}">${I.check} Resolve</button>` : `<button type="button" class="btn btn-secondary btn-sm" data-reopen="${d.id}">Reopen</button>`}`;
       return `<article class="defect-card defect-card-${priorityClass}${resolved ? ' is-resolved' : ''}" role="listitem" data-detail="${d.id}" tabindex="0" aria-label="Open full defect details for ${esc(d.vehicleId)}">
         ${media}
@@ -278,6 +343,7 @@ AD.views.defects = (function () {
       });
     });
     grid.querySelectorAll('[data-resolve]').forEach((b) => (b.onclick = () => AD.resolveDefect(b.dataset.resolve)));
+    grid.querySelectorAll('[data-edit]').forEach((b) => (b.onclick = () => AD.editDefect(b.dataset.edit)));
     grid.querySelectorAll('[data-prog]').forEach((b) => (b.onclick = async () => {
       try {
         const d = await AD.store.update('defects', b.dataset.prog, { status: 'In progress' });
