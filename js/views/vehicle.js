@@ -84,7 +84,7 @@ AD.views.vehicle = (function () {
         </dl>
         <div class="veh-actions">
           ${isVac ? `<a class="btn btn-secondary" href="#/calendar?view=week&truck=${v.id}">${I.calendar} Schedule</a>` : ''}
-          <button class="btn btn-secondary" id="edit-veh">${I.edit} Edit details</button>
+          <button class="btn btn-primary" data-edit-vehicle>${I.edit} Edit vehicle</button>
         </div>
       </header>
 
@@ -104,7 +104,7 @@ AD.views.vehicle = (function () {
       <div id="tab-body" role="tabpanel">${tabBody(v, services, defects, docs, upcoming)}</div>`;
 
     el.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => { tab = b.dataset.tab; fresh = true; AD.setParams({ tab }); draw(); }));
-    el.querySelector('#edit-veh').onclick = () => AD.vehicleForm(v);
+    el.querySelectorAll('[data-edit-vehicle]').forEach((b) => (b.onclick = () => AD.vehicleForm(v, () => draw())));
     const rangeSel = el.querySelector('#rev-range');
     if (rangeSel) rangeSel.onchange = () => { range = rangeSel.value; fresh = true; draw(); };
 
@@ -438,7 +438,7 @@ AD.views.vehicle = (function () {
     ].filter(Boolean);
     if (!rows.length) return '';
     return `<section class="section">
-      ${sectionHead({ title: 'Vehicle details', level: 3 })}
+      ${sectionHead({ title: 'Vehicle details', level: 3, actions: `<button type="button" class="btn btn-ghost btn-sm" data-edit-vehicle>${I.edit} Edit</button>` })}
       <dl class="facts">${rows.map(([dt, dd]) => `<div><dt>${esc(dt)}</dt><dd style="font-family:var(--mono,monospace);font-size:.92em">${esc(dd)}</dd></div>`).join('')}</dl>
     </section>`;
   }

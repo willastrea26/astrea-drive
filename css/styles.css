@@ -284,6 +284,10 @@ input[readonly] { background: var(--paper-2); color: var(--ink-2); }
 .field-error { color: var(--red); font-size: 13.5px; margin-top: 4px; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 18px; }
 .form-grid .full { grid-column: 1 / -1; }
+.form-section-title { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-top: 6px; padding: 12px 0 7px; border-bottom: 1px solid var(--rule); }
+.form-section-title:first-child { margin-top: -4px; padding-top: 0; }
+.form-section-title b { color: var(--ink); font-size: 15px; }
+.form-section-title span { color: var(--muted); font-size: 12px; text-align: right; }
 .field label { display: block; font-size: 14px; font-weight: 600; margin-bottom: 5px; color: var(--ink-2); }
 .field .help { font-size: 13.5px; color: var(--muted); margin-top: 4px; }
 .req { color: var(--muted); font-weight: 400; }

@@ -23,8 +23,10 @@ AD.vehicleForm = function (vehicle, onSaved) {
 
   modal({
     title: isNew ? 'Add vehicle' : `Edit ${v.id}`,
+    wide: true,
     body: `
       <form class="form-grid" novalidate>
+        <div class="form-section-title full"><b>Vehicle details</b><span>Identification and assignment</span></div>
         <div class="field"><label>Fleet ID <span class="req">*</span></label>
           <input type="text" name="id" value="${esc(v.id)}" ${isNew ? '' : 'disabled'} placeholder="e.g. UTE-03" maxlength="12">
           ${isNew ? '<div class="help">Unique short code, e.g. UTE-03.</div>' : ''}</div>
@@ -39,11 +41,13 @@ AD.vehicleForm = function (vehicle, onSaved) {
                <input type="text" name="hireCompany" value="${esc(v.hireCompany)}" list="hired-co-list" placeholder="e.g. Quinnex">
                <datalist id="hired-co-list">${companies.map((c) => `<option value="${esc(c)}">`).join('')}</datalist></div>`
           : `<div class="field"><label>Assigned driver</label><select name="driverId">${options(drivers, v.driverId, 'Unassigned')}</select></div>`}
+        <div class="form-section-title full"><b>Fleet status and servicing</b><span>Current operating and compliance information</span></div>
         <div class="field"><label>Status</label><select name="status">${options(AD.VEHICLE_STATUSES, v.status)}</select></div>
         <div class="field"><label>Odometer (km) <span class="req">*</span></label><input type="number" name="odometer" value="${esc(v.odometer)}" min="0" step="1"></div>
         <div class="field"><label>Registration expiry <span class="req">*</span></label><input type="date" name="regoExpiry" value="${esc(v.regoExpiry)}"></div>
         <div class="field"><label>Next service date <span class="req">*</span></label><input type="date" name="nextServiceDate" value="${esc(v.nextServiceDate)}"></div>
         <div class="field"><label>Next service odometer (km) <span class="req">*</span></label><input type="number" name="nextServiceKm" value="${esc(v.nextServiceKm)}" min="0" step="1"></div>
+        <div class="form-section-title full"><b>Identifiers and notes</b><span>Optional fleet reference details</span></div>
         <div class="field"><label>VIN</label><input type="text" name="vin" value="${esc(v.vin || '')}" maxlength="20"></div>
         <div class="field"><label>Variant / spec</label><input type="text" name="variant" value="${esc(v.variant || '')}"></div>
         <div class="field"><label>Linkt tag</label><input type="text" name="linktTag" value="${esc(v.linktTag || '')}"></div>
@@ -230,7 +234,7 @@ AD.views.fleet = (function () {
           ? `<td class="col-opt">${docCount ? `<span class="flag flag-muted">${docCount} file${docCount === 1 ? '' : 's'}</span>` : '<span class="muted">None</span>'}</td>`
           : `<td class="col-opt">${alerts || AD.ui.dash}</td>`}
         <td class="col-action col-opt col-wide">
-          <button class="row-menu" data-edit="${v.id}" title="Edit ${esc(v.id)}" aria-label="Edit ${esc(v.id)}">${I.dots}</button>
+          <button class="btn btn-ghost btn-sm" data-edit="${v.id}" title="Edit ${esc(v.id)}" aria-label="Edit ${esc(v.id)}">${I.edit} Edit</button>
         </td></tr>`;
     }).join('') || `<tr><td colspan="${isHired ? 9 : 10}" class="empty">No vehicles match these filters.</td></tr>`;
 
