@@ -139,6 +139,135 @@ AD.views.vehicle = (function () {
       toast(`${doc.name} deleted`);
       draw();
     }));
+    if (tab === 'documents') bindDocsDnd(tb, v);
+  }
+
+  /** Rename-category and drag-to-reorder wiring for the documents register. */
+  function bindDocsDnd(tb, v) {
+    const { esc, toast } = AD.ui;
+    const tbody = tb.querySelector('#doc-tbody');
+    if (!tbody) return;
+
+    // --- Rename a category heading inline ---
+    tb.querySelectorAll('[data-rename]').forEach((btn) => {
+      btn.onclick = (e) => {
+        e.preventDefault(); e.stopPropagation();
+        const head = btn.closest('.doc-group');
+        const nameEl = head && head.querySelector('.doc-group-name');
+        if (!nameEl || head.querySelector('.doc-cat-input')) return;
+        const oldCat = head.dataset.cat;
+        const input = document.createElement('input');
+        input.className = 'doc-cat-input';
+        input.type = 'text';
+        input.value = oldCat === 'Uncategorised' ? '' : oldCat;
+        input.setAttribute('aria-label', 'Category name');
+        nameEl.replaceWith(input);
+        btn.style.display = 'none';
+        input.focus(); input.select();
+        let done = false;
+        const commit = async (save) => {
+          if (done) return; done = true;
+          const next = input.value.trim();
+          if (!save || !next || next === oldCat) { draw(); return; }
+          try { await AD.store.renameDocumentCategory(v.id, oldCat, next); }
+          catch (err) { toast('Could not rename: ' + (err.message || err), 'error'); }
+          draw();
+        };
+        input.addEventListener('keydown', (ev) => {
+          if (ev.key === 'Enter') { ev.preventDefault(); commit(true); }
+          else if (ev.key === 'Escape') { ev.preventDefault(); commit(false); }
+        });
+        input.addEventListener('blur', () => commit(true));
+      };
+    });
+
+    // --- Drag to reorder documents and whole categories ---
+    let dragKind = null, dragId = null, dragCat = null;
+
+    const clearMarks = () => tbody.querySelectorAll('.doc-drop-mark').forEach((el) => el.classList.remove('doc-drop-mark'));
+
+    // Find the row to insert BEFORE given the pointer Y (null = append at end).
+    const slotBefore = (clientY, selector) => {
+      const els = Array.from(tbody.querySelectorAll(selector)).filter((el) => !el.classList.contains('dragging'));
+      let best = { offset: -Infinity, el: null };
+      els.forEach((el) => {
+        const box = el.getBoundingClientRect();
+        const offset = clientY - box.top - box.height / 2;
+        if (offset < 0 && offset > best.offset) best = { offset, el };
+      });
+      return best.el;
+    };
+
+    // The heading + all its document rows, as a contiguous block.
+    const categoryBlock = (head) => {
+      const block = [head];
+      let n = head.nextElementSibling;
+      while (n && !n.classList.contains('doc-group')) { block.push(n); n = n.nextElementSibling; }
+      return block;
+    };
+
+    const rebuildAndSave = async () => {
+      let curCat = null;
+      const ordered = [];
+      Array.from(tbody.children).forEach((tr) => {
+        if (tr.classList.contains('doc-group')) curCat = tr.dataset.cat;
+        else if (tr.classList.contains('doc-row')) {
+          ordered.push({ id: tr.dataset.docId, category: curCat === 'Uncategorised' ? '' : (curCat || ''), sortIndex: ordered.length });
+        }
+      });
+      try { await AD.store.reorderDocuments(ordered); }
+      catch (err) { toast('Could not save order: ' + (err.message || err), 'error'); }
+      draw();
+    };
+
+    tbody.addEventListener('dragstart', (e) => {
+      const tr = e.target.closest('tr');
+      if (!tr) return;
+      if (tr.classList.contains('doc-group')) { dragKind = 'cat'; dragCat = tr.dataset.cat; dragId = null; }
+      else if (tr.classList.contains('doc-row')) { dragKind = 'doc'; dragId = tr.dataset.docId; dragCat = null; }
+      else return;
+      tr.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      try { e.dataTransfer.setData('text/plain', dragId || dragCat || ''); } catch (err) { /* ignore */ }
+    });
+
+    tbody.addEventListener('dragover', (e) => {
+      if (!dragKind) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      clearMarks();
+      const ref = slotBefore(e.clientY, dragKind === 'cat' ? '.doc-group' : '.doc-row, .doc-group');
+      if (ref) ref.classList.add('doc-drop-mark');
+    });
+
+    tbody.addEventListener('drop', (e) => {
+      if (!dragKind) return;
+      e.preventDefault();
+      clearMarks();
+      if (dragKind === 'doc') {
+        const dragged = tbody.querySelector(`.doc-row[data-doc-id="${CSS.escape(dragId)}"]`);
+        if (dragged) {
+          const ref = slotBefore(e.clientY, '.doc-row, .doc-group');
+          if (ref) tbody.insertBefore(dragged, ref); else tbody.appendChild(dragged);
+        }
+      } else if (dragKind === 'cat') {
+        const head = Array.from(tbody.querySelectorAll('.doc-group')).find((h) => h.dataset.cat === dragCat);
+        if (head) {
+          const block = categoryBlock(head);
+          const ref = slotBefore(e.clientY, '.doc-group');
+          if (ref && !block.includes(ref)) block.forEach((el) => tbody.insertBefore(el, ref));
+          else if (!ref) block.forEach((el) => tbody.appendChild(el));
+        }
+      }
+      dragKind = dragId = dragCat = null;
+      rebuildAndSave();
+    });
+
+    tbody.addEventListener('dragend', () => {
+      clearMarks();
+      tbody.querySelectorAll('.dragging').forEach((el) => el.classList.remove('dragging'));
+      dragKind = dragId = dragCat = null;
+    });
   }
 
   // ---------- Photo drop zone ----------
@@ -382,30 +511,31 @@ AD.views.vehicle = (function () {
       </tbody></table></div>`;
 
     if (tab === 'documents') {
-      // Group documents under their category (the folder name they were uploaded
-      // in). Standard categories keep their defined order; any custom folder-name
-      // categories follow alphabetically; uncategorised files sit last.
-      const groups = {};
-      docs.forEach((d) => {
-        const cat = (d.category || '').trim() || 'Uncategorised';
-        (groups[cat] = groups[cat] || []).push(d);
+      // Documents are grouped under their category (the folder name). Order is
+      // user-controlled: sorted by the saved sortIndex, with categories appearing
+      // in the order their first document falls. Headings can be renamed and both
+      // documents and whole categories can be dragged to reorder.
+      const sorted = docs.slice().sort((a, b) => {
+        const sa = typeof a.sortIndex === 'number' ? a.sortIndex : 0;
+        const sb = typeof b.sortIndex === 'number' ? b.sortIndex : 0;
+        if (sa !== sb) return sa - sb;
+        const au = a.uploadedAt || '', bu = b.uploadedAt || '';
+        if (au !== bu) return bu.localeCompare(au);
+        return (a.name || '').localeCompare(b.name || '');
       });
-      const STD = AD.DOCUMENT_CATEGORIES || [];
-      const catOrder = Object.keys(groups).sort((a, b) => {
-        if (a === 'Uncategorised') return 1;
-        if (b === 'Uncategorised') return -1;
-        const ia = STD.indexOf(a), ib = STD.indexOf(b);
-        if (ia !== -1 && ib !== -1) return ia - ib;
-        if (ia !== -1) return -1;
-        if (ib !== -1) return 1;
-        return a.localeCompare(b);
+      const groups = [];
+      const groupIdx = {};
+      sorted.forEach((d) => {
+        const cat = (d.category || '').trim() || 'Uncategorised';
+        if (groupIdx[cat] == null) { groupIdx[cat] = groups.length; groups.push({ cat, docs: [] }); }
+        groups[groupIdx[cat]].docs.push(d);
       });
       const docRow = (d) => {
         const hasFile = !!d.storagePath;
         const sub = hasFile && d.uploadedBy ? `<span class="t2">${esc(d.uploadedBy)}</span>` : (!hasFile ? '<span class="t2 muted">Placeholder — no file attached</span>' : '');
         const icon = AD.fileIcon(hasFile ? (d.storagePath || d.name) : d.name);
-        return `<tr${hasFile ? ` class="row-link" data-open="${d.id}" title="Open ${esc(d.name)}"` : ''}>
-          <td><div class="doc-cell">${icon}<div class="doc-name">${hasFile ? `<a class="id" href="#" data-open="${d.id}">${esc(d.name)}</a>` : `<span>${esc(d.name)}</span>`}${sub}</div></div></td>
+        return `<tr class="doc-row${hasFile ? ' row-link' : ''}" draggable="true" data-doc-id="${d.id}"${hasFile ? ` data-open="${d.id}" title="Drag to reorder · click to open ${esc(d.name)}"` : ' title="Drag to reorder"'}>
+          <td><div class="doc-cell"><span class="doc-grip" aria-hidden="true"></span>${icon}<div class="doc-name">${hasFile ? `<a class="id" href="#" data-open="${d.id}">${esc(d.name)}</a>` : `<span>${esc(d.name)}</span>`}${sub}</div></div></td>
           <td class="num col-opt">${hasFile ? AD.fmtBytes(d.sizeBytes) : dash}</td>
           <td class="col-opt nowrap">${hasFile && d.uploadedAt ? T.fmtKey(d.uploadedAt.slice(0, 10)) : dash}</td>
           <td class="col-action">
@@ -413,23 +543,24 @@ AD.views.vehicle = (function () {
             <button class="btn btn-link btn-danger-ghost" data-delete="${d.id}">${hasFile ? 'Delete' : 'Remove'}</button>
           </td></tr>`;
       };
-      const body = catOrder.map((cat) => {
-        const rows = groups[cat].slice().sort((a, b) => {
-          const au = a.uploadedAt || '', bu = b.uploadedAt || '';
-          if (au !== bu) return bu.localeCompare(au);
-          return (a.name || '').localeCompare(b.name || '');
-        });
-        return `<tr class="doc-group"><td colspan="4"><span class="doc-group-name">${esc(cat)}</span><span class="doc-group-count">${rows.length}</span></td></tr>
-          ${rows.map(docRow).join('')}`;
-      }).join('');
+      const body = groups.map((g) => `
+        <tr class="doc-group" draggable="true" data-cat="${esc(g.cat)}">
+          <td colspan="4">
+            <span class="doc-grip doc-group-grip" aria-hidden="true"></span>
+            <span class="doc-group-name">${esc(g.cat)}</span>
+            <span class="doc-group-count">${g.docs.length}</span>
+            <button class="doc-cat-edit" data-rename="${esc(g.cat)}" type="button" title="Rename category" aria-label="Rename category">${I.edit || '✎'}</button>
+          </td>
+        </tr>
+        ${g.docs.map(docRow).join('')}`).join('');
       return `
       <div class="tab-tools">
-        <span class="t2">${docs.length} document${docs.length === 1 ? '' : 's'} on file${catOrder.length > 1 ? ` · ${catOrder.length} categories` : ''}</span>
+        <span class="t2">${docs.length} document${docs.length === 1 ? '' : 's'} on file${groups.length > 1 ? ` · ${groups.length} categories` : ''}</span>
         <button class="btn btn-sm btn-primary" data-upload>${I.plus} Upload document</button>
       </div>
-      <div class="table-wrap"><table class="data"><thead><tr>
+      <div class="table-wrap"><table class="data doc-table"><thead><tr>
         <th>Document</th><th class="num col-opt">Size</th><th class="col-opt">Uploaded</th><th class="col-action"><span class="hide">Actions</span></th>
-      </tr></thead><tbody>
+      </tr></thead><tbody id="doc-tbody">
       ${body || '<tr><td colspan="4" class="empty">No documents yet. Click “Upload document” to add one.</td></tr>'}
       </tbody></table></div>`;
     }

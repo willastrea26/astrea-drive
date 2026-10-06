@@ -99,10 +99,13 @@ AD.store = (function () {
     if (up.error) throw up.error;
     let who = '';
     try { const { data } = await sb().auth.getUser(); who = (data && data.user && data.user.email) || ''; } catch (e) { /* leave blank */ }
+    // Append to the end: one past the highest existing sortIndex for this vehicle.
+    const maxIdx = db.documents.reduce((m, r) => r.vehicleId === vehicleId && typeof r.sortIndex === 'number' && r.sortIndex > m ? r.sortIndex : m, -1);
     const rec = {
       vehicleId, name: name || file.name, category: category || '', placeholder: false,
       storagePath: path, contentType: file.type || 'application/octet-stream',
-      sizeBytes: file.size || 0, uploadedAt: new Date().toISOString(), uploadedBy: who
+      sizeBytes: file.size || 0, uploadedAt: new Date().toISOString(), uploadedBy: who,
+      sortIndex: maxIdx + 1
     };
     try {
       return await insert('documents', rec, 'doc');
@@ -111,6 +114,28 @@ AD.store = (function () {
       try { await sb().storage.from(BUCKET).remove([path]); } catch (e) { /* best effort */ }
       throw dbErr;
     }
+  }
+
+  /** Rename a category: update every document under `oldCat` for this vehicle
+   *  to `newCat`. Merges into an existing category if newCat already exists. */
+  async function renameDocumentCategory(vehicleId, oldCat, newCat) {
+    const rows = db.documents.filter((r) => r.vehicleId === vehicleId && ((r.category || '').trim() || 'Uncategorised') === oldCat);
+    await Promise.all(rows.map((r) => update('documents', r.id, { category: newCat })));
+  }
+
+  /** Persist a new document order. `ordered` is [{ id, category, sortIndex }].
+   *  Only rows whose sortIndex or category actually changed are written. */
+  async function reorderDocuments(ordered) {
+    const tasks = [];
+    ordered.forEach((o) => {
+      const cur = db.documents.find((r) => r.id === o.id);
+      if (!cur) return;
+      const patch = {};
+      if (cur.sortIndex !== o.sortIndex) patch.sortIndex = o.sortIndex;
+      if (o.category != null && (cur.category || '') !== o.category) patch.category = o.category;
+      if (Object.keys(patch).length) tasks.push(update('documents', o.id, patch));
+    });
+    await Promise.all(tasks);
   }
 
   /** Short-lived signed URL for a file in the private bucket.
@@ -160,5 +185,5 @@ AD.store = (function () {
     await update('vehicles', vehicleId, { photos });
   }
 
-  return { load, all, get, insert, update, remove, log, on, uid, uploadDocument, signDocumentUrl, removeDocument, uploadVehiclePhoto, removeVehiclePhoto };
+  return { load, all, get, insert, update, remove, log, on, uid, uploadDocument, signDocumentUrl, removeDocument, renameDocumentCategory, reorderDocuments, uploadVehiclePhoto, removeVehiclePhoto };
 })();
