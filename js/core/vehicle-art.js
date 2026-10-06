@@ -631,63 +631,63 @@ AD.art = (function () {
     </defs>
 
     <!-- Ground shadow and chassis -->
-    <ellipse cx="60" cy="54.6" rx="50" ry="3" fill="#101D35" opacity=".16"/>
-    <rect x="8" y="41" width="104" height="4" rx="1.3" fill="#202936"/>
+    <ellipse cx="60" cy="54.6" rx="44" ry="3" fill="#101D35" opacity=".16"/>
+    <rect x="16" y="41" width="90" height="4" rx="1.3" fill="#202936"/>
 
-    <!-- Body: short bonnet, raked windscreen, tall cargo box -->
-    <path d="M5.5 43.5 L5.5 34 Q5.5 31 8.5 30.3 L15 29.2 L21 19.2 Q22 17.5 25 17.5 L110.5 17.5 Q112.5 17.5 112.5 19.5 L112.5 43.5
-             L104 43.5 A10 10 0 0 0 86 43.5 L34 43.5 A10 10 0 0 0 16 43.5 Z"
+    <!-- Body: short-wheelbase work van — stubby bonnet, tall compact cargo box -->
+    <path d="M15 43 L15 33.5 Q15 30.8 17.8 30.1 L23 29.1 L28 19.4 Q29 17.5 32 17.5 L103 17.5 Q105 17.5 105 19.5 L105 43
+             L96 43 A8 8 0 0 0 80 43 L41 43 A8 8 0 0 0 25 43 Z"
           fill="${p.body}" stroke="${p.stroke}" stroke-width="1" stroke-linejoin="round"/>
 
     <!-- Windscreen and driver window -->
-    <path d="M16.8 29.2 L21.8 19.9 Q22.3 19 23.8 19 L29 19 L29 29.2 Z" fill="url(#${id}-glass)"/>
-    <rect x="30.5" y="19" width="9" height="8.2" rx=".6" fill="url(#${id}-glass)"/>
-    <path d="M29.6 18.6 V29.4 M39.8 18.6 V27.6" stroke="#111c2d" stroke-width="1.1"/>
+    <path d="M23.6 29.1 L28.3 20.1 Q28.8 19 30.2 19 L35 19 L35 29.1 Z" fill="url(#${id}-glass)"/>
+    <rect x="36.5" y="19" width="9" height="8" rx=".6" fill="url(#${id}-glass)"/>
+    <path d="M35.6 18.6 V29.3 M45.8 18.6 V27.4" stroke="#111c2d" stroke-width="1.1"/>
 
     <!-- Cab door line + handle -->
-    <path d="M40 27.8 V43 M30 29.6 V43" stroke="${p.stroke}" stroke-width=".7"/>
-    <rect x="34.3" y="31" width="4.2" height="1.1" rx=".5" fill="#667486"/>
+    <path d="M46 27.6 V42.5 M36 29.4 V42.5" stroke="${p.stroke}" stroke-width=".7"/>
+    <rect x="40.2" y="30.8" width="4.2" height="1.1" rx=".5" fill="#667486"/>
 
     <!-- Sliding cargo door seam + handle -->
-    <path d="M58 18.8 V43" stroke="${p.stroke}" stroke-width=".6" opacity=".6"/>
-    <rect x="51.5" y="31" width="4.2" height="1.1" rx=".5" fill="#667486"/>
+    <path d="M63 18.8 V42.5" stroke="${p.stroke}" stroke-width=".6" opacity=".6"/>
+    <rect x="56.5" y="30.8" width="4.2" height="1.1" rx=".5" fill="#667486"/>
 
     <!-- Rear door window and seam -->
-    <rect x="99" y="20" width="10" height="7" rx=".6" fill="url(#${id}-glass)"/>
-    <path d="M104 20 V27" stroke="#111c2d" stroke-width=".8" opacity=".7"/>
-    <path d="M98 18.8 V43" stroke="${p.stroke}" stroke-width=".6" opacity=".55"/>
+    <rect x="94" y="20" width="8.5" height="6.5" rx=".6" fill="url(#${id}-glass)"/>
+    <path d="M98.3 20 V26.5" stroke="#111c2d" stroke-width=".8" opacity=".7"/>
+    <path d="M92.5 18.8 V42.5" stroke="${p.stroke}" stroke-width=".6" opacity=".55"/>
 
     <!-- Roof highlight + waist line -->
-    <path d="M26 18.5 H110.5" stroke="#ffffff" stroke-width=".9" opacity=".5"/>
-    <path d="M42 36.5 H110" stroke="${p.stroke}" stroke-width=".5" opacity=".3"/>
+    <path d="M32 18.5 H104" stroke="#ffffff" stroke-width=".9" opacity=".5"/>
+    <path d="M47 36 H104" stroke="${p.stroke}" stroke-width=".5" opacity=".3"/>
 
     <!-- Brand accent stripe along the side -->
-    <rect x="30" y="38.6" width="81" height="1.6" rx=".6" fill="${p.trim}" opacity=".85"/>
+    <rect x="36" y="38.3" width="68" height="1.6" rx=".6" fill="${p.trim}" opacity=".85"/>
 
     <!-- Front: headlight, grille, bumper, indicator -->
-    <path d="M5.8 33 L11 32.2 L11.3 35 L6 35.6 Z" fill="#eaf1f7" stroke="#8390a0" stroke-width=".4"/>
-    <rect x="5.5" y="36.2" width="6" height="3.4" rx=".6" fill="#27313e"/>
-    <path d="M6 37 H10.8 M6 38.2 H10.5" stroke="#7c8998" stroke-width=".4"/>
-    <rect x="4.5" y="39.5" width="9" height="3.2" rx="1" fill="#202936"/>
-    <rect x="6" y="35.7" width="2" height="1" rx=".3" fill="#f4b943"/>
+    <path d="M15.3 32.8 L20.5 32 L20.8 34.8 L15.5 35.4 Z" fill="#eaf1f7" stroke="#8390a0" stroke-width=".4"/>
+    <rect x="15" y="36.2" width="6" height="3.2" rx=".6" fill="#27313e"/>
+    <path d="M15.5 37 H20.3 M15.5 38.1 H20" stroke="#7c8998" stroke-width=".4"/>
+    <rect x="14" y="39.3" width="9" height="3.1" rx="1" fill="#202936"/>
+    <rect x="15.5" y="35.6" width="2" height="1" rx=".3" fill="#f4b943"/>
 
     <!-- Door mirror -->
-    <path d="M20.5 20.5 L17.5 19 L17 21 L20 22" fill="#2a3140" stroke="#1d2330" stroke-width=".4"/>
+    <path d="M27.5 20.5 L24.5 19 L24 21 L27 22" fill="#2a3140" stroke="#1d2330" stroke-width=".4"/>
 
     <!-- Rear light + bumper -->
-    <path d="M111 31 H112.5 V37 H111 Z" fill="#b9343d"/>
-    <rect x="107.5" y="40" width="6.5" height="2.8" rx=".6" fill="#202936"/>
+    <path d="M103.5 31 H105 V37 H103.5 Z" fill="#b9343d"/>
+    <rect x="99.5" y="40" width="6.5" height="2.8" rx=".6" fill="#202936"/>
 
     <!-- Astrea wordmark on the cargo panel -->
-    ${mark(p.mark, 66, 27, 26)}
+    ${mark(p.mark, 65, 27, 24)}
 
     <!-- Wheels with alloy rims -->
-    <g fill="#121923"><circle cx="25" cy="46.5" r="8.3"/><circle cx="95" cy="46.5" r="8.3"/></g>
-    <g fill="url(#${id}-rim)" stroke="#596575" stroke-width=".45"><circle cx="25" cy="46.5" r="4.9"/><circle cx="95" cy="46.5" r="4.9"/></g>
-    <g fill="#283241"><circle cx="25" cy="46.5" r="1.6"/><circle cx="95" cy="46.5" r="1.6"/></g>
+    <g fill="#121923"><circle cx="33" cy="46.5" r="8"/><circle cx="88" cy="46.5" r="8"/></g>
+    <g fill="url(#${id}-rim)" stroke="#596575" stroke-width=".45"><circle cx="33" cy="46.5" r="4.8"/><circle cx="88" cy="46.5" r="4.8"/></g>
+    <g fill="#283241"><circle cx="33" cy="46.5" r="1.6"/><circle cx="88" cy="46.5" r="1.6"/></g>
     <g stroke="#4b5665" stroke-width=".6" opacity=".9">
-      <path d="M25 42.1 V44.9 M20.8 45 L23.4 46 M22.4 50 L24.1 47.8 M27.6 50 L25.9 47.8 M29.2 45 L26.6 46"/>
-      <path d="M95 42.1 V44.9 M90.8 45 L93.4 46 M92.4 50 L94.1 47.8 M97.6 50 L95.9 47.8 M99.2 45 L96.6 46"/>
+      <path d="M33 42.2 V44.9 M28.9 45 L31.4 46 M30.5 50 L32.1 47.8 M35.5 50 L33.9 47.8 M37.1 45 L34.6 46"/>
+      <path d="M88 42.2 V44.9 M83.9 45 L86.4 46 M85.5 50 L87.1 47.8 M90.5 50 L88.9 47.8 M92.1 45 L89.6 46"/>
     </g>
   </symbol>`;
 
