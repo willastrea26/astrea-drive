@@ -90,7 +90,7 @@ function guessCategory(name) {
 AD.documentForm = function (vehicleId, onSaved) {
   const { esc, options, modal, toast } = AD.ui;
   const I = AD.icons || {};
-  const ACCEPT = '.pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.webp,.heic,.txt';
+  const ACCEPT = '.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.png,.jpg,.jpeg,.webp,.heic,.txt,.csv,.zip,.rar,.7z';
   const UPLOAD_ICO = '<svg viewBox="0 0 24 24" class="ico" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4"/><path d="m6 10 6-6 6 6"/><path d="M4 20h16"/></svg>';
 
   modal({
@@ -100,8 +100,10 @@ AD.documentForm = function (vehicleId, onSaved) {
         <div class="du-drop" id="du-drop" tabindex="0" role="button" aria-label="Drop files here or click to browse">
           <div class="du-drop-ico">${UPLOAD_ICO}</div>
           <div class="du-drop-title">Drop files here</div>
-          <div class="du-drop-sub">or <span class="du-link">click to browse</span> — PDFs, images, Word or Excel docs, up to ${AD.fmtBytes(AD.MAX_DOC_BYTES)} each</div>
+          <div class="du-drop-sub">or <span class="du-link" id="du-browse-files">click to browse</span> · <span class="du-link" id="du-browse-folder">browse a folder</span></div>
+          <div class="du-drop-hint">PDFs, images, Word, Excel, PowerPoint, ZIPs — up to ${AD.fmtBytes(AD.MAX_DOC_BYTES)} each</div>
           <input type="file" id="du-input" accept="${ACCEPT}" multiple hidden>
+          <input type="file" id="du-input-dir" webkitdirectory directory multiple hidden>
         </div>
         <ul class="du-list" id="du-list" hidden></ul>
       </div>
@@ -120,8 +122,35 @@ AD.documentForm = function (vehicleId, onSaved) {
         window.removeEventListener('drop', stopDefault);
         rawClose();
       };
+
+      // Recursively walk a DirectoryEntry (from webkitGetAsEntry) and collect
+      // every file beneath it. Skips hidden files (.DS_Store, .git, etc).
+      const walkEntry = (entry) => new Promise((resolve) => {
+        if (!entry) return resolve([]);
+        if (entry.isFile) {
+          entry.file((f) => resolve([f]), () => resolve([]));
+          return;
+        }
+        if (entry.isDirectory) {
+          const reader = entry.createReader();
+          const all = [];
+          const readBatch = () => reader.readEntries(async (entries) => {
+            if (!entries.length) return resolve(all);
+            for (const e of entries) {
+              if (e.name && e.name.startsWith('.')) continue;
+              const files = await walkEntry(e);
+              all.push(...files);
+            }
+            readBatch();
+          }, () => resolve(all));
+          readBatch();
+        } else {
+          resolve([]);
+        }
+      });
       const drop = el.querySelector('#du-drop');
       const input = el.querySelector('#du-input');
+      const dirInput = el.querySelector('#du-input-dir');
       const list = el.querySelector('#du-list');
       const saveBtn = el.querySelector('[data-save]');
       el.querySelector('[data-close]').onclick = close;
@@ -205,8 +234,12 @@ AD.documentForm = function (vehicleId, onSaved) {
         render();
       };
 
-      // Click → file picker
-      drop.addEventListener('click', () => input.click());
+      // Click handlers — the drop zone itself opens the file picker, and the
+      // two inline links target files vs folder specifically.
+      drop.addEventListener('click', (e) => {
+        if (e.target.id === 'du-browse-folder') { e.stopPropagation(); dirInput.click(); return; }
+        input.click();
+      });
       drop.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); input.click(); }
       });
@@ -214,8 +247,17 @@ AD.documentForm = function (vehicleId, onSaved) {
         addFiles(input.files);
         input.value = '';
       });
+      dirInput.addEventListener('change', () => {
+        // webkitdirectory populates files with everything under the folder tree.
+        // Skip dotfiles the OS adds (.DS_Store, Thumbs.db, …).
+        const files = Array.from(dirInput.files || []).filter((f) => !f.name.startsWith('.') && f.name !== 'Thumbs.db');
+        addFiles(files);
+        dirInput.value = '';
+      });
 
-      // Drag + drop
+      // Drag + drop. For a native file drop e.dataTransfer.files has the files
+      // flat; for a FOLDER drop we have to walk the DirectoryEntry tree via
+      // the webkitGetAsEntry API or we only get the folder's name, no contents.
       ['dragenter', 'dragover'].forEach((ev) => drop.addEventListener(ev, (e) => {
         e.preventDefault(); e.stopPropagation();
         drop.classList.add('du-over');
@@ -225,8 +267,20 @@ AD.documentForm = function (vehicleId, onSaved) {
         if (ev === 'dragleave' && drop.contains(e.relatedTarget)) return;
         drop.classList.remove('du-over');
       }));
-      drop.addEventListener('drop', (e) => {
-        addFiles(e.dataTransfer && e.dataTransfer.files);
+      drop.addEventListener('drop', async (e) => {
+        const items = e.dataTransfer && e.dataTransfer.items;
+        const hasEntries = items && items.length && typeof items[0].webkitGetAsEntry === 'function';
+        if (!hasEntries) {
+          addFiles(e.dataTransfer && e.dataTransfer.files);
+          return;
+        }
+        const entries = Array.from(items).map((it) => it.webkitGetAsEntry()).filter(Boolean);
+        const collected = [];
+        for (const entry of entries) {
+          const files = await walkEntry(entry);
+          collected.push(...files);
+        }
+        addFiles(collected);
       });
 
       saveBtn.onclick = async () => {
