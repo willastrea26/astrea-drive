@@ -1,9 +1,9 @@
 /*
- * Tracker: scheduled vac truck positions on a map of Australia.
+ * Tracker: scheduled vehicle positions and current workshop assignments on a map of Australia.
  *
- * Positions come ONLY from Calendar bookings at the selected instant. Trucks
- * jump between booked sites as time changes — never GPS, never interpolated
- * travel, never an assumed return to depot.
+ * Positions come from Calendar bookings at the selected instant, plus a
+ * vehicle's explicit "In workshop" assignment. Never GPS, never interpolated
+ * travel, and never an assumed return to depot.
  */
 AD.views = AD.views || {};
 
@@ -19,6 +19,12 @@ AD.views.tracker = (function () {
   const wsMarkers = new Map();
   let st = {};
   let prefs = loadPrefs();
+
+  function trackedVehicles() {
+    const vehicles = new Map(L.vacTrucks().map((v) => [v.id, v]));
+    AD.store.all('vehicles').filter((v) => !v.hired && v.status === 'In workshop' && v.workshopId).forEach((v) => vehicles.set(v.id, v));
+    return [...vehicles.values()].sort((a, b) => a.id.localeCompare(b.id));
+  }
 
   function loadPrefs() {
     try { return Object.assign({ panel: 'open', style: 'dark' }, JSON.parse(localStorage.getItem(PREF_KEY) || '{}')); }
@@ -71,7 +77,7 @@ AD.views.tracker = (function () {
             </div>
             <div class="fp-body" id="t-panel-body">
               <div class="fp-filters">
-                <select id="f-truck" aria-label="Truck">${options(L.vacTrucks().map((v) => v.id), st.truck, 'All trucks')}</select>
+                <select id="f-truck" aria-label="Vehicle">${options(trackedVehicles().map((v) => v.id), st.truck, 'All vehicles')}</select>
                 <select id="f-status" aria-label="Booking status">${options([['confirmed', 'Confirmed'], ['tentative', 'Tentative'], ['maintenance', 'Maintenance'], ['depot', 'Depot'], ['unscheduled', 'Unscheduled'], ['conflict', 'Clash'], ['needs-location', 'Site location required']], st.status, 'Any status')}</select>
                 <select id="f-avail" aria-label="Availability">${options([['free', 'Free (no booking)'], ['booked', 'Booked on a job'], ['unavailable', 'Unavailable']], st.avail, 'Availability')}</select>
               </div>
@@ -165,7 +171,7 @@ AD.views.tracker = (function () {
       });
       group.on('clustermouseover', (e) => {
         const ids = e.layer.getAllChildMarkers().map((m) => m._tid).sort();
-        e.layer.bindTooltip(`<b>${ids.length} trucks</b><br>${ids.join(', ')}<br><span class="muted">Click to ${ids.length && sameSpot(e.layer) ? 'separate' : 'zoom in'}</span>`, { direction: 'top', offset: [0, -26], className: 'tm-tip' }).openTooltip();
+        e.layer.bindTooltip(`<b>${ids.length} vehicles</b><br>${ids.join(', ')}<br><span class="muted">Click to ${ids.length && sameSpot(e.layer) ? 'separate' : 'zoom in'}</span>`, { direction: 'top', offset: [0, -26], className: 'tm-tip' }).openTooltip();
       });
       // Keep the true site visible while trucks are fanned out.
       group.on('spiderfied', (e) => {
@@ -182,9 +188,9 @@ AD.views.tracker = (function () {
     }
     group.addTo(map);
 
-    // Static, always-on layer of repairer/workshop locations relevant to vac trucks.
+    // Static, always-on layer of all saved repairer/workshop locations.
     wsGroup = window.L.layerGroup().addTo(map);
-    L.workshopsFor('Vac truck').filter((w) => w.lat != null).forEach((w) => {
+    AD.store.all('workshops').filter((w) => w.lat != null && w.lng != null).forEach((w) => {
       const m = window.L.marker([w.lat, w.lng], { icon: wsIcon(0), keyboard: false, zIndexOffset: -1000 });
       m._wid = w.id;
       m._w = w;
@@ -204,13 +210,13 @@ AD.views.tracker = (function () {
     });
   }
 
-  /** Refresh workshop pin badges/tooltips with whichever trucks are currently located there. */
+  /** Refresh workshop pin badges/tooltips with whichever vehicles are currently located there. */
   function syncWorkshops(shown) {
     for (const [id, m] of wsMarkers) {
       const w = m._w;
       const here = shown.filter((l) => l.state === 'located' && l.lat === w.lat && l.lng === w.lng);
       m.setIcon(wsIcon(here.length));
-      m.bindTooltip(`<b>${esc(w.name)}</b><br>${esc(w.address)}${here.length ? `<br><b>${here.length} truck${here.length > 1 ? 's' : ''} here now:</b> ${here.map((l) => esc(l.truckId)).join(', ')}` : ''}`, { direction: 'top', offset: [0, -18], className: 'tm-tip' });
+      m.bindTooltip(`<b>${esc(w.name)}</b><br>${esc(w.address)}${here.length ? `<br><b>${here.length} vehicle${here.length > 1 ? 's' : ''} here now:</b> ${here.map((l) => esc(l.truckId)).join(', ')}` : ''}`, { direction: 'top', offset: [0, -18], className: 'tm-tip' });
     }
   }
 
@@ -221,19 +227,18 @@ AD.views.tracker = (function () {
     const hasSel = kids.some((m) => m._tid === st.sel);
     return window.L.divIcon({
       className: 'tcluster',
-      html: `<div class="tc${hasSel ? ' sel' : ''}" aria-label="${kids.length} trucks"><span class="tc-n">${kids.length}</span><span class="tc-l">trucks</span></div>`,
+      html: `<div class="tc${hasSel ? ' sel' : ''}" aria-label="${kids.length} vehicles"><span class="tc-n">${kids.length}</span><span class="tc-l">vehicles</span></div>`,
       iconSize: [56, 56], iconAnchor: [28, 28]
     });
   }
 
   function markerIcon(l, sel) {
-    const num = AD.art.num(l.truckId);
     return window.L.divIcon({
       className: 'tm-wrap',
       html: `<div class="tm tm-${l.cat}${sel ? ' sel' : ''}">
         <span class="tm-halo"></span>
         <span class="tm-status"><i></i>${STATUS_WORD[l.cat] || ''}</span>
-        ${AD.art.vac(num, 88)}
+        ${AD.art.forVehicle(l.truck, 88, `${l.truckId} scheduled location`) || AD.art.car(88, `${l.truckId} vehicle`)}
         <span class="tm-stem"></span><span class="tm-anchor"></span>
       </div>`,
       iconSize: [88, 64], iconAnchor: [44, 60]
@@ -370,8 +375,24 @@ AD.views.tracker = (function () {
 
   // ---------------------------------------------------------------- state
   function locations() {
-    return L.vacTrucks().map((v) => {
-      const loc = L.locate(v.id, st.t);
+    return trackedVehicles().map((v) => {
+      let loc = L.locate(v.id, st.t);
+      const workshop = v.status === 'In workshop' && v.workshopId ? AD.store.get('workshops', v.workshopId) : null;
+      // A saved workshop assignment supplies a trustworthy position when no
+      // calendar booking (or a booking without coordinates) can locate it.
+      if (workshop && workshop.lat != null && workshop.lng != null && (loc.state === 'unscheduled' || loc.state === 'needs-location')) {
+        const day = T.dateKey(st.t);
+        const booking = {
+          id: `workshop-${v.id}`, truckId: v.id, kind: 'maintenance', status: 'confirmed',
+          jobName: 'In workshop', siteId: workshop.id, address: workshop.address || workshop.name,
+          lat: workshop.lat, lng: workshop.lng,
+          start: new Date(T.startOfDay(day)).toISOString(), end: new Date(T.startOfDay(T.addDays(day, 1))).toISOString()
+        };
+        loc = Object.assign({}, loc, {
+          state: 'located', booking, lat: workshop.lat, lng: workshop.lng,
+          label: workshop.address || workshop.name, kindLabel: 'Maintenance', workshopAssignment: workshop
+        });
+      }
       loc.cat = loc.state === 'conflict' ? 'conflict' : loc.state === 'unscheduled' ? 'unscheduled' : L.bookingCategory(loc.booking);
       const vehicleDown = v.status === 'Out of service' || v.status === 'In workshop';
       loc.avail = loc.cat === 'maintenance' || (vehicleDown && loc.cat === 'unscheduled') ? 'unavailable' : loc.cat === 'unscheduled' ? 'free' : 'booked';
@@ -479,7 +500,11 @@ AD.views.tracker = (function () {
       const sel = l.truckId === st.sel;
       const b = l.booking;
       let job, site, when;
-      if (l.state === 'unscheduled') {
+      if (l.workshopAssignment) {
+        job = 'In workshop';
+        site = esc(l.workshopAssignment.name);
+        when = 'Current workshop assignment';
+      } else if (l.state === 'unscheduled') {
         job = '<span class="muted">No booking at this time</span>';
         site = '<span class="fp-unknown">Unscheduled — location unknown</span>';
         when = l.next ? `Next: ${T.fmtKeyLong(T.dateKey(l.next.start)).slice(0, 9)} ${T.fmtTime(l.next.start)}` : 'No upcoming bookings';
@@ -495,7 +520,7 @@ AD.views.tracker = (function () {
       const fullSite = b ? (b.address || siteName(b)) : '';
       return `<div class="fp-item${sel ? ' sel' : ''}" role="listitem" data-t="${l.truckId}">
         <button type="button" class="fp-row" data-pick="${l.truckId}" aria-expanded="${sel}" aria-controls="fp-d-${l.truckId}" ${fullSite ? `title="${esc(fullSite)}"` : ''}>
-          <span class="fp-thumb">${AD.art.vac(AD.art.num(l.truckId), 64)}</span>
+          <span class="fp-thumb">${AD.art.forVehicle(l.truck, 64, `${l.truckId} vehicle`) || AD.art.car(64, `${l.truckId} vehicle`)}</span>
           <span class="fp-main">
             <span class="fp-top"><b>${l.truckId}</b>${statusFor(l)}</span>
             <span class="fp-job">${job}</span>
@@ -525,6 +550,16 @@ AD.views.tracker = (function () {
     const nextHtml = next ? `${esc(L.bookingTitle(next))}<span class="t2">${T.fmtDateTime(next.start)} · ${esc(siteName(next) || 'Site location required')}</span>` : '<span class="muted">None scheduled</span>';
     const vehicleBtn = `<button type="button" class="btn btn-secondary btn-sm" data-veh="${v.id}">View vehicle</button>`;
     const head = `<div class="fpd-veh">${esc(v.make)} ${esc(v.model.split(' —')[0])} · ${esc(v.rego)} · ${vehicleBadge(v.status)}</div>`;
+
+    if (l.workshopAssignment) {
+      const w = l.workshopAssignment;
+      return `${head}
+        <p class="note"><b>Workshop location shown.</b> ${esc(v.id)} is assigned to ${esc(w.name)}.</p>
+        <dl><dt>Workshop</dt><dd>${esc(w.name)}${w.address ? `<span class="t2">${esc(w.address)}</span>` : ''}</dd>
+        <dt>Driver</dt><dd>${assigned ? esc(assigned) : '<span class="muted">Not recorded</span>'}</dd>
+        <dt>Next job</dt><dd>${nextHtml}</dd></dl>
+        <div class="btns">${vehicleBtn}</div>`;
+    }
 
     if (l.state === 'unscheduled') {
       return `${head}
