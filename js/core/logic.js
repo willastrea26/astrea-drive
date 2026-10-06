@@ -15,7 +15,9 @@ AD.logic = (function () {
   function serviceState(v) {
     const today = T.todayKey();
     const daysLeft = T.daysBetween(today, v.nextServiceDate);
-    const hasKm = v.nextServiceKm !== null && v.nextServiceKm !== '' && Number.isFinite(Number(v.nextServiceKm));
+    // Legacy imports used 0 to mean "not applicable". Treat it as date-only
+    // so those vehicles do not appear falsely overdue by kilometres.
+    const hasKm = Number.isFinite(Number(v.nextServiceKm)) && Number(v.nextServiceKm) > 0;
     const kmLeft = hasKm ? Number(v.nextServiceKm) - Number(v.odometer || 0) : Infinity;
     if (daysLeft < 0 || kmLeft <= 0) {
       const why = daysLeft < 0 ? `${-daysLeft} day${daysLeft === -1 ? '' : 's'} overdue` : `${fmtKm(-kmLeft)} over`;

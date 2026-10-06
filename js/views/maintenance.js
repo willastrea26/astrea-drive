@@ -129,7 +129,7 @@ AD.serviceForm = function (vehicleId) {
         const { y, m, d: dd } = T.parseKey(d);
         const next = new Date(Date.UTC(y, m - 1 + (v.serviceIntervalMonths || 6), dd));
         f.nextServiceDate.value = next.toISOString().slice(0, 10);
-        f.nextServiceKmNA.checked = v.nextServiceKm == null;
+        f.nextServiceKmNA.checked = !(Number(v.nextServiceKm) > 0);
         f.nextServiceKm.value = f.nextServiceKmNA.checked ? '' : v.odometer + (v.serviceIntervalKm || 10000);
         syncKm();
         el.querySelector('#svc-hint').textContent = f.nextServiceKmNA.checked
@@ -195,13 +195,15 @@ AD.serviceForm = function (vehicleId) {
 };
 
 AD.views.maintenance = (function () {
-  const { esc, stateBadge, bookingBadge, pageHeader, sectionHead, dash } = AD.ui;
+  const { esc, options, pageHeader, sectionHead, dash } = AD.ui;
   const L = AD.logic, T = AD.time, I = AD.icons;
-  let root = null, filter = 'due';
+  let root = null, filter = 'due', query = '', type = '';
 
   function render(el, params) {
     root = el;
     filter = params.filter || 'due';
+    query = params.q || '';
+    type = params.type || '';
     draw();
   }
 
@@ -210,50 +212,94 @@ AD.views.maintenance = (function () {
     // Owned fleet only — hired vehicles are serviced by their hire company, not us.
     const all = AD.store.all('vehicles').filter((v) => !v.hired).map((v) => ({ v, s: L.serviceState(v) }));
     const order = { overdue: 0, soon: 1, ok: 2 };
-    all.sort((a, b) => order[a.s.state] - order[b.s.state] || a.s.daysLeft - b.s.daysLeft);
+    all.sort((a, b) => order[a.s.state] - order[b.s.state] || Math.min(a.s.daysLeft, a.s.kmLeft) - Math.min(b.s.daysLeft, b.s.kmLeft) || a.v.id.localeCompare(b.v.id));
     const overdue = all.filter((x) => x.s.state === 'overdue');
     const soon = all.filter((x) => x.s.state === 'soon');
-    const list = filter === 'overdue' ? overdue : filter === 'due' ? overdue.concat(soon) : all;
+    const scheduled = all.filter((x) => x.s.state === 'ok');
+    const dateOnly = all.filter((x) => !x.s.hasKm);
+    const types = [...new Set(all.map(({ v }) => v.type).filter(Boolean))].sort();
     const now = Date.now();
     const blocks = AD.store.all('bookings').filter((b) => b.kind === 'maintenance' && b.status !== 'cancelled' && Date.parse(b.end) > now).sort((a, b) => a.start.localeCompare(b.start));
     const recent = AD.store.all('services').slice().sort((a, b) => b.date.localeCompare(a.date)).slice(0, 6);
-    const late = (text) => `<span class="flag flag-red">${text}</span>`;
     const startsIn = (b) => {
       if (Date.parse(b.start) <= now) return 'Now';
       const d = T.daysBetween(T.todayKey(), T.dateKey(b.start));
       return d === 0 ? 'Today' : d === 1 ? 'Tomorrow' : `In ${d} days`;
     };
 
+    const triggerInfo = ({ v, s }) => {
+      const dateLate = s.daysLeft < 0;
+      const kmLate = s.hasKm && s.kmLeft <= 0;
+      const dateSoon = !dateLate && s.daysLeft <= L.SOON_DAYS;
+      const kmSoon = s.hasKm && !kmLate && s.kmLeft <= L.SOON_KM;
+      let label = 'Scheduled', tone = 'ok';
+      if (dateLate && kmLate) { label = 'Date and km overdue'; tone = 'overdue'; }
+      else if (dateLate) { label = 'Date overdue'; tone = 'overdue'; }
+      else if (kmLate) { label = 'KM overdue'; tone = 'overdue'; }
+      else if (dateSoon && kmSoon) { label = 'Date and km due soon'; tone = 'soon'; }
+      else if (dateSoon) { label = 'Date due soon'; tone = 'soon'; }
+      else if (kmSoon) { label = 'KM due soon'; tone = 'soon'; }
+      const detail = `${T.fmtKey(v.nextServiceDate)}${s.hasKm ? ` · ${L.fmtKm(v.nextServiceKm)}` : ' · Date only'}`;
+      return { label, tone, detail };
+    };
+
+    const progressInfo = ({ v, s }) => {
+      const daysInInterval = Math.max(30, Number(v.serviceIntervalMonths || 6) * 30);
+      const datePct = 100 - (Math.max(0, s.daysLeft) / daysInInterval * 100);
+      const kmInterval = Math.max(1, Number(v.serviceIntervalKm || 10000));
+      const kmPct = s.hasKm ? 100 - (Math.max(0, s.kmLeft) / kmInterval * 100) : 0;
+      const pct = Math.max(3, Math.min(100, Math.round(Math.max(datePct, kmPct))));
+      const dateText = s.daysLeft < 0 ? `${-s.daysLeft} day${s.daysLeft === -1 ? '' : 's'} late` : s.daysLeft === 0 ? 'Due today' : `${s.daysLeft} days left`;
+      const kmText = !s.hasKm ? 'Date-only schedule' : s.kmLeft < 0 ? `${L.fmtKm(-s.kmLeft)} over` : s.kmLeft === 0 ? 'KM limit reached' : `${L.fmtKm(s.kmLeft)} left`;
+      return { pct, text: `${dateText} · ${kmText}` };
+    };
+
+    const rowHtml = (item) => {
+      const { v, s } = item;
+      const trigger = triggerInfo(item);
+      const progress = progressInfo(item);
+      const art = AD.art.forVehicle(v, 74) || `<span class="maintenance-thumb-icon">${I.truck}</span>`;
+      const badge = s.state === 'overdue' ? AD.ui.badge('Overdue', 'red') : s.state === 'soon' ? AD.ui.badge('Due soon', 'amber') : AD.ui.badge('Scheduled', 'green muted');
+      return `<article class="maintenance-row maintenance-${s.state}" data-id="${esc(v.id)}" tabindex="0" aria-label="Open ${esc(v.id)} vehicle profile">
+        <div class="maintenance-vehicle">
+          <span class="maintenance-thumb">${art}</span>
+          <span><b>${esc(v.id)}</b><small>${esc(v.rego || 'No registration')} · ${esc(v.type)}</small></span>
+        </div>
+        <div class="maintenance-cell"><span>Due trigger</span><strong class="maintenance-trigger maintenance-trigger-${trigger.tone}">${trigger.label}</strong><small>${trigger.detail}</small></div>
+        <div class="maintenance-cell"><span>Last service</span><strong>${v.lastServiceDate ? T.fmtKey(v.lastServiceDate) : 'Not recorded'}</strong><small>${v.lastServiceKm != null ? L.fmtKm(v.lastServiceKm) : 'No odometer recorded'}</small></div>
+        <div class="maintenance-cell maintenance-progress-cell"><span>Service progress</span><div class="maintenance-progress" aria-label="${progress.pct}% through service interval"><i style="width:${progress.pct}%"></i></div><small>${progress.text}</small></div>
+        <div class="maintenance-status">${badge}</div>
+        <button type="button" class="btn btn-primary btn-sm" data-rec="${esc(v.id)}">Record service</button>
+      </article>`;
+    };
+
+    const groupHtml = (label, state, items) => items.length ? `<section class="maintenance-group maintenance-group-${state}">
+      <header><span><i></i><b>${label}</b></span><small>${items.length} vehicle${items.length === 1 ? '' : 's'}</small></header>
+      <div class="maintenance-rows">${items.map(rowHtml).join('')}</div>
+    </section>` : '';
+
     el.innerHTML = `
       ${pageHeader({
         title: 'Maintenance',
-        sub: `Due means within ${L.SOON_DAYS} days${all.some(({ s }) => s.hasKm) ? ` or ${L.SOON_KM.toLocaleString('en-AU')} km of the next service` : ''}`,
+        sub: `A clearer view of what is overdue, what is approaching, and why`,
         actions: `<button class="btn btn-primary" id="rec">${I.plus} Record completed service</button>`
       })}
 
-      <section class="section">
-        ${sectionHead({
-          title: 'Servicing',
-          meta: `${overdue.length ? `<span class="flag flag-red">${overdue.length} overdue</span> · ` : ''}${soon.length} due soon`,
-          actions: `<div class="seg" role="group" aria-label="Filter">
-            <button data-f="due" class="${filter === 'due' ? 'on' : ''}">Due &amp; overdue (${overdue.length + soon.length})</button>
-            <button data-f="overdue" class="${filter === 'overdue' ? 'on' : ''}">Overdue (${overdue.length})</button>
-            <button data-f="all" class="${filter === 'all' ? 'on' : ''}">All (${all.length})</button>
-          </div>`
-        })}
-        <div class="table-wrap"><table class="data">
-          <thead><tr><th style="width:110px">Vehicle</th><th class="col-opt">Last service</th><th>Next service</th><th class="num col-opt">Next at</th><th class="num">Remaining</th><th>Status</th><th class="col-action col-opt"><span class="hide">Action</span></th></tr></thead>
-          <tbody>
-          ${list.map(({ v, s }) => `<tr class="row-link" data-id="${esc(v.id)}" title="Open ${esc(v.id)}">
-            <td><a class="id" href="#/vehicle/${v.id}">${esc(v.id)}</a><span class="t2">${esc(v.type)}</span></td>
-            <td class="nowrap col-opt">${v.lastServiceDate ? T.fmtKey(v.lastServiceDate) : dash}<span class="t2">${v.lastServiceKm ? L.fmtKm(v.lastServiceKm) : ''}</span></td>
-            <td class="nowrap">${T.fmtKey(v.nextServiceDate)}</td>
-            <td class="num col-opt">${s.hasKm ? L.fmtKm(v.nextServiceKm) : 'N/A'}<span class="t2">${s.hasKm ? `now ${L.fmtKm(v.odometer)}` : 'date only'}</span></td>
-            <td class="num">${s.daysLeft < 0 ? late(`${-s.daysLeft} days late`) : `${s.daysLeft} days`}<span class="t2">${s.hasKm ? (s.kmLeft < 0 ? late(`${L.fmtKm(-s.kmLeft)} over`) : L.fmtKm(s.kmLeft)) : 'No km limit'}</span></td>
-            <td>${s.state === 'ok' ? AD.ui.badge('Not due', 'green muted') : AD.ui.badge(s.label, L.attentionTone(s.state, s.daysLeft, s.kmLeft) || 'ink')}</td>
-            <td class="col-action col-opt"><button class="btn btn-link" data-rec="${v.id}">Record service</button></td>
-          </tr>`).join('') || '<tr><td colspan="7" class="empty">Nothing in this list.</td></tr>'}
-          </tbody></table></div>
+      <div class="maintenance-summary" role="group" aria-label="Maintenance summary">
+        <button data-f="overdue" class="maintenance-kpi maintenance-kpi-overdue${filter === 'overdue' ? ' is-active' : ''}"><span>Overdue</span><strong>${overdue.length}</strong><small>Needs attention now</small></button>
+        <button data-f="soon" class="maintenance-kpi maintenance-kpi-soon${filter === 'soon' ? ' is-active' : ''}"><span>Due soon</span><strong>${soon.length}</strong><small>Within ${L.SOON_DAYS} days or ${L.SOON_KM.toLocaleString('en-AU')} km</small></button>
+        <button data-f="ok" class="maintenance-kpi maintenance-kpi-ok${filter === 'ok' ? ' is-active' : ''}"><span>Scheduled</span><strong>${scheduled.length}</strong><small>Currently on track</small></button>
+        <button data-f="date" class="maintenance-kpi maintenance-kpi-date${filter === 'date' ? ' is-active' : ''}"><span>Date only</span><strong>${dateOnly.length}</strong><small>No kilometre limit</small></button>
+      </div>
+
+      <section class="section maintenance-register">
+        ${sectionHead({ title: 'Service register', meta: '<span id="maint-count"></span>' })}
+        <div class="toolbar maintenance-toolbar">
+          <label class="search">${I.search}<input id="maint-search" type="search" value="${esc(query)}" placeholder="Search fleet ID, registration or type" aria-label="Search maintenance register"></label>
+          <select id="maint-type" aria-label="Vehicle type">${options(types, type, 'All vehicle types')}</select>
+          <select id="maint-status" aria-label="Service status">${options([['due', 'Due and overdue'], ['overdue', 'Overdue'], ['soon', 'Due soon'], ['ok', 'Scheduled'], ['date', 'Date only'], ['all', 'All vehicles']], filter)}</select>
+        </div>
+        <div id="maintenance-groups"></div>
       </section>
 
       <div class="cols-2">
@@ -275,18 +321,50 @@ AD.views.maintenance = (function () {
       </div>`;
 
     el.querySelector('#rec').onclick = () => AD.serviceForm('');
-    el.querySelectorAll('[data-rec]').forEach((b) => (b.onclick = () => AD.serviceForm(b.dataset.rec)));
-    el.querySelectorAll('tr[data-id]').forEach((row) => row.addEventListener('click', (e) => {
-      if (e.target.closest('[data-rec]')) return;
-      if (e.target.closest('a')) return;
-      AD.go('vehicle/' + row.dataset.id);
+    const groups = el.querySelector('#maintenance-groups');
+    const count = el.querySelector('#maint-count');
+    const statusSelect = el.querySelector('#maint-status');
+    const syncParams = () => AD.setParams({ filter, q: query, type });
+    const renderRegister = () => {
+      const q = query.trim().toLowerCase();
+      const list = all.filter(({ v, s }) => {
+        if (filter === 'due' && s.state === 'ok') return false;
+        if (filter === 'overdue' && s.state !== 'overdue') return false;
+        if (filter === 'soon' && s.state !== 'soon') return false;
+        if (filter === 'ok' && s.state !== 'ok') return false;
+        if (filter === 'date' && s.hasKm) return false;
+        if (type && v.type !== type) return false;
+        if (q && !`${v.id} ${v.rego || ''} ${v.type || ''} ${v.make || ''} ${v.model || ''}`.toLowerCase().includes(q)) return false;
+        return true;
+      });
+      count.textContent = `${list.length} of ${all.length} vehicles`;
+      groups.innerHTML = groupHtml('Overdue', 'overdue', list.filter(({ s }) => s.state === 'overdue'))
+        + groupHtml('Due soon', 'soon', list.filter(({ s }) => s.state === 'soon'))
+        + groupHtml('Scheduled', 'ok', list.filter(({ s }) => s.state === 'ok'))
+        || `<div class="maintenance-empty">${I.search}<b>No vehicles found</b><span>Try changing the search or filters.</span></div>`;
+      el.querySelectorAll('.maintenance-kpi').forEach((b) => b.classList.toggle('is-active', b.dataset.f === filter));
+      groups.querySelectorAll('[data-rec]').forEach((b) => (b.onclick = () => AD.serviceForm(b.dataset.rec)));
+      groups.querySelectorAll('[data-id]').forEach((row) => {
+        const open = () => AD.go('vehicle/' + row.dataset.id);
+        row.addEventListener('click', (e) => { if (!e.target.closest('button, a')) open(); });
+        row.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && !e.target.closest('button, a')) { e.preventDefault(); open(); } });
+      });
+    };
+    el.querySelectorAll('[data-f]').forEach((b) => (b.onclick = () => {
+      filter = b.dataset.f;
+      statusSelect.value = filter;
+      syncParams();
+      renderRegister();
     }));
-    el.querySelectorAll('[data-f]').forEach((b) => (b.onclick = () => { filter = b.dataset.f; AD.setParams({ filter }); draw(); }));
+    statusSelect.onchange = () => { filter = statusSelect.value; syncParams(); renderRegister(); };
+    el.querySelector('#maint-type').onchange = (e) => { type = e.target.value; syncParams(); renderRegister(); };
+    el.querySelector('#maint-search').oninput = (e) => { query = e.target.value; syncParams(); renderRegister(); };
     el.querySelectorAll('[data-veh]').forEach((b) => (b.onclick = () => AD.go('vehicle/' + b.dataset.veh)));
     el.querySelectorAll('[data-open]').forEach((b) => (b.onclick = () => {
       const bk = AD.store.get('bookings', b.dataset.open);
       AD.go('calendar', { view: 'day', date: T.dateKey(bk.start), open: bk.id });
     }));
+    renderRegister();
   }
 
   return { title: 'Maintenance', render, refresh: () => root && draw() };

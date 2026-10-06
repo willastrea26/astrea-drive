@@ -46,8 +46,8 @@ AD.vehicleForm = function (vehicle, onSaved) {
         <div class="field"><label>Odometer (km) <span class="req">*</span></label><input type="number" name="odometer" value="${esc(v.odometer)}" min="0" step="1"></div>
         <div class="field"><label>Registration expiry <span class="req">*</span></label><input type="date" name="regoExpiry" value="${esc(v.regoExpiry)}"></div>
         <div class="field"><label>Next service date <span class="req">*</span></label><input type="date" name="nextServiceDate" value="${esc(v.nextServiceDate)}"></div>
-        <div class="field"><label>Next service odometer (km)</label><input type="number" name="nextServiceKm" value="${v.nextServiceKm == null ? '' : esc(v.nextServiceKm)}" min="0" step="1">
-          <label class="check"><input type="checkbox" name="nextServiceKmNA" ${v.nextServiceKm == null ? 'checked' : ''}> N/A — service by date only</label></div>
+        <div class="field"><label>Next service odometer (km)</label><input type="number" name="nextServiceKm" value="${Number(v.nextServiceKm) > 0 ? esc(v.nextServiceKm) : ''}" min="0" step="1">
+          <label class="check"><input type="checkbox" name="nextServiceKmNA" ${Number(v.nextServiceKm) > 0 ? '' : 'checked'}> N/A — service by date only</label></div>
         <div class="form-section-title full"><b>Identifiers and notes</b><span>Optional fleet reference details</span></div>
         <div class="field"><label>VIN</label><input type="text" name="vin" value="${esc(v.vin || '')}" maxlength="20"></div>
         <div class="field"><label>Variant / spec</label><input type="text" name="variant" value="${esc(v.variant || '')}"></div>
@@ -69,7 +69,7 @@ AD.vehicleForm = function (vehicle, onSaved) {
       const syncKm = () => {
         kmInput.disabled = kmNA.checked;
         if (kmNA.checked) kmInput.value = '';
-        else if (!kmInput.value) kmInput.value = v.nextServiceKm == null ? Number(v.odometer || 0) + Number(v.serviceIntervalKm || 10000) : v.nextServiceKm;
+        else if (!kmInput.value) kmInput.value = Number(v.nextServiceKm) > 0 ? v.nextServiceKm : Number(v.odometer || 0) + Number(v.serviceIntervalKm || 10000);
       };
       kmNA.addEventListener('change', syncKm);
       syncKm();
