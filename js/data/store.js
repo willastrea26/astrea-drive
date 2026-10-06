@@ -110,7 +110,19 @@ AD.store = (function () {
     try {
       return await insert('documents', rec, 'doc');
     } catch (dbErr) {
-      // Metadata insert failed — don't orphan the blob.
+      // The sortIndex column only exists once update-documents-order.sql has run.
+      // If it's missing, insert without the ordering field so uploads still work.
+      const msg = String((dbErr && (dbErr.message || dbErr.details || dbErr.hint)) || dbErr);
+      if ('sortIndex' in rec && /sortindex|pgrst204|42703|schema cache|could not find/i.test(msg)) {
+        delete rec.sortIndex;
+        try {
+          return await insert('documents', rec, 'doc');
+        } catch (retryErr) {
+          try { await sb().storage.from(BUCKET).remove([path]); } catch (e) { /* best effort */ }
+          throw retryErr;
+        }
+      }
+      // Metadata insert failed for some other reason — don't orphan the blob.
       try { await sb().storage.from(BUCKET).remove([path]); } catch (e) { /* best effort */ }
       throw dbErr;
     }
