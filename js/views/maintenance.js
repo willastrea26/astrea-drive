@@ -197,11 +197,11 @@ AD.serviceForm = function (vehicleId) {
 AD.views.maintenance = (function () {
   const { esc, options, pageHeader, sectionHead, dash } = AD.ui;
   const L = AD.logic, T = AD.time, I = AD.icons;
-  let root = null, filter = 'due', query = '', type = '';
+  let root = null, filter = 'all', query = '', type = '';
 
   function render(el, params) {
     root = el;
-    filter = params.filter || 'due';
+    filter = params.filter || 'all';
     query = params.q || '';
     type = params.type || '';
     draw();
