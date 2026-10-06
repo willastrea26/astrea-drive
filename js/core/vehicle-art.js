@@ -618,6 +618,79 @@ AD.art = (function () {
     ${mark(p.mark, 47, 35, 24)}
   </symbol>`;
 
+  // Panel van (Astrea Van / hired van): white boxy body, wordmark on the side.
+  const vanSymbol = (id, p) => `
+  <symbol id="${id}" viewBox="0 0 120 60">
+    <defs>
+      <linearGradient id="${id}-glass" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#16243a"/><stop offset="1" stop-color="#31445c"/>
+      </linearGradient>
+      <linearGradient id="${id}-rim" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#dce2e9"/><stop offset=".5" stop-color="#778494"/><stop offset="1" stop-color="#c4ccd5"/>
+      </linearGradient>
+    </defs>
+
+    <!-- Ground shadow and chassis -->
+    <ellipse cx="60" cy="54.6" rx="50" ry="3" fill="#101D35" opacity=".16"/>
+    <rect x="8" y="41" width="104" height="4" rx="1.3" fill="#202936"/>
+
+    <!-- Body: short bonnet, raked windscreen, tall cargo box -->
+    <path d="M5.5 43.5 L5.5 34 Q5.5 31 8.5 30.3 L15 29.2 L21 19.2 Q22 17.5 25 17.5 L110.5 17.5 Q112.5 17.5 112.5 19.5 L112.5 43.5
+             L104 43.5 A10 10 0 0 0 86 43.5 L34 43.5 A10 10 0 0 0 16 43.5 Z"
+          fill="${p.body}" stroke="${p.stroke}" stroke-width="1" stroke-linejoin="round"/>
+
+    <!-- Windscreen and driver window -->
+    <path d="M16.8 29.2 L21.8 19.9 Q22.3 19 23.8 19 L29 19 L29 29.2 Z" fill="url(#${id}-glass)"/>
+    <rect x="30.5" y="19" width="9" height="8.2" rx=".6" fill="url(#${id}-glass)"/>
+    <path d="M29.6 18.6 V29.4 M39.8 18.6 V27.6" stroke="#111c2d" stroke-width="1.1"/>
+
+    <!-- Cab door line + handle -->
+    <path d="M40 27.8 V43 M30 29.6 V43" stroke="${p.stroke}" stroke-width=".7"/>
+    <rect x="34.3" y="31" width="4.2" height="1.1" rx=".5" fill="#667486"/>
+
+    <!-- Sliding cargo door seam + handle -->
+    <path d="M58 18.8 V43" stroke="${p.stroke}" stroke-width=".6" opacity=".6"/>
+    <rect x="51.5" y="31" width="4.2" height="1.1" rx=".5" fill="#667486"/>
+
+    <!-- Rear door window and seam -->
+    <rect x="99" y="20" width="10" height="7" rx=".6" fill="url(#${id}-glass)"/>
+    <path d="M104 20 V27" stroke="#111c2d" stroke-width=".8" opacity=".7"/>
+    <path d="M98 18.8 V43" stroke="${p.stroke}" stroke-width=".6" opacity=".55"/>
+
+    <!-- Roof highlight + waist line -->
+    <path d="M26 18.5 H110.5" stroke="#ffffff" stroke-width=".9" opacity=".5"/>
+    <path d="M42 36.5 H110" stroke="${p.stroke}" stroke-width=".5" opacity=".3"/>
+
+    <!-- Brand accent stripe along the side -->
+    <rect x="30" y="38.6" width="81" height="1.6" rx=".6" fill="${p.trim}" opacity=".85"/>
+
+    <!-- Front: headlight, grille, bumper, indicator -->
+    <path d="M5.8 33 L11 32.2 L11.3 35 L6 35.6 Z" fill="#eaf1f7" stroke="#8390a0" stroke-width=".4"/>
+    <rect x="5.5" y="36.2" width="6" height="3.4" rx=".6" fill="#27313e"/>
+    <path d="M6 37 H10.8 M6 38.2 H10.5" stroke="#7c8998" stroke-width=".4"/>
+    <rect x="4.5" y="39.5" width="9" height="3.2" rx="1" fill="#202936"/>
+    <rect x="6" y="35.7" width="2" height="1" rx=".3" fill="#f4b943"/>
+
+    <!-- Door mirror -->
+    <path d="M20.5 20.5 L17.5 19 L17 21 L20 22" fill="#2a3140" stroke="#1d2330" stroke-width=".4"/>
+
+    <!-- Rear light + bumper -->
+    <path d="M111 31 H112.5 V37 H111 Z" fill="#b9343d"/>
+    <rect x="107.5" y="40" width="6.5" height="2.8" rx=".6" fill="#202936"/>
+
+    <!-- Astrea wordmark on the cargo panel -->
+    ${mark(p.mark, 66, 27, 26)}
+
+    <!-- Wheels with alloy rims -->
+    <g fill="#121923"><circle cx="25" cy="46.5" r="8.3"/><circle cx="95" cy="46.5" r="8.3"/></g>
+    <g fill="url(#${id}-rim)" stroke="#596575" stroke-width=".45"><circle cx="25" cy="46.5" r="4.9"/><circle cx="95" cy="46.5" r="4.9"/></g>
+    <g fill="#283241"><circle cx="25" cy="46.5" r="1.6"/><circle cx="95" cy="46.5" r="1.6"/></g>
+    <g stroke="#4b5665" stroke-width=".6" opacity=".9">
+      <path d="M25 42.1 V44.9 M20.8 45 L23.4 46 M22.4 50 L24.1 47.8 M27.6 50 L25.9 47.8 M29.2 45 L26.6 46"/>
+      <path d="M95 42.1 V44.9 M90.8 45 L93.4 46 M92.4 50 L94.1 47.8 M97.6 50 L95.9 47.8 M99.2 45 L96.6 46"/>
+    </g>
+  </symbol>`;
+
   // Sedan silhouette (Astrea Car / hired car). Blue variant for owned, red for hired.
   const carBody = (body, stroke, mark_tone) => `
     <ellipse cx="60" cy="54.6" rx="48" ry="3" fill="#101D35" opacity=".16"/>
@@ -649,6 +722,8 @@ AD.art = (function () {
     digSymbol('art-dig-red',     PAL_EXC_RED),
     trailerSymbol('art-trailer',     PAL_WHITE),
     trailerSymbol('art-trailer-red', PAL_RED),
+    vanSymbol('art-van',         PAL_WHITE),
+    vanSymbol('art-van-red',     PAL_RED),
     `<symbol id="art-car"     viewBox="0 0 120 60">${carBody('#4a90c4', '#2a5c82', 'white')}</symbol>`,
     `<symbol id="art-car-red" viewBox="0 0 120 60">${carBody('#c23b3b', '#7a2626', 'white')}</symbol>`,
   ].join('');
@@ -679,6 +754,7 @@ AD.art = (function () {
   const vacRed = plain('art-vac-red');
   const uteRed = plain('art-ute-red'), tipRed = plain('art-tip-red'), digRed = plain('art-dig-red');
   const trailer = plain('art-trailer'), trailerRed = plain('art-trailer-red');
+  const van = plain('art-van'), vanRed = plain('art-van-red');
 
   // Owned fleet: full-colour illustrations per type.
   const BY_TYPE = {
@@ -687,7 +763,7 @@ AD.art = (function () {
     'Tipper truck': (v, width, label) => tip(width, label || `${v.id} tipper`),
     'Excavator': (v, width, label) => dig(width, label || `${v.id} excavator`),
     'Car': (v, width, label) => car(width, label || `${v.id} car`),
-    'Van': (v, width, label) => car(width, label || `${v.id} van`),
+    'Van': (v, width, label) => van(width, label || `${v.id} van`),
     'Trailer': (v, width, label) => trailer(width, label || `${v.id} trailer`)
   };
 
@@ -699,7 +775,7 @@ AD.art = (function () {
     'Tipper truck': (v, width, label) => tipRed(width, label || `${v.id || v.rego} hired tipper`),
     'Excavator': (v, width, label) => digRed(width, label || `${v.id || v.rego} hired excavator`),
     'Car': (v, width, label) => carRed(width, label || `${v.id || v.rego} hired car`),
-    'Van': (v, width, label) => carRed(width, label || `${v.id || v.rego} hired van`),
+    'Van': (v, width, label) => vanRed(width, label || `${v.id || v.rego} hired van`),
     'Trailer': (v, width, label) => trailerRed(width, label || `${v.id || v.rego} hired trailer`)
   };
 
@@ -711,5 +787,5 @@ AD.art = (function () {
     return BY_TYPE[v.type] ? BY_TYPE[v.type](v, width, label) : '';
   };
 
-  return { vac, ute, tip, dig, car, carRed, trailer, trailerRed, num, forVehicle };
+  return { vac, ute, tip, dig, car, carRed, van, vanRed, trailer, trailerRed, num, forVehicle };
 })();
