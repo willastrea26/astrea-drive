@@ -19,14 +19,14 @@ AD.views.vehicle = (function () {
     { key: '30d', label: 'Last 30 days', short: '30D', days: 30 },
     { key: 'ytd', label: 'Year to date', short: 'YTD', ytd: true }
   ];
-  let root = null, id = null, tab = 'overview', range = '12m';
+  let root = null, id = null, tab = 'service', range = '12m';
   // Charts animate in when a tab is opened, not on every redraw (saving the
   // odometer would otherwise replay every chart on the page).
   let fresh = true;
 
   function render(el, params, arg) {
     root = el; id = arg;
-    tab = TABS.some((t) => t.key === params.tab) ? params.tab : 'overview';
+    tab = TABS.some((t) => t.key === params.tab) ? params.tab : 'service';
     fresh = true;
     draw();
   }
