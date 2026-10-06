@@ -123,12 +123,24 @@ AD.documentForm = function (vehicleId, onSaved) {
         rawClose();
       };
 
+      // Map a subfolder name to the nearest DOCUMENT_CATEGORIES entry, or null.
+      const categoryFromFolder = (folderName) => {
+        if (!folderName) return null;
+        const lower = folderName.toLowerCase();
+        for (const cat of AD.DOCUMENT_CATEGORIES) {
+          if (cat.toLowerCase().includes(lower) || lower.includes(cat.toLowerCase())) return cat;
+        }
+        return null;
+      };
+
       // Recursively walk a DirectoryEntry (from webkitGetAsEntry) and collect
-      // every file beneath it. Skips hidden files (.DS_Store, .git, etc).
-      const walkEntry = (entry) => new Promise((resolve) => {
+      // { file, rel } pairs where rel is the path relative to the dropped root.
+      // Skips hidden files (.DS_Store, .git, etc).
+      const walkEntry = (entry, prefix) => new Promise((resolve) => {
+        const pfx = prefix || '';
         if (!entry) return resolve([]);
         if (entry.isFile) {
-          entry.file((f) => resolve([f]), () => resolve([]));
+          entry.file((f) => resolve([{ file: f, rel: pfx + f.name }]), () => resolve([]));
           return;
         }
         if (entry.isDirectory) {
@@ -138,8 +150,8 @@ AD.documentForm = function (vehicleId, onSaved) {
             if (!entries.length) return resolve(all);
             for (const e of entries) {
               if (e.name && e.name.startsWith('.')) continue;
-              const files = await walkEntry(e);
-              all.push(...files);
+              const items = await walkEntry(e, pfx + entry.name + '/');
+              all.push(...items);
             }
             readBatch();
           }, () => resolve(all));
@@ -218,15 +230,26 @@ AD.documentForm = function (vehicleId, onSaved) {
         updateSaveBtn();
       };
 
-      const addFiles = (fileList) => {
-        const files = Array.from(fileList || []);
-        if (!files.length) return;
-        files.forEach((file) => {
+      // Accept either plain File objects or { file, rel } pairs from walkEntry.
+      // rel is the path relative to the dropped folder root (e.g. "Registration/truck.pdf").
+      // The first path segment (if any) is used as the category hint.
+      const addFiles = (items) => {
+        const arr = Array.from(items || []);
+        if (!arr.length) return;
+        arr.forEach((item) => {
+          const file = item.file || item;
+          const rel = item.rel || file.webkitRelativePath || file.name;
+          // Strip the top-level folder name that webkitdirectory prepends (e.g. "MyDocs/Rego/x.pdf" → "Rego/x.pdf")
+          const parts = rel.split('/').filter(Boolean);
+          // If there are 3+ segments the first is the root folder name; subfolder is second.
+          // If 2 segments the first IS the subfolder.
+          const subFolder = parts.length >= 2 ? parts[parts.length - 2] : null;
+          const category = (subFolder && categoryFromFolder(subFolder)) || guessCategory(file.name);
           queue.push({
             id: 'q' + (++seq),
             file,
             name: file.name.replace(/\.[^.]+$/, ''),
-            category: guessCategory(file.name),
+            category,
             status: 'queued',
             error: ''
           });
@@ -248,10 +271,13 @@ AD.documentForm = function (vehicleId, onSaved) {
         input.value = '';
       });
       dirInput.addEventListener('change', () => {
-        // webkitdirectory populates files with everything under the folder tree.
+        // webkitdirectory populates files with webkitRelativePath set to the path
+        // within the chosen folder (e.g. "MyDocs/Registration/truck.pdf").
         // Skip dotfiles the OS adds (.DS_Store, Thumbs.db, …).
-        const files = Array.from(dirInput.files || []).filter((f) => !f.name.startsWith('.') && f.name !== 'Thumbs.db');
-        addFiles(files);
+        const items = Array.from(dirInput.files || [])
+          .filter((f) => !f.name.startsWith('.') && f.name !== 'Thumbs.db')
+          .map((f) => ({ file: f, rel: f.webkitRelativePath || f.name }));
+        addFiles(items);
         dirInput.value = '';
       });
 
@@ -268,17 +294,20 @@ AD.documentForm = function (vehicleId, onSaved) {
         drop.classList.remove('du-over');
       }));
       drop.addEventListener('drop', async (e) => {
-        const items = e.dataTransfer && e.dataTransfer.items;
-        const hasEntries = items && items.length && typeof items[0].webkitGetAsEntry === 'function';
+        const dtItems = e.dataTransfer && e.dataTransfer.items;
+        const hasEntries = dtItems && dtItems.length && typeof dtItems[0].webkitGetAsEntry === 'function';
         if (!hasEntries) {
+          // Plain file drop — no path info, falls back to filename-based guessing.
           addFiles(e.dataTransfer && e.dataTransfer.files);
           return;
         }
-        const entries = Array.from(items).map((it) => it.webkitGetAsEntry()).filter(Boolean);
+        // Walk each dropped entry. walkEntry returns { file, rel } pairs where
+        // rel is relative to the dropped item itself (e.g. "Registration/truck.pdf").
+        const entries = Array.from(dtItems).map((it) => it.webkitGetAsEntry()).filter(Boolean);
         const collected = [];
         for (const entry of entries) {
-          const files = await walkEntry(entry);
-          collected.push(...files);
+          const items = await walkEntry(entry, '');
+          collected.push(...items);
         }
         addFiles(collected);
       });
