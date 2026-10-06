@@ -10,24 +10,74 @@ AD.logic = (function () {
   // ---------- Fleet / maintenance ----------
   const SOON_DAYS = 30;
   const SOON_KM = 1000;
+  const SOON_HOURS = 100;
+  const URGENT_HOURS = 25;
 
-  /** 'overdue' | 'soon' | 'ok' with a reason string. */
+  // Vehicle types whose next service is tracked by engine hours (as well as
+  // date) by default. Everything else defaults to km + date. The user can
+  // still tick a different mix in the vehicle form.
+  const HOURS_TYPES = new Set(['Vac truck', 'Tipper truck', 'Excavator']);
+
+  /** Which "notify when due by …" switches are on for this vehicle.
+   *  Reads v.trackByDate/trackByKm/trackByHours when set, otherwise
+   *  derives sensible defaults from the vehicle type (so rows that pre-date
+   *  the engine-hours migration still behave sensibly). */
+  function serviceTriggers(v) {
+    const hoursType = HOURS_TYPES.has(v.type);
+    const anySet = v.trackByDate != null || v.trackByKm != null || v.trackByHours != null;
+    if (anySet) {
+      return { date: !!v.trackByDate, km: !!v.trackByKm, hours: !!v.trackByHours };
+    }
+    return { date: true, km: !hoursType, hours: hoursType };
+  }
+
+  /** 'overdue' | 'soon' | 'ok' with a reason string.
+   *  Only triggers ticked under serviceTriggers() can raise the flag; the
+   *  other values are still returned for display but marked inactive. */
   function serviceState(v) {
     const today = T.todayKey();
+    const tr = serviceTriggers(v);
     const daysLeft = T.daysBetween(today, v.nextServiceDate);
-    // Legacy imports used 0 to mean "not applicable". Treat it as date-only
-    // so those vehicles do not appear falsely overdue by kilometres.
+    // Legacy imports used 0 to mean "not applicable". Treat it as not-tracked
+    // so those vehicles do not appear falsely overdue by kilometres/hours.
     const hasKm = Number.isFinite(Number(v.nextServiceKm)) && Number(v.nextServiceKm) > 0;
     const kmLeft = hasKm ? Number(v.nextServiceKm) - Number(v.odometer || 0) : Infinity;
-    if (daysLeft < 0 || kmLeft <= 0) {
-      const why = daysLeft < 0 ? `${-daysLeft} day${daysLeft === -1 ? '' : 's'} overdue` : `${fmtKm(-kmLeft)} over`;
-      return { state: 'overdue', daysLeft, kmLeft, hasKm, label: 'Overdue', why };
+    const hasHours = Number.isFinite(Number(v.nextServiceHours)) && Number(v.nextServiceHours) > 0;
+    const hoursLeft = hasHours ? Number(v.nextServiceHours) - Number(v.engineHours || 0) : Infinity;
+
+    const dateOverdue = tr.date && Number.isFinite(daysLeft) && daysLeft < 0;
+    const kmOverdue = tr.km && hasKm && kmLeft <= 0;
+    const hoursOverdue = tr.hours && hasHours && hoursLeft <= 0;
+    const dateSoon = tr.date && Number.isFinite(daysLeft) && daysLeft >= 0 && daysLeft <= SOON_DAYS;
+    const kmSoon = tr.km && hasKm && kmLeft > 0 && kmLeft <= SOON_KM;
+    const hoursSoon = tr.hours && hasHours && hoursLeft > 0 && hoursLeft <= SOON_HOURS;
+
+    // Pick the most urgent REASON (what to show in the "why" string).
+    const reasons = [];
+    if (dateOverdue) reasons.push({ kind: 'date', urgency: 0, text: `${-daysLeft} day${daysLeft === -1 ? '' : 's'} overdue` });
+    if (kmOverdue)   reasons.push({ kind: 'km',   urgency: 0, text: `${fmtKm(-kmLeft)} over` });
+    if (hoursOverdue) reasons.push({ kind: 'hours', urgency: 0, text: `${fmtHours(-hoursLeft)} over` });
+    if (dateSoon)  reasons.push({ kind: 'date', urgency: 1, text: daysLeft === 0 ? 'Due today' : `Due in ${daysLeft} day${daysLeft === 1 ? '' : 's'}` });
+    if (kmSoon)    reasons.push({ kind: 'km',   urgency: 1, text: `${fmtKm(kmLeft)} to go` });
+    if (hoursSoon) reasons.push({ kind: 'hours', urgency: 1, text: `${fmtHours(hoursLeft)} to go` });
+    reasons.sort((a, b) => a.urgency - b.urgency);
+
+    const base = { daysLeft, kmLeft, hoursLeft, hasKm, hasHours, triggers: tr,
+                   dateOverdue, kmOverdue, hoursOverdue, dateSoon, kmSoon, hoursSoon };
+    if (dateOverdue || kmOverdue || hoursOverdue) {
+      return Object.assign(base, { state: 'overdue', label: 'Overdue', why: reasons[0].text, kind: reasons[0].kind });
     }
-    if (daysLeft <= SOON_DAYS || kmLeft <= SOON_KM) {
-      const why = daysLeft <= SOON_DAYS ? (daysLeft === 0 ? 'Due today' : `Due in ${daysLeft} day${daysLeft === 1 ? '' : 's'}`) : `${fmtKm(kmLeft)} to go`;
-      return { state: 'soon', daysLeft, kmLeft, hasKm, label: 'Due soon', why };
+    if (dateSoon || kmSoon || hoursSoon) {
+      return Object.assign(base, { state: 'soon', label: 'Due soon', why: reasons[0].text, kind: reasons[0].kind });
     }
-    return { state: 'ok', daysLeft, kmLeft, hasKm, label: 'OK', why: `In ${daysLeft} days` };
+    // Nothing ticked is near — "why" shows the soonest ticked trigger.
+    const nextActive = [
+      tr.date && Number.isFinite(daysLeft) && { kind: 'date', text: `In ${daysLeft} days` },
+      tr.km && hasKm && Number.isFinite(kmLeft) && { kind: 'km', text: `${fmtKm(kmLeft)} to go` },
+      tr.hours && hasHours && Number.isFinite(hoursLeft) && { kind: 'hours', text: `${fmtHours(hoursLeft)} to go` }
+    ].filter(Boolean);
+    const why = nextActive.length ? nextActive[0].text : 'No service trigger set';
+    return Object.assign(base, { state: 'ok', label: 'OK', why, kind: nextActive[0] ? nextActive[0].kind : 'date' });
   }
 
   function regoState(v) {
@@ -39,12 +89,12 @@ AD.logic = (function () {
 
   /**
    * One rule for signal colour everywhere: 'red' when overdue/expired,
-   * 'amber' when within 14 days (or 500 km), otherwise '' (no signal colour).
+   * 'amber' when within 14 days / 500 km / 25 engine hours, otherwise ''.
    */
   const URGENT_DAYS = 14, URGENT_KM = 500;
-  function attentionTone(state, days, km = Infinity) {
+  function attentionTone(state, days, km = Infinity, hours = Infinity) {
     if (state === 'overdue') return 'red';
-    if (state === 'soon' && (days <= URGENT_DAYS || km <= URGENT_KM)) return 'amber';
+    if (state === 'soon' && (days <= URGENT_DAYS || km <= URGENT_KM || hours <= URGENT_HOURS)) return 'amber';
     return '';
   }
 
@@ -70,6 +120,12 @@ AD.logic = (function () {
   }
 
   function fmtKm(n) { return n === null || n === '' || !Number.isFinite(Number(n)) ? 'N/A' : Math.round(Number(n)).toLocaleString('en-AU') + ' km'; }
+  function fmtHours(n) {
+    if (n === null || n === '' || !Number.isFinite(Number(n))) return 'N/A';
+    const num = Number(n);
+    const rounded = Math.abs(num) < 10 ? Math.round(num * 10) / 10 : Math.round(num);
+    return rounded.toLocaleString('en-AU') + ' hr';
+  }
   function fmtAUD(n) { return Number(n || 0).toLocaleString('en-AU', { style: 'currency', currency: 'AUD' }); }
 
   function driverName(id) {
@@ -256,9 +312,10 @@ AD.logic = (function () {
   }
 
   return {
-    serviceState, regoState, attentionTone, openDefects, fmtKm, fmtAUD, driverName,
+    serviceState, serviceTriggers, HOURS_TYPES,
+    regoState, attentionTone, openDefects, fmtKm, fmtHours, fmtAUD, driverName,
     vacTrucks, bookingsFor, activeAt, overlaps, conflictIds, nextBooking, locate, hasCoords,
-    bookingCategory, bookingTitle, SOON_DAYS, SOON_KM,
+    bookingCategory, bookingTitle, SOON_DAYS, SOON_KM, SOON_HOURS, URGENT_HOURS,
     hourlyRate, revenue, revenueBy, costs, bookingHours, revenueSeries,
     workshopsFor, atWorkshop
   };

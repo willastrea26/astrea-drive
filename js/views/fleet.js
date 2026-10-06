@@ -8,15 +8,18 @@ AD.VEHICLE_STATUSES = ['Available', 'In use', 'In workshop', 'Out of service'];
  *  If called with just { hired: true } (no id), opens the form in hired mode. */
 AD.vehicleForm = function (vehicle, onSaved) {
   const { esc, options, formData, showErrors, modal, toast } = AD.ui;
-  const T = AD.time;
+  const T = AD.time, L = AD.logic;
   const seedHired = vehicle && vehicle.hired && !vehicle.id;
   const isNew = !vehicle || seedHired;
   const v = (!isNew ? vehicle : null) || {
     id: '', rego: '', make: '', model: '', year: new Date().getFullYear(), type: seedHired ? 'Vac truck' : 'Ute', driverId: '', odometer: 0,
     status: seedHired ? 'In use' : 'Available', regoExpiry: T.addDays(T.todayKey(), 365), nextServiceDate: T.addDays(T.todayKey(), 180),
     nextServiceKm: 10000, serviceIntervalKm: 10000, serviceIntervalMonths: 6, notes: '',
+    engineHours: '', nextServiceHours: '', serviceIntervalHours: 250,
     hired: !!seedHired, hireCompany: ''
   };
+  // Current / default notification triggers for this vehicle.
+  const trig = L.serviceTriggers(v);
   const drivers = AD.store.all('drivers').map((d) => [d.id, d.name]);
   const hiredMode = !!v.hired;
   const companies = [...new Set(AD.store.all('vehicles').filter((x) => x.hired && x.hireCompany).map((x) => x.hireCompany))].sort();
@@ -44,10 +47,23 @@ AD.vehicleForm = function (vehicle, onSaved) {
         <div class="form-section-title full"><b>Fleet status and servicing</b><span>Current operating and compliance information</span></div>
         <div class="field"><label>Status</label><select name="status">${options(AD.VEHICLE_STATUSES, v.status)}</select></div>
         <div class="field"><label>Odometer (km) <span class="req">*</span></label><input type="number" name="odometer" value="${esc(v.odometer)}" min="0" step="1"></div>
+        <div class="field"><label>Engine hours</label><input type="number" name="engineHours" value="${v.engineHours != null && v.engineHours !== '' ? esc(v.engineHours) : ''}" min="0" step="0.1" placeholder="e.g. 1250">
+          <div class="help">Current hours (for vac trucks, tippers and excavators).</div></div>
         <div class="field"><label>Registration expiry <span class="req">*</span></label><input type="date" name="regoExpiry" value="${esc(v.regoExpiry)}"></div>
-        <div class="field"><label>Next service date <span class="req">*</span></label><input type="date" name="nextServiceDate" value="${esc(v.nextServiceDate)}"></div>
-        <div class="field"><label>Next service odometer (km)</label><input type="number" name="nextServiceKm" value="${Number(v.nextServiceKm) > 0 ? esc(v.nextServiceKm) : ''}" min="0" step="1">
-          <label class="check"><input type="checkbox" name="nextServiceKmNA" ${Number(v.nextServiceKm) > 0 ? '' : 'checked'}> N/A — service by date only</label></div>
+
+        <div class="form-section-title full"><b>Next service</b><span>Tick which triggers should flag this vehicle as due. All ticked triggers are watched.</span></div>
+        <div class="field full">
+          <div class="trigger-ticks">
+            <label class="check"><input type="checkbox" name="trackByDate" ${trig.date ? 'checked' : ''}> Date</label>
+            <label class="check"><input type="checkbox" name="trackByKm" ${trig.km ? 'checked' : ''}> Kilometres</label>
+            <label class="check"><input type="checkbox" name="trackByHours" ${trig.hours ? 'checked' : ''}> Engine hours</label>
+          </div>
+        </div>
+        <div class="field"><label>Next service date</label><input type="date" name="nextServiceDate" value="${esc(v.nextServiceDate || '')}"></div>
+        <div class="field"><label>Next service odometer (km)</label><input type="number" name="nextServiceKm" value="${Number(v.nextServiceKm) > 0 ? esc(v.nextServiceKm) : ''}" min="0" step="1" placeholder="e.g. ${(Number(v.odometer || 0) + 10000).toLocaleString('en-AU')}"></div>
+        <div class="field"><label>Next service hours</label><input type="number" name="nextServiceHours" value="${Number(v.nextServiceHours) > 0 ? esc(v.nextServiceHours) : ''}" min="0" step="0.1" placeholder="e.g. ${(Number(v.engineHours || 0) + 250).toLocaleString('en-AU')}"></div>
+        <div class="field"><label>Service interval (hours)</label><input type="number" name="serviceIntervalHours" value="${Number(v.serviceIntervalHours) > 0 ? esc(v.serviceIntervalHours) : ''}" min="0" step="1" placeholder="e.g. 250">
+          <div class="help">Used to pre-fill the next service when logging one.</div></div>
         <div class="form-section-title full"><b>Identifiers and notes</b><span>Optional fleet reference details</span></div>
         <div class="field"><label>VIN</label><input type="text" name="vin" value="${esc(v.vin || '')}" maxlength="20"></div>
         <div class="field"><label>Variant / spec</label><input type="text" name="variant" value="${esc(v.variant || '')}"></div>
@@ -64,15 +80,23 @@ AD.vehicleForm = function (vehicle, onSaved) {
     onMount(el, close) {
       const form = el.querySelector('form');
       el.querySelector('[data-close]').onclick = close;
-      const kmInput = form.elements.nextServiceKm;
-      const kmNA = form.elements.nextServiceKmNA;
-      const syncKm = () => {
-        kmInput.disabled = kmNA.checked;
-        if (kmNA.checked) kmInput.value = '';
-        else if (!kmInput.value) kmInput.value = Number(v.nextServiceKm) > 0 ? v.nextServiceKm : Number(v.odometer || 0) + Number(v.serviceIntervalKm || 10000);
-      };
-      kmNA.addEventListener('change', syncKm);
-      syncKm();
+
+      // Re-tick sensible defaults when the vehicle type changes (unless the
+      // user has already overridden them this session).
+      const typeSel = form.elements.type;
+      const dateChk = form.elements.trackByDate;
+      const kmChk = form.elements.trackByKm;
+      const hrsChk = form.elements.trackByHours;
+      let userTouched = false;
+      [dateChk, kmChk, hrsChk].forEach((c) => c.addEventListener('change', () => { userTouched = true; }));
+      typeSel.addEventListener('change', () => {
+        if (userTouched) return;
+        const hoursType = L.HOURS_TYPES && L.HOURS_TYPES.has(typeSel.value);
+        dateChk.checked = true;
+        kmChk.checked = !hoursType;
+        hrsChk.checked = !!hoursType;
+      });
+
       const saveBtn = el.querySelector('[data-save]');
       saveBtn.onclick = async () => {
         const d = formData(form);
@@ -89,14 +113,23 @@ AD.vehicleForm = function (vehicle, onSaved) {
         const odo = Number(d.odometer);
         if (d.odometer === '' || !(odo >= 0)) err.odometer = 'Enter a valid odometer reading.';
         if (!d.regoExpiry) err.regoExpiry = 'Registration expiry is required.';
-        if (!d.nextServiceDate) err.nextServiceDate = 'Next service date is required.';
-        if (!d.nextServiceKmNA && (d.nextServiceKm === '' || !(Number(d.nextServiceKm) >= 0))) err.nextServiceKm = 'Enter a valid odometer value or choose N/A.';
+        if (d.trackByDate && !d.nextServiceDate) err.nextServiceDate = 'Required — Date trigger is ticked.';
+        if (d.trackByKm && (d.nextServiceKm === '' || !(Number(d.nextServiceKm) >= 0))) err.nextServiceKm = 'Required — Km trigger is ticked.';
+        if (d.trackByHours && (d.nextServiceHours === '' || !(Number(d.nextServiceHours) >= 0))) err.nextServiceHours = 'Required — Hours trigger is ticked.';
+        if (!d.trackByDate && !d.trackByKm && !d.trackByHours) err.trackByDate = 'Tick at least one trigger.';
+        if (d.engineHours !== '' && !(Number(d.engineHours) >= 0)) err.engineHours = 'Enter a valid number of hours.';
         if (!showErrors(form, err)) return;
 
         const rec = {
           rego: d.rego.toUpperCase(), make: d.make, model: d.model, type: d.type, year: Number(d.year) || null,
           driverId: hiredMode ? '' : d.driverId, status: d.status, odometer: Math.round(odo), regoExpiry: d.regoExpiry,
-          nextServiceDate: d.nextServiceDate, nextServiceKm: d.nextServiceKmNA ? null : Math.round(Number(d.nextServiceKm)), notes: d.notes,
+          nextServiceDate: d.trackByDate ? d.nextServiceDate : (d.nextServiceDate || null),
+          nextServiceKm: d.trackByKm && d.nextServiceKm !== '' ? Math.round(Number(d.nextServiceKm)) : null,
+          nextServiceHours: d.trackByHours && d.nextServiceHours !== '' ? Number(d.nextServiceHours) : null,
+          engineHours: d.engineHours === '' ? null : Number(d.engineHours),
+          serviceIntervalHours: d.serviceIntervalHours === '' ? null : Number(d.serviceIntervalHours),
+          trackByDate: !!d.trackByDate, trackByKm: !!d.trackByKm, trackByHours: !!d.trackByHours,
+          notes: d.notes,
           vin: d.vin || null, variant: d.variant || null, linktTag: d.linktTag || null,
           wrdtPlantNo: d.wrdtPlantNo || null, evieFob: d.evieFob || null, evieCard: d.evieCard || null,
           hired: hiredMode, hireCompany: hiredMode ? (d.hireCompany || '') : ''
@@ -105,11 +138,12 @@ AD.vehicleForm = function (vehicle, onSaved) {
         let saved;
         try {
           if (isNew) {
-            saved = await AD.store.insert('vehicles', Object.assign({ id, serviceIntervalKm: 10000, serviceIntervalMonths: 6, lastServiceDate: null, lastServiceKm: rec.odometer }, rec));
+            const seed = Object.assign({ id, serviceIntervalKm: 10000, serviceIntervalMonths: 6, lastServiceDate: null, lastServiceKm: rec.odometer }, rec);
+            saved = await stripUnknownColumns((row) => AD.store.insert('vehicles', row), seed);
             await AD.store.log(`${id} added to the fleet register`, id);
             toast(`${id} added`);
           } else {
-            saved = await AD.store.update('vehicles', v.id, rec);
+            saved = await stripUnknownColumns((patch) => AD.store.update('vehicles', v.id, patch), rec);
             await AD.store.log(`${v.id} details updated`, v.id);
             toast(`${v.id} saved`);
           }
@@ -124,6 +158,21 @@ AD.vehicleForm = function (vehicle, onSaved) {
     }
   });
 };
+
+/** Retry a vehicle write without engine-hours columns when the migration
+ *  update-vehicles-engine-hours.sql has not been run yet. */
+async function stripUnknownColumns(fn, rec) {
+  const extras = ['engineHours', 'nextServiceHours', 'serviceIntervalHours', 'trackByDate', 'trackByKm', 'trackByHours'];
+  try {
+    return await fn(rec);
+  } catch (e) {
+    const msg = String((e && (e.message || e.details || e.hint)) || e);
+    if (!/pgrst204|42703|schema cache|could not find/i.test(msg)) throw e;
+    const stripped = Object.assign({}, rec);
+    extras.forEach((k) => delete stripped[k]);
+    return fn(stripped);
+  }
+}
 
 AD.views.fleet = (function () {
   const { esc, options, vehicleBadge, stateBadge } = AD.ui;

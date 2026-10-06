@@ -79,6 +79,7 @@ AD.views.vehicle = (function () {
         <dl class="veh-facts">
           <div><dt>Rego</dt><dd>${esc(v.rego)}</dd></div>
           <div><dt>Odometer</dt><dd>${L.fmtKm(v.odometer)}</dd></div>
+          ${(L.HOURS_TYPES && L.HOURS_TYPES.has(v.type)) || (v.engineHours != null && v.engineHours !== '') ? `<div><dt>Engine hours</dt><dd>${v.engineHours != null && v.engineHours !== '' ? L.fmtHours(v.engineHours) : '<span class="muted" style="font-weight:400">Not recorded</span>'}</dd></div>` : ''}
           <div><dt>Type</dt><dd>${esc(v.type)}</dd></div>
           <div><dt>Year</dt><dd>${esc(v.year)}</dd></div>
         </dl>
@@ -497,11 +498,15 @@ AD.views.vehicle = (function () {
     if (tab === 'photos') return photosTab(v);
     if (tab === 'revenue') return revenueTab(v);
 
-    if (tab === 'service') return `
+    if (tab === 'service') {
+      const trig = L.serviceTriggers(v);
+      const showHours = trig.hours || services.some((x) => x.hours != null && x.hours !== '');
+      return `
       <div class="tab-tools"><span class="t2">Completed services, newest first</span><button class="btn btn-sm btn-secondary" data-record>${I.plus} Record service</button></div>
-      <div class="table-wrap"><table class="data"><thead><tr><th>Date</th><th class="num">Odometer</th><th>Service</th><th class="col-opt">Workshop</th><th class="num">Cost</th></tr></thead><tbody>
-      ${services.map((x) => `<tr><td class="nowrap">${T.fmtKey(x.date)}</td><td class="num">${L.fmtKm(x.odometer)}</td><td>${esc(x.type)}${x.notes ? `<span class="t2">${esc(x.notes)}</span>` : ''}</td><td class="col-opt">${x.workshop ? esc(x.workshop) : dash}</td><td class="num">${L.fmtAUD(x.cost)}</td></tr>`).join('') || '<tr><td colspan="5" class="empty">No services recorded.</td></tr>'}
+      <div class="table-wrap"><table class="data"><thead><tr><th>Date</th><th class="num">Odometer</th>${showHours ? '<th class="num">Hours</th>' : ''}<th>Service</th><th class="col-opt">Workshop</th><th class="num">Cost</th></tr></thead><tbody>
+      ${services.map((x) => `<tr><td class="nowrap">${T.fmtKey(x.date)}</td><td class="num">${L.fmtKm(x.odometer)}</td>${showHours ? `<td class="num">${x.hours != null && x.hours !== '' ? L.fmtHours(x.hours) : dash}</td>` : ''}<td>${esc(x.type)}${x.notes ? `<span class="t2">${esc(x.notes)}</span>` : ''}</td><td class="col-opt">${x.workshop ? esc(x.workshop) : dash}</td><td class="num">${L.fmtAUD(x.cost)}</td></tr>`).join('') || `<tr><td colspan="${showHours ? 6 : 5}" class="empty">No services recorded.</td></tr>`}
       </tbody></table></div>`;
+    }
 
     if (tab === 'defects') return `
       <div class="tab-tools"><span class="t2">Open defects first</span><button class="btn btn-sm btn-secondary" data-report>${I.plus} Report defect</button></div>
@@ -597,6 +602,19 @@ AD.views.vehicle = (function () {
     </section>`;
   }
 
+  function nextServiceLabel(v, s) {
+    const bits = [];
+    if (s.triggers.date && v.nextServiceDate) bits.push(T.fmtKey(v.nextServiceDate));
+    if (s.triggers.km && s.hasKm) bits.push(L.fmtKm(v.nextServiceKm));
+    if (s.triggers.hours && s.hasHours) bits.push(L.fmtHours(v.nextServiceHours));
+    if (!bits.length) return '<span class="muted" style="font-weight:400">Not scheduled</span>';
+    const triggerLabels = [];
+    if (s.triggers.date) triggerLabels.push('date');
+    if (s.triggers.km) triggerLabels.push('km');
+    if (s.triggers.hours) triggerLabels.push('hours');
+    return `${bits.join(' · ')} <span class="t2" style="font-weight:400">Notify by ${triggerLabels.join(' + ')}</span>`;
+  }
+
   function overview(v, services, defects) {
     const s = L.serviceState(v), r = L.regoState(v);
     const flagTone = (tone) => (tone ? 'flag-' + tone : 'muted');
@@ -607,7 +625,7 @@ AD.views.vehicle = (function () {
             <div><dt>Assigned driver</dt><dd>${v.driverId ? esc(L.driverName(v.driverId)) : '<span class="muted" style="font-weight:400">Unassigned</span>'}</dd></div>
             <div><dt>Charge-out rate</dt><dd>${aud0(L.hourlyRate(v))}/hr</dd></div>
             <div><dt>Registration expiry</dt><dd>${T.fmtKey(v.regoExpiry)}<span class="sub ${flagTone(L.attentionTone(r.state, r.days))}">${esc(r.state === 'ok' ? 'Current — ' + r.why : r.why)}</span></dd></div>
-            <div><dt>Next service</dt><dd>${T.fmtKey(v.nextServiceDate)}${s.hasKm ? ` or ${L.fmtKm(v.nextServiceKm)}` : ' · date only'}<span class="sub ${flagTone(L.attentionTone(s.state, s.daysLeft, s.kmLeft))}">${esc(s.why.charAt(0).toUpperCase() + s.why.slice(1))}</span></dd></div>
+            <div><dt>Next service</dt><dd>${nextServiceLabel(v, s)}<span class="sub ${flagTone(L.attentionTone(s.state, s.daysLeft, s.kmLeft, s.hoursLeft))}">${esc(s.why.charAt(0).toUpperCase() + s.why.slice(1))}</span></dd></div>
             ${v.status === 'In workshop' && v.workshopId ? `<div><dt>Currently at</dt><dd>${esc((AD.store.get('workshops', v.workshopId) || {}).name || 'Unknown workshop')}</dd></div>` : ''}
           </dl>
           ${detailsFacts(v)}

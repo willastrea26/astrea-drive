@@ -381,6 +381,8 @@ input[readonly] { background: var(--paper-2); color: var(--ink-2); }
 .field .help { font-size: 13.5px; color: var(--muted); margin-top: 4px; }
 .req { color: var(--muted); font-weight: 400; }
 label.check { display: flex; gap: 8px; align-items: center; font-weight: 400; color: var(--ink); }
+.trigger-ticks { display: flex; flex-wrap: wrap; gap: 10px 22px; padding: 8px 12px; background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; }
+.trigger-ticks label.check { margin: 0; font-weight: 500; }
 .form-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--rule); flex-wrap: wrap; }
 .form-actions .left { margin-right: auto; }
 .inline-form { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; padding-top: 12px; }
