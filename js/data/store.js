@@ -113,9 +113,14 @@ AD.store = (function () {
     }
   }
 
-  /** Short-lived signed URL for a file in the private bucket. */
-  async function signDocumentUrl(storagePath, expiresInSec = 300) {
-    const { data, error } = await sb().storage.from(BUCKET).createSignedUrl(storagePath, expiresInSec);
+  /** Short-lived signed URL for a file in the private bucket.
+   *  Pass { download: 'filename.ext' } to make the response Content-Disposition:
+   *  attachment, which forces the browser to download rather than render inline —
+   *  the OS then opens the file with its default handler (Adobe Reader for PDFs,
+   *  Excel for xlsx, etc). */
+  async function signDocumentUrl(storagePath, expiresInSec = 300, opts = {}) {
+    const sbOpts = opts.download ? { download: opts.download } : undefined;
+    const { data, error } = await sb().storage.from(BUCKET).createSignedUrl(storagePath, expiresInSec, sbOpts);
     if (error) throw error;
     return data.signedUrl;
   }

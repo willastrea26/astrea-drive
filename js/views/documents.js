@@ -14,35 +14,41 @@ AD.fmtBytes = function (n) {
 
 AD.MAX_DOC_BYTES = 25 * 1024 * 1024; // 25 MB per file
 
-/** Open the file in a new tab via a short-lived signed URL. */
+/** Pick a sensible download filename: use the document's name, keeping (or
+ *  adding) the correct extension from the stored path. */
+function downloadFilename(doc) {
+  const base = (doc.name || 'document').replace(/[\\/:*?"<>|]+/g, '_');
+  const pathExt = (doc.storagePath || '').match(/\.[a-z0-9]{1,8}$/i);
+  const nameExt = base.match(/\.[a-z0-9]{1,8}$/i);
+  if (pathExt && !nameExt) return base + pathExt[0];
+  return base;
+}
+
+/** Open the file via its system default app (Adobe Reader for PDFs, Excel
+ *  for xlsx, etc). We ask Supabase for a signed URL with Content-Disposition
+ *  attachment so the browser downloads instead of rendering inline — once the
+ *  file is on disk, Windows hands it to the user's default handler for that
+ *  file type. */
 AD.openDocument = async function (doc) {
   const { toast } = AD.ui;
   if (!doc || !doc.storagePath) { toast('That document has no attached file.', 'warn'); return; }
   try {
-    const url = await AD.store.signDocumentUrl(doc.storagePath, 300);
-    window.open(url, '_blank', 'noopener');
-  } catch (e) {
-    toast('Could not open document: ' + e.message, 'error');
-  }
-};
-
-/** Download the file (same signed URL, but hinted with the stored name). */
-AD.downloadDocument = async function (doc) {
-  const { toast } = AD.ui;
-  if (!doc || !doc.storagePath) { toast('That document has no attached file.', 'warn'); return; }
-  try {
-    const url = await AD.store.signDocumentUrl(doc.storagePath, 300);
+    const filename = downloadFilename(doc);
+    const url = await AD.store.signDocumentUrl(doc.storagePath, 300, { download: filename });
     const a = document.createElement('a');
     a.href = url;
-    a.download = doc.name || 'document';
     a.rel = 'noopener';
     document.body.appendChild(a);
     a.click();
     a.remove();
   } catch (e) {
-    toast('Could not download document: ' + e.message, 'error');
+    toast('Could not open document: ' + e.message, 'error');
   }
 };
+
+/** Download the file to disk (same mechanism as Open — kept as a separate
+ *  entry point so views that want to label the action "Download" still can). */
+AD.downloadDocument = AD.openDocument;
 
 /** Guess a sensible category from the file name. */
 function guessCategory(name) {
