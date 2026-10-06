@@ -188,6 +188,29 @@ AD.viewDefectPhotos = function (defectId, startWith = 'reported') {
   AD.ui.photoLightbox(all, startWith === 'resolved' ? reported.length : 0);
 };
 
+/** Permanently remove a defect record (and its embedded photos). */
+AD.deleteDefect = async function (defectId) {
+  const { esc, confirm, toast } = AD.ui;
+  const d = AD.store.get('defects', defectId);
+  if (!d) return;
+  const ok = await confirm({
+    title: 'Delete defect?',
+    message: `Delete the defect on <b>${esc(d.vehicleId)}</b> — “${esc(d.description.slice(0, 80))}”? This can’t be undone.`,
+    confirmText: 'Delete',
+    danger: true
+  });
+  if (!ok) return false;
+  try {
+    await AD.store.remove('defects', d.id);
+    await AD.store.log(`Defect deleted on ${d.vehicleId}: ${d.description.slice(0, 60)}`, d.vehicleId);
+  } catch (err) {
+    toast('Could not delete defect: ' + err.message, 'error');
+    return false;
+  }
+  toast(`Defect on ${d.vehicleId} deleted`);
+  return true;
+};
+
 /** Open the complete defect record from a register tile. */
 AD.viewDefect = function (defectId) {
   const { esc, modal, priorityBadge, defectBadge } = AD.ui;
@@ -212,7 +235,7 @@ AD.viewDefect = function (defectId) {
     body: `
       <div class="defect-detail-head">
         <div><span class="id">${esc(d.vehicleId)}</span>${vehicle && vehicle.rego ? `<span>${esc(vehicle.rego)}</span>` : ''}${vehicle && vehicle.type ? `<span>${esc(vehicle.type)}</span>` : ''}</div>
-        <div>${priorityBadge(d.priority, d.status === 'Resolved')} ${defectBadge(d.status)} <button type="button" class="btn btn-secondary btn-sm" data-edit-defect>Edit defect</button></div>
+        <div>${priorityBadge(d.priority, d.status === 'Resolved')} ${defectBadge(d.status)} <button type="button" class="btn btn-secondary btn-sm" data-edit-defect>Edit defect</button> <button type="button" class="btn btn-danger-ghost btn-sm" data-delete-defect>Delete</button></div>
       </div>
       <section class="defect-detail-section">
         <h3>Description</h3>
@@ -229,9 +252,13 @@ AD.viewDefect = function (defectId) {
       ${d.resolutionNotes || resolved.length ? `<section class="defect-detail-section"><h3>Resolution</h3>${d.resolutionNotes ? `<p class="defect-detail-description">${esc(d.resolutionNotes)}</p>` : '<p class="muted">No resolution notes recorded.</p>'}</section>` : ''}
       ${photoSection('Resolution photos', resolved, reported.length)}
       ${!allPhotos.length ? '<div class="defect-detail-no-photos">No photos uploaded for this defect.</div>' : ''}`,
-    onMount(el) {
+    onMount(el, close) {
       el.querySelectorAll('[data-photo-index]').forEach((b) => (b.onclick = () => AD.ui.photoLightbox(allPhotos, Number(b.dataset.photoIndex))));
       el.querySelector('[data-edit-defect]').onclick = () => AD.editDefect(d.id);
+      el.querySelector('[data-delete-defect]').onclick = async () => {
+        const deleted = await AD.deleteDefect(d.id);
+        if (deleted) close();
+      };
     }
   });
 };
@@ -345,7 +372,8 @@ AD.views.defects = (function () {
             ${I.camera}<span>No photo uploaded</span>
           </div>`;
       const actions = `<button type="button" class="btn btn-ghost btn-sm" data-edit="${d.id}">Edit</button>${d.status === 'Open' ? `<button type="button" class="btn btn-secondary btn-sm" data-prog="${d.id}">Start work</button>` : ''}
-        ${!resolved ? `<button type="button" class="btn btn-primary btn-sm" data-resolve="${d.id}">${I.check} Resolve</button>` : `<button type="button" class="btn btn-secondary btn-sm" data-reopen="${d.id}">Reopen</button>`}`;
+        ${!resolved ? `<button type="button" class="btn btn-primary btn-sm" data-resolve="${d.id}">${I.check} Resolve</button>` : `<button type="button" class="btn btn-secondary btn-sm" data-reopen="${d.id}">Reopen</button>`}
+        <button type="button" class="btn btn-danger-ghost btn-sm" data-delete="${d.id}">Delete</button>`;
       return `<article class="defect-card defect-card-${priorityClass}${resolved ? ' is-resolved' : ''}" role="listitem" data-detail="${d.id}" tabindex="0" aria-label="Open full defect details for ${esc(d.vehicleId)}">
         ${media}
         <div class="defect-card-body">
@@ -399,6 +427,7 @@ AD.views.defects = (function () {
         toast(`Defect on ${d.vehicleId} reopened`);
       } catch (err) { toast('Could not reopen defect: ' + err.message, 'error'); }
     }));
+    grid.querySelectorAll('[data-delete]').forEach((b) => (b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); AD.deleteDefect(b.dataset.delete); }));
   }
 
   // Full re-render so the header counts stay current after a change.
