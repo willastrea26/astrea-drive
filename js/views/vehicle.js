@@ -382,33 +382,55 @@ AD.views.vehicle = (function () {
       </tbody></table></div>`;
 
     if (tab === 'documents') {
-      const sorted = docs.slice().sort((a, b) => {
-        const au = a.uploadedAt || '', bu = b.uploadedAt || '';
-        if (au !== bu) return bu.localeCompare(au);
-        return (a.name || '').localeCompare(b.name || '');
+      // Group documents under their category (the folder name they were uploaded
+      // in). Standard categories keep their defined order; any custom folder-name
+      // categories follow alphabetically; uncategorised files sit last.
+      const groups = {};
+      docs.forEach((d) => {
+        const cat = (d.category || '').trim() || 'Uncategorised';
+        (groups[cat] = groups[cat] || []).push(d);
       });
-      return `
-      <div class="tab-tools">
-        <span class="t2">${sorted.length} document${sorted.length === 1 ? '' : 's'} on file</span>
-        <button class="btn btn-sm btn-primary" data-upload>${I.plus} Upload document</button>
-      </div>
-      <div class="table-wrap"><table class="data"><thead><tr>
-        <th>Document</th><th>Category</th><th class="num col-opt">Size</th><th class="col-opt">Uploaded</th><th class="col-action"><span class="hide">Actions</span></th>
-      </tr></thead><tbody>
-      ${sorted.map((d) => {
+      const STD = AD.DOCUMENT_CATEGORIES || [];
+      const catOrder = Object.keys(groups).sort((a, b) => {
+        if (a === 'Uncategorised') return 1;
+        if (b === 'Uncategorised') return -1;
+        const ia = STD.indexOf(a), ib = STD.indexOf(b);
+        if (ia !== -1 && ib !== -1) return ia - ib;
+        if (ia !== -1) return -1;
+        if (ib !== -1) return 1;
+        return a.localeCompare(b);
+      });
+      const docRow = (d) => {
         const hasFile = !!d.storagePath;
         const sub = hasFile && d.uploadedBy ? `<span class="t2">${esc(d.uploadedBy)}</span>` : (!hasFile ? '<span class="t2 muted">Placeholder — no file attached</span>' : '');
         const icon = AD.fileIcon(hasFile ? (d.storagePath || d.name) : d.name);
         return `<tr${hasFile ? ` class="row-link" data-open="${d.id}" title="Open ${esc(d.name)}"` : ''}>
           <td><div class="doc-cell">${icon}<div class="doc-name">${hasFile ? `<a class="id" href="#" data-open="${d.id}">${esc(d.name)}</a>` : `<span>${esc(d.name)}</span>`}${sub}</div></div></td>
-          <td>${esc(d.category || '—')}</td>
           <td class="num col-opt">${hasFile ? AD.fmtBytes(d.sizeBytes) : dash}</td>
           <td class="col-opt nowrap">${hasFile && d.uploadedAt ? T.fmtKey(d.uploadedAt.slice(0, 10)) : dash}</td>
           <td class="col-action">
             ${hasFile ? `<button class="btn btn-link" data-download="${d.id}">Download</button>` : ''}
             <button class="btn btn-link btn-danger-ghost" data-delete="${d.id}">${hasFile ? 'Delete' : 'Remove'}</button>
           </td></tr>`;
-      }).join('') || '<tr><td colspan="5" class="empty">No documents yet. Click “Upload document” to add one.</td></tr>'}
+      };
+      const body = catOrder.map((cat) => {
+        const rows = groups[cat].slice().sort((a, b) => {
+          const au = a.uploadedAt || '', bu = b.uploadedAt || '';
+          if (au !== bu) return bu.localeCompare(au);
+          return (a.name || '').localeCompare(b.name || '');
+        });
+        return `<tr class="doc-group"><td colspan="4"><span class="doc-group-name">${esc(cat)}</span><span class="doc-group-count">${rows.length}</span></td></tr>
+          ${rows.map(docRow).join('')}`;
+      }).join('');
+      return `
+      <div class="tab-tools">
+        <span class="t2">${docs.length} document${docs.length === 1 ? '' : 's'} on file${catOrder.length > 1 ? ` · ${catOrder.length} categories` : ''}</span>
+        <button class="btn btn-sm btn-primary" data-upload>${I.plus} Upload document</button>
+      </div>
+      <div class="table-wrap"><table class="data"><thead><tr>
+        <th>Document</th><th class="num col-opt">Size</th><th class="col-opt">Uploaded</th><th class="col-action"><span class="hide">Actions</span></th>
+      </tr></thead><tbody>
+      ${body || '<tr><td colspan="4" class="empty">No documents yet. Click “Upload document” to add one.</td></tr>'}
       </tbody></table></div>`;
     }
 

@@ -123,16 +123,6 @@ AD.documentForm = function (vehicleId, onSaved) {
         rawClose();
       };
 
-      // Map a subfolder name to the nearest DOCUMENT_CATEGORIES entry, or null.
-      const categoryFromFolder = (folderName) => {
-        if (!folderName) return null;
-        const lower = folderName.toLowerCase();
-        for (const cat of AD.DOCUMENT_CATEGORIES) {
-          if (cat.toLowerCase().includes(lower) || lower.includes(cat.toLowerCase())) return cat;
-        }
-        return null;
-      };
-
       // Recursively walk a DirectoryEntry (from webkitGetAsEntry) and collect
       // { file, rel } pairs where rel is the path relative to the dropped root.
       // Skips hidden files (.DS_Store, .git, etc).
@@ -191,8 +181,13 @@ AD.documentForm = function (vehicleId, onSaved) {
           const nameInput = q.status === 'queued'
             ? `<input class="du-name" type="text" data-id="${q.id}" value="${esc(q.name)}" aria-label="Document name">`
             : `<span class="du-name-static">${esc(q.name)}</span>`;
+          // Include the file's own category in the dropdown even when it's a
+          // custom folder name that isn't one of the standard categories.
+          const catList = AD.DOCUMENT_CATEGORIES.includes(q.category)
+            ? AD.DOCUMENT_CATEGORIES
+            : [q.category, ...AD.DOCUMENT_CATEGORIES];
           const catInput = q.status === 'queued'
-            ? `<select class="du-cat" data-id="${q.id}">${options(AD.DOCUMENT_CATEGORIES, q.category)}</select>`
+            ? `<select class="du-cat" data-id="${q.id}">${options(catList, q.category)}</select>`
             : `<span class="du-cat-static">${esc(q.category)}</span>`;
           const removeBtn = q.status === 'queued'
             ? `<button type="button" class="du-del" data-del="${q.id}" title="Remove" aria-label="Remove">${I && I.x ? I.x : '&times;'}</button>`
@@ -239,12 +234,12 @@ AD.documentForm = function (vehicleId, onSaved) {
         arr.forEach((item) => {
           const file = item.file || item;
           const rel = item.rel || file.webkitRelativePath || file.name;
-          // Strip the top-level folder name that webkitdirectory prepends (e.g. "MyDocs/Rego/x.pdf" → "Rego/x.pdf")
           const parts = rel.split('/').filter(Boolean);
-          // If there are 3+ segments the first is the root folder name; subfolder is second.
-          // If 2 segments the first IS the subfolder.
-          const subFolder = parts.length >= 2 ? parts[parts.length - 2] : null;
-          const category = (subFolder && categoryFromFolder(subFolder)) || guessCategory(file.name);
+          // The file's immediate parent folder becomes its category, verbatim.
+          // A file sitting at the dropped root (only its own name in the path)
+          // has no parent folder, so fall back to guessing from the filename.
+          const subFolder = parts.length >= 2 ? parts[parts.length - 2].trim() : '';
+          const category = subFolder || guessCategory(file.name);
           queue.push({
             id: 'q' + (++seq),
             file,
