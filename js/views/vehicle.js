@@ -398,8 +398,9 @@ AD.views.vehicle = (function () {
       ${sorted.map((d) => {
         const hasFile = !!d.storagePath;
         const sub = hasFile && d.uploadedBy ? `<span class="t2">${esc(d.uploadedBy)}</span>` : (!hasFile ? '<span class="t2 muted">Placeholder — no file attached</span>' : '');
+        const icon = AD.fileIcon(hasFile ? (d.storagePath || d.name) : d.name);
         return `<tr${hasFile ? ` class="row-link" data-open="${d.id}" title="Open ${esc(d.name)}"` : ''}>
-          <td>${hasFile ? `<a class="id" href="#" data-open="${d.id}">${esc(d.name)}</a>` : esc(d.name)}${sub}</td>
+          <td><div class="doc-cell">${icon}<div class="doc-name">${hasFile ? `<a class="id" href="#" data-open="${d.id}">${esc(d.name)}</a>` : `<span>${esc(d.name)}</span>`}${sub}</div></div></td>
           <td>${esc(d.category || '—')}</td>
           <td class="num col-opt">${hasFile ? AD.fmtBytes(d.sizeBytes) : dash}</td>
           <td class="col-opt nowrap">${hasFile && d.uploadedAt ? T.fmtKey(d.uploadedAt.slice(0, 10)) : dash}</td>

@@ -14,6 +14,30 @@ AD.fmtBytes = function (n) {
 
 AD.MAX_DOC_BYTES = 25 * 1024 * 1024; // 25 MB per file
 
+/** Pick the file-type family (and its colour) from a filename or storage path.
+ *  Returns { kind: 'pdf'|'doc'|'xls'|'img'|'txt'|'file', label: 'PDF'|… }. */
+AD.fileKind = function (nameOrPath) {
+  const m = String(nameOrPath || '').match(/\.([a-z0-9]+)$/i);
+  const ext = (m ? m[1] : '').toLowerCase();
+  if (ext === 'pdf') return { kind: 'pdf', label: 'PDF' };
+  if (ext === 'doc' || ext === 'docx') return { kind: 'doc', label: 'DOC' };
+  if (ext === 'xls' || ext === 'xlsx' || ext === 'csv') return { kind: 'xls', label: 'XLS' };
+  if (['png', 'jpg', 'jpeg', 'webp', 'heic', 'gif', 'bmp', 'svg'].includes(ext)) return { kind: 'img', label: 'IMG' };
+  if (ext === 'txt' || ext === 'md' || ext === 'rtf') return { kind: 'txt', label: 'TXT' };
+  if (ext === 'ppt' || ext === 'pptx') return { kind: 'ppt', label: 'PPT' };
+  if (ext === 'zip' || ext === 'rar' || ext === '7z') return { kind: 'zip', label: 'ZIP' };
+  return { kind: 'file', label: ext ? ext.slice(0, 3).toUpperCase() : 'FILE' };
+};
+
+/** Small inline-SVG file badge — a document silhouette with a coloured
+ *  corner-fold and the extension label across the body. Scales with font-size
+ *  (uses em units) so it visually matches the row it's in. */
+AD.fileIcon = function (nameOrPath) {
+  const { kind, label } = AD.fileKind(nameOrPath);
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  return `<span class="file-ico file-ico-${kind}" aria-hidden="true"><span class="file-ico-ext">${esc(label)}</span></span>`;
+};
+
 /** Pick a sensible download filename: use the document's name, keeping (or
  *  adding) the correct extension from the stored path. */
 function downloadFilename(doc) {
