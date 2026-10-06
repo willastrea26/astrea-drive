@@ -128,6 +128,9 @@ AD.vehicleForm = function (vehicle, onSaved) {
 AD.views.fleet = (function () {
   const { esc, options, vehicleBadge, stateBadge } = AD.ui;
   const L = AD.logic, I = AD.icons;
+  const TYPE_ORDER = ['Vac truck', 'Tipper truck', 'Excavator', 'Trailer', 'Van', 'Car', 'Ute', 'Other'];
+  const TYPE_LABEL = { 'Vac truck': 'Vac trucks', 'Tipper truck': 'Tipper trucks', Excavator: 'Excavators', Trailer: 'Trailers', Van: 'Vans', Car: 'Cars', Ute: 'Utes', Other: 'Other vehicles' };
+  const groupType = (v) => v.type || 'Other';
   let st = {};
   let root = null;
 
@@ -219,12 +222,18 @@ AD.views.fleet = (function () {
         if (!hay.includes(q)) return false;
       }
       return true;
-    }).sort((a, b) => isHired ? (a.hireCompany || '').localeCompare(b.hireCompany || '') || a.id.localeCompare(b.id) : a.id.localeCompare(b.id));
+    }).sort((a, b) => {
+      const aType = groupType(a), bType = groupType(b);
+      const typeOrder = (TYPE_ORDER.indexOf(aType) < 0 ? TYPE_ORDER.length : TYPE_ORDER.indexOf(aType))
+        - (TYPE_ORDER.indexOf(bType) < 0 ? TYPE_ORDER.length : TYPE_ORDER.indexOf(bType));
+      if (typeOrder) return typeOrder;
+      return a.id.localeCompare(b.id);
+    });
 
     root.querySelector('#f-count').textContent = `${list.length} of ${base.length} vehicles`;
     const body = root.querySelector('#f-body');
     const allDocs = AD.store.all('documents') || [];
-    body.innerHTML = list.map((v) => {
+    const vehicleRow = (v) => {
       const alerts = isHired ? '' : AD.ui.attentionFlags(v);
       const [model, spec] = (v.model || '').split(' — ');
       const art = AD.art.forVehicle(v, 52) || `<span class="fleet-thumb-icon">${I.truck}</span>`;
@@ -246,7 +255,16 @@ AD.views.fleet = (function () {
         <td class="col-action col-opt col-wide">
           <button class="btn btn-ghost btn-sm" data-edit="${v.id}" title="Edit ${esc(v.id)}" aria-label="Edit ${esc(v.id)}">${I.edit} Edit</button>
         </td></tr>`;
-    }).join('') || `<tr><td colspan="${isHired ? 9 : 10}" class="empty">No vehicles match these filters.</td></tr>`;
+    };
+    const colspan = isHired ? 9 : 10;
+    const grouped = [];
+    TYPE_ORDER.concat([...new Set(list.map(groupType).filter((t) => !TYPE_ORDER.includes(t)))]).forEach((vehicleType) => {
+      const vehicles = list.filter((v) => groupType(v) === vehicleType);
+      if (!vehicles.length) return;
+      grouped.push(`<tr class="fleet-group-row"><th colspan="${colspan}"><span>${esc(TYPE_LABEL[vehicleType] || vehicleType)}</span><small>${vehicles.length} vehicle${vehicles.length === 1 ? '' : 's'}</small></th></tr>`);
+      grouped.push(vehicles.map(vehicleRow).join(''));
+    });
+    body.innerHTML = grouped.join('') || `<tr><td colspan="${colspan}" class="empty">No vehicles match these filters.</td></tr>`;
 
     body.querySelectorAll('tr[data-id]').forEach((tr) => tr.addEventListener('click', (e) => {
       if (e.target.closest('[data-edit]')) { AD.vehicleForm(AD.store.get('vehicles', tr.dataset.id)); return; }

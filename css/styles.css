@@ -236,6 +236,13 @@ table.data { width: 100%; border-collapse: collapse; font-size: 14.5px; }
 .col-thumb { width: 66px; padding-right: 4px !important; }
 /* Fleet rows: vertically centre every cell so one tall column doesn't push the rest off-centre */
 #f-body td { vertical-align: middle; }
+.fleet-group-row th {
+  padding: 18px 14px 8px !important; border-bottom: 2px solid var(--rule-strong); background: var(--bg) !important;
+  color: var(--ink); text-align: left; text-transform: none; letter-spacing: 0;
+}
+.fleet-group-row:first-child th { padding-top: 6px !important; }
+.fleet-group-row th span { font-size: 15px; font-weight: 750; }
+.fleet-group-row th small { margin-left: 8px; color: var(--muted); font-size: 12.5px; font-weight: 500; }
 .fleet-thumb { display: block; width: 58px; }
 .fleet-thumb .veh-svg { display: block; width: 100%; height: auto; }
 .fleet-thumb-icon { display: flex; align-items: center; justify-content: center; width: 100%; aspect-ratio: 2 / 1; color: var(--muted); }
