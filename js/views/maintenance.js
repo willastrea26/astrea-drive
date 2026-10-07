@@ -271,7 +271,14 @@ AD.views.maintenance = (function () {
     // Owned fleet only — hired vehicles are serviced by their hire company, not us.
     const all = AD.store.all('vehicles').filter((v) => !v.hired).map((v) => ({ v, s: L.serviceState(v) }));
     const order = { overdue: 0, soon: 1, ok: 2 };
-    all.sort((a, b) => order[a.s.state] - order[b.s.state] || Math.min(a.s.daysLeft, a.s.kmLeft) - Math.min(b.s.daysLeft, b.s.kmLeft) || a.v.id.localeCompare(b.v.id));
+    // Within a status group, show the row closest to its primary trigger first.
+    // Hours-based types (vac/tipper/excavator) sort on hours headroom; others
+    // on the smaller of days vs km.
+    const headroom = ({ v, s }) => {
+      if (L.HOURS_TYPES.has(v.type) && s.hasHours) return s.hoursLeft;
+      return Math.min(s.daysLeft, s.kmLeft);
+    };
+    all.sort((a, b) => order[a.s.state] - order[b.s.state] || headroom(a) - headroom(b) || a.v.id.localeCompare(b.v.id));
     const overdue = all.filter((x) => x.s.state === 'overdue');
     const soon = all.filter((x) => x.s.state === 'soon');
     const scheduled = all.filter((x) => x.s.state === 'ok');
@@ -286,38 +293,71 @@ AD.views.maintenance = (function () {
       return d === 0 ? 'Today' : d === 1 ? 'Tomorrow' : `In ${d} days`;
     };
 
-    const triggerInfo = ({ v, s }) => {
-      const parts = [];
-      if (s.dateOverdue) parts.push({ text: 'Date overdue', tone: 'overdue' });
-      if (s.kmOverdue) parts.push({ text: 'KM overdue', tone: 'overdue' });
-      if (s.hoursOverdue) parts.push({ text: 'Hours overdue', tone: 'overdue' });
-      if (!parts.length) {
-        if (s.dateSoon) parts.push({ text: 'Date due soon', tone: 'soon' });
-        if (s.kmSoon) parts.push({ text: 'KM due soon', tone: 'soon' });
-        if (s.hoursSoon) parts.push({ text: 'Hours due soon', tone: 'soon' });
+    // Which trigger leads in the register for this vehicle. Vac trucks, tippers
+    // and excavators lead on hours; everything else leads on km (falling back
+    // to date when km isn't tracked). The other active triggers follow as the
+    // "and date" / "+ km" secondary text.
+    const triggerOrder = (v) => {
+      if (L.HOURS_TYPES.has(v.type)) return ['hours', 'date', 'km'];
+      return ['km', 'date', 'hours'];
+    };
+    const triggerText = (kind, s, v) => {
+      if (kind === 'date') {
+        if (!s.triggers.date || !v.nextServiceDate) return null;
+        const dueText = s.daysLeft < 0 ? `${-s.daysLeft} day${s.daysLeft === -1 ? '' : 's'} overdue`
+          : s.daysLeft <= L.SOON_DAYS ? (s.daysLeft === 0 ? 'Due today' : `Due in ${s.daysLeft} day${s.daysLeft === 1 ? '' : 's'}`)
+          : `${T.fmtKey(v.nextServiceDate)}`;
+        const tone = s.dateOverdue ? 'overdue' : s.dateSoon ? 'soon' : 'ok';
+        return { label: 'Date', value: dueText, tone, detail: T.fmtKey(v.nextServiceDate) };
       }
-      const label = parts.length ? parts.map((p) => p.text).join(' · ') : 'Scheduled';
-      const tone = parts[0] ? parts[0].tone : 'ok';
-      const detailBits = [];
-      if (s.triggers.date && v.nextServiceDate) detailBits.push(T.fmtKey(v.nextServiceDate));
-      if (s.triggers.km && s.hasKm) detailBits.push(L.fmtKm(v.nextServiceKm));
-      if (s.triggers.hours && s.hasHours) detailBits.push(L.fmtHours(v.nextServiceHours));
-      return { label, tone, detail: detailBits.join(' · ') || 'No triggers set' };
+      if (kind === 'km') {
+        if (!s.triggers.km || !s.hasKm) return null;
+        const value = s.kmLeft < 0 ? `${L.fmtKm(-s.kmLeft)} over`
+          : s.kmLeft <= L.SOON_KM ? `${L.fmtKm(s.kmLeft)} to go`
+          : `${L.fmtKm(s.kmLeft)} left`;
+        const tone = s.kmOverdue ? 'overdue' : s.kmSoon ? 'soon' : 'ok';
+        return { label: 'Kilometres', value, tone, detail: `Next at ${L.fmtKm(v.nextServiceKm)}` };
+      }
+      if (kind === 'hours') {
+        if (!s.triggers.hours || !s.hasHours) return null;
+        const value = s.hoursLeft < 0 ? `${L.fmtHours(-s.hoursLeft)} over`
+          : s.hoursLeft <= L.SOON_HOURS ? `${L.fmtHours(s.hoursLeft)} to go`
+          : `${L.fmtHours(s.hoursLeft)} left`;
+        const tone = s.hoursOverdue ? 'overdue' : s.hoursSoon ? 'soon' : 'ok';
+        return { label: 'Engine hours', value, tone, detail: `Next at ${L.fmtHours(v.nextServiceHours)}` };
+      }
+      return null;
+    };
+
+    const triggerInfo = ({ v, s }) => {
+      const parts = triggerOrder(v).map((k) => triggerText(k, s, v)).filter(Boolean);
+      if (!parts.length) return { label: 'Scheduled', value: 'No triggers set', tone: 'ok', detail: '', secondary: '' };
+      const lead = parts[0];
+      const secondary = parts.slice(1).map((p) => `${p.label}: ${p.value}`).join(' · ');
+      return { label: lead.label, value: lead.value, tone: lead.tone, detail: lead.detail, secondary };
     };
 
     const progressInfo = ({ v, s }) => {
-      const daysInInterval = Math.max(30, Number(v.serviceIntervalMonths || 6) * 30);
-      const datePct = s.triggers.date ? 100 - (Math.max(0, s.daysLeft) / daysInInterval * 100) : 0;
-      const kmInterval = Math.max(1, Number(v.serviceIntervalKm || 10000));
-      const kmPct = s.triggers.km && s.hasKm ? 100 - (Math.max(0, s.kmLeft) / kmInterval * 100) : 0;
-      const hoursInterval = Math.max(1, Number(v.serviceIntervalHours || 250));
-      const hoursPct = s.triggers.hours && s.hasHours ? 100 - (Math.max(0, s.hoursLeft) / hoursInterval * 100) : 0;
-      const pct = Math.max(3, Math.min(100, Math.round(Math.max(datePct, kmPct, hoursPct))));
-      const bits = [];
-      if (s.triggers.date) bits.push(s.daysLeft < 0 ? `${-s.daysLeft} day${s.daysLeft === -1 ? '' : 's'} late` : s.daysLeft === 0 ? 'Due today' : `${s.daysLeft} days left`);
-      if (s.triggers.km && s.hasKm) bits.push(s.kmLeft < 0 ? `${L.fmtKm(-s.kmLeft)} over` : s.kmLeft === 0 ? 'KM limit reached' : `${L.fmtKm(s.kmLeft)} left`);
-      if (s.triggers.hours && s.hasHours) bits.push(s.hoursLeft < 0 ? `${L.fmtHours(-s.hoursLeft)} over` : s.hoursLeft === 0 ? 'Hours reached' : `${L.fmtHours(s.hoursLeft)} left`);
-      return { pct, text: bits.join(' · ') || 'No service trigger set' };
+      // The progress bar reflects the leading trigger for the vehicle; the
+      // other triggers' text still appears beside it so users see them all.
+      const lead = triggerOrder(v).find((k) => (k === 'hours' && s.triggers.hours && s.hasHours)
+        || (k === 'km' && s.triggers.km && s.hasKm)
+        || (k === 'date' && s.triggers.date));
+      let pct = 0, text = 'No service trigger set';
+      if (lead === 'hours') {
+        const interval = Math.max(1, Number(v.serviceIntervalHours || 250));
+        pct = 100 - (Math.max(0, s.hoursLeft) / interval * 100);
+        text = s.hoursLeft < 0 ? `${L.fmtHours(-s.hoursLeft)} over` : s.hoursLeft === 0 ? 'Hours reached' : `${L.fmtHours(s.hoursLeft)} left`;
+      } else if (lead === 'km') {
+        const interval = Math.max(1, Number(v.serviceIntervalKm || 10000));
+        pct = 100 - (Math.max(0, s.kmLeft) / interval * 100);
+        text = s.kmLeft < 0 ? `${L.fmtKm(-s.kmLeft)} over` : s.kmLeft === 0 ? 'KM limit reached' : `${L.fmtKm(s.kmLeft)} left`;
+      } else if (lead === 'date') {
+        const daysInInterval = Math.max(30, Number(v.serviceIntervalMonths || 6) * 30);
+        pct = 100 - (Math.max(0, s.daysLeft) / daysInInterval * 100);
+        text = s.daysLeft < 0 ? `${-s.daysLeft} day${s.daysLeft === -1 ? '' : 's'} late` : s.daysLeft === 0 ? 'Due today' : `${s.daysLeft} days left`;
+      }
+      return { pct: Math.max(3, Math.min(100, Math.round(pct))), text };
     };
 
     const rowHtml = (item) => {
@@ -326,13 +366,21 @@ AD.views.maintenance = (function () {
       const progress = progressInfo(item);
       const art = AD.art.forVehicle(v, 74) || `<span class="maintenance-thumb-icon">${I.truck}</span>`;
       const badge = s.state === 'overdue' ? AD.ui.badge('Overdue', 'red') : s.state === 'soon' ? AD.ui.badge('Due soon', 'amber') : AD.ui.badge('Scheduled', 'green muted');
+      // Hours-type vehicles get their hours shown in the "Last service" cell;
+      // km-tracked vehicles keep their odometer reading there.
+      const hoursType = L.HOURS_TYPES.has(v.type);
+      const lastValue = v.lastServiceDate ? T.fmtKey(v.lastServiceDate) : 'Not recorded';
+      const lastDetail = hoursType
+        ? (v.lastServiceHours != null && v.lastServiceHours !== '' ? L.fmtHours(v.lastServiceHours)
+            : (v.lastServiceKm != null ? L.fmtKm(v.lastServiceKm) : 'No hours recorded'))
+        : (v.lastServiceKm != null ? L.fmtKm(v.lastServiceKm) : 'No odometer recorded');
       return `<article class="maintenance-row maintenance-${s.state}" data-id="${esc(v.id)}" tabindex="0" aria-label="Open ${esc(v.id)} vehicle profile">
         <div class="maintenance-vehicle">
           <span class="maintenance-thumb">${art}</span>
           <span><b>${esc(v.id)}</b><small>${esc(v.rego || 'No registration')} · ${esc(v.type)}</small></span>
         </div>
-        <div class="maintenance-cell"><span>Due trigger</span><strong class="maintenance-trigger maintenance-trigger-${trigger.tone}">${trigger.label}</strong><small>${trigger.detail}</small></div>
-        <div class="maintenance-cell"><span>Last service</span><strong>${v.lastServiceDate ? T.fmtKey(v.lastServiceDate) : 'Not recorded'}</strong><small>${v.lastServiceKm != null ? L.fmtKm(v.lastServiceKm) : 'No odometer recorded'}</small></div>
+        <div class="maintenance-cell"><span>${esc(trigger.label)}</span><strong class="maintenance-trigger maintenance-trigger-${trigger.tone}">${esc(trigger.value)}</strong><small>${esc(trigger.secondary || trigger.detail)}</small></div>
+        <div class="maintenance-cell"><span>Last service</span><strong>${lastValue}</strong><small>${lastDetail}</small></div>
         <div class="maintenance-cell maintenance-progress-cell"><span>Service progress</span><div class="maintenance-progress" aria-label="${progress.pct}% through service interval"><i style="width:${progress.pct}%"></i></div><small>${progress.text}</small></div>
         <div class="maintenance-status">${badge}</div>
         <button type="button" class="btn btn-primary btn-sm" data-rec="${esc(v.id)}">Record service</button>
@@ -379,10 +427,15 @@ AD.views.maintenance = (function () {
         </section>
         <section class="section">
           ${sectionHead({ title: 'Recently recorded services' })}
-          <ul class="rows">${recent.map((x) => `<li class="link" data-veh="${x.vehicleId}">
-            <span class="id">${esc(x.vehicleId)}</span>
-            <span class="what">${esc(x.type)}<span class="t2">${T.fmtKey(x.date)} · ${L.fmtKm(x.odometer)} · ${esc(x.workshop || 'Workshop not recorded')}</span></span>
-            <span class="when">${L.fmtAUD(x.cost)}</span></li>`).join('')}</ul>
+          <ul class="rows">${recent.map((x) => {
+            const vx = AD.store.get('vehicles', x.vehicleId);
+            const hoursType = vx && L.HOURS_TYPES.has(vx.type);
+            const reading = hoursType && x.hours != null && x.hours !== '' ? L.fmtHours(x.hours) : L.fmtKm(x.odometer);
+            return `<li class="link" data-veh="${x.vehicleId}">
+              <span class="id">${esc(x.vehicleId)}</span>
+              <span class="what">${esc(x.type)}<span class="t2">${T.fmtKey(x.date)} · ${reading} · ${esc(x.workshop || 'Workshop not recorded')}</span></span>
+              <span class="when">${L.fmtAUD(x.cost)}</span></li>`;
+          }).join('')}</ul>
         </section>
       </div>`;
 
