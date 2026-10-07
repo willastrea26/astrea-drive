@@ -107,9 +107,12 @@ AD.views.dashboard = (function () {
       <div class="hero">
         <div class="hero-inner">
           <div class="hero-lead">
-            <h1>${greeting()}, ${esc(USER_FIRST_NAME)}.</h1>
-            <p class="hero-brand">Fleet operations</p>
-            <p class="hero-date"><i class="hero-dot"></i>${esc(longDate)}</p>
+            <img class="hero-logo" src="assets/logo-lockup.png?v=81" alt="Astrea Drive" width="169" height="46">
+            <div class="hero-greet">
+              <h1>${greeting()}, ${esc(USER_FIRST_NAME)}.</h1>
+              <p class="hero-brand">Fleet operations</p>
+              <p class="hero-date"><i class="hero-dot"></i>${esc(longDate)}</p>
+            </div>
           </div>
           <div class="hero-wx" id="hero-wx">${wxStrip(AD.weather.cached())}</div>
           <div class="hero-actions">
