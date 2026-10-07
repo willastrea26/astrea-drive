@@ -618,28 +618,50 @@ AD.views.vehicle = (function () {
   function overview(v, services, defects) {
     const s = L.serviceState(v), r = L.regoState(v);
     const flagTone = (tone) => (tone ? 'flag-' + tone : 'muted');
+    const faint = (txt) => `<span class="muted" style="font-weight:400">${txt}</span>`;
+    const isHours = (L.HOURS_TYPES && L.HOURS_TYPES.has(v.type)) || (v.engineHours != null && v.engineHours !== '');
+    // Lead the reading fact with engine hours for hours-tracked plant, else odometer.
+    const readingFact = isHours
+      ? `<div><dt>Engine hours</dt><dd>${v.engineHours != null && v.engineHours !== '' ? L.fmtHours(v.engineHours) : faint('Not recorded')}${v.odometer != null ? `<span class="sub">${L.fmtKm(v.odometer)} on the clock</span>` : ''}</dd></div>`
+      : `<div><dt>Odometer</dt><dd>${L.fmtKm(v.odometer)}</dd></div>`;
+    // Last service: the most recent recorded service, else the stored last-service fields.
+    const last = services[0];
+    const lastBits = [];
+    if (last) {
+      lastBits.push(T.fmtKey(last.date));
+      if (isHours && last.hours != null && last.hours !== '') lastBits.push(L.fmtHours(last.hours));
+      else if (last.odometer != null) lastBits.push(L.fmtKm(last.odometer));
+    } else {
+      if (v.lastServiceDate) lastBits.push(T.fmtKey(v.lastServiceDate));
+      if (isHours && v.lastServiceHours != null && v.lastServiceHours !== '') lastBits.push(L.fmtHours(v.lastServiceHours));
+      else if (v.lastServiceKm != null && v.lastServiceKm !== '') lastBits.push(L.fmtKm(v.lastServiceKm));
+    }
+    const lastServiceCell = lastBits.length ? lastBits.join(' · ') : faint('Not recorded');
+    const openDefs = defects.filter((d) => d.status !== 'Resolved');
     return `
       <div class="cols-main-aside">
         <div>
-          <dl class="facts">
-            <div><dt>Assigned driver</dt><dd>${v.driverId ? esc(L.driverName(v.driverId)) : '<span class="muted" style="font-weight:400">Unassigned</span>'}</dd></div>
+          <dl class="facts facts-snapshot">
+            <div><dt>Assigned driver</dt><dd>${v.driverId ? esc(L.driverName(v.driverId)) : faint('Unassigned')}</dd></div>
             <div><dt>Charge-out rate</dt><dd>${aud0(L.hourlyRate(v))}/hr</dd></div>
+            ${readingFact}
             <div><dt>Registration expiry</dt><dd>${T.fmtKey(v.regoExpiry)}<span class="sub ${flagTone(L.attentionTone(r.state, r.days))}">${esc(r.state === 'ok' ? 'Current — ' + r.why : r.why)}</span></dd></div>
+            <div><dt>Last service</dt><dd>${lastServiceCell}</dd></div>
             <div><dt>Next service</dt><dd>${nextServiceLabel(v, s)}<span class="sub ${flagTone(L.attentionTone(s.state, s.daysLeft, s.kmLeft, s.hoursLeft))}">${esc(s.why.charAt(0).toUpperCase() + s.why.slice(1))}</span></dd></div>
             ${v.status === 'In workshop' && v.workshopId ? `<div><dt>Currently at</dt><dd>${esc((AD.store.get('workshops', v.workshopId) || {}).name || 'Unknown workshop')}</dd></div>` : ''}
           </dl>
           ${detailsFacts(v)}
           <section class="section">
             ${sectionHead({ title: 'Recent services', meta: `${services.length} recorded`, level: 3 })}
-            <ul class="rows">
-              ${services.slice(0, 4).map((x) => `<li><span class="id">${T.fmtKey(x.date)}</span><span class="what">${esc(x.type)}<span class="t2">${x.workshop ? esc(x.workshop) : 'Workshop not recorded'}</span></span><span class="when">${L.fmtAUD(x.cost)}</span></li>`).join('') || '<li class="muted">No services recorded.</li>'}
-            </ul>
+            ${services.length ? `<ul class="rows">
+              ${services.slice(0, 4).map((x) => `<li><span class="id">${T.fmtKey(x.date)}</span><span class="what">${esc(x.type)}<span class="t2">${x.workshop ? esc(x.workshop) : 'Workshop not recorded'}</span></span><span class="when">${L.fmtAUD(x.cost)}</span></li>`).join('')}
+            </ul>` : `<div class="empty-tidy">${I.wrench}No services recorded yet.</div>`}
           </section>
           <section class="section">
-            ${sectionHead({ title: 'Open defects', meta: `${defects.filter((d) => d.status !== 'Resolved').length} open`, level: 3 })}
-            <ul class="rows">
-              ${defects.filter((d) => d.status !== 'Resolved').slice(0, 4).map((d) => `<li><span class="id">${T.fmtKey(d.reportedDate)}</span><span class="what">${esc(d.description)}<span class="t2">${esc(d.reportedBy)}</span></span><span class="when">${priorityBadge(d.priority)}</span></li>`).join('') || '<li class="muted">No open defects.</li>'}
-            </ul>
+            ${sectionHead({ title: 'Open defects', meta: `${openDefs.length} open`, level: 3 })}
+            ${openDefs.length ? `<ul class="rows">
+              ${openDefs.slice(0, 4).map((d) => `<li><span class="id">${T.fmtKey(d.reportedDate)}</span><span class="what">${esc(d.description)}<span class="t2">${esc(d.reportedBy)}</span></span><span class="when">${priorityBadge(d.priority)}</span></li>`).join('')}
+            </ul>` : `<div class="empty-tidy ok">${I.check}No open defects — all clear.</div>`}
           </section>
         </div>
         <aside class="aside">
