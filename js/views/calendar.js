@@ -190,10 +190,15 @@ AD.views.calendar = (function () {
       const rowH = n === 1 ? 64 : 12 + n * 40;
       const showStatus = key === T.todayKey() && needsStatusChip(v, list);
       const statusLabel = showStatus ? `<span class="t2">${esc(v.status)}${v.workshopId ? ' · ' + esc(((AD.store.get('workshops', v.workshopId) || {}).name) || '') : ''}</span>` : '';
+      const ws = showStatus && v.workshopId ? (AD.store.get('workshops', v.workshopId) || {}).name || '' : '';
+      const dayStatusBar = showStatus
+        ? `<a class="tl-bar chip maintenance status-chip" data-status="${v.id}" href="#/vehicle/${v.id}?tab=overview" style="left:0;width:100%;top:7px;height:${rowH - 14}px" title="${esc(v.id + ' · ' + v.status + (ws ? ' · at ' + ws : '') + '\nOpen vehicle profile')}"><b>${esc(v.status)}</b>${ws ? `<span class="t2">${esc(ws)}</span>` : ''}</a>`
+        : '';
       return `<div class="tl-row" style="min-height:${rowH}px">
         <div class="who"><a href="#/vehicle/${v.id}?tab=bookings">${v.id}</a><span class="t2">${v.driverId ? esc(L.driverName(v.driverId)) : 'No assigned driver'}</span>${statusLabel}</div>
         <div class="lane" data-slot="${v.id}|${key}|" title="Click to add a booking for ${v.id}">
           ${hours.map((x) => `<div class="tl-grid" style="left:${x.p}%"></div>`).join('')}
+          ${dayStatusBar}
           ${placed.map(({ b, lane }) => {
             const s = Date.parse(b.start), e = Date.parse(b.end);
             const left = pct(s), width = Math.max(pct(e) - left, 0.6);
@@ -220,13 +225,28 @@ AD.views.calendar = (function () {
     const today = T.todayKey();
     const all = AD.store.all('bookings').filter(visible).sort((a, b) => a.start.localeCompare(b.start) || a.truckId.localeCompare(b.truckId));
     const cells = Array.from({ length: 42 }, (_, i) => T.addDays(s, i));
+    // Trucks currently in workshop / out of service with no maintenance booking covering today.
+    const inShop = L.vacTrucks().filter((v) =>
+      (!st.truck || v.id === st.truck) &&
+      (v.status === 'In workshop' || v.status === 'Out of service') &&
+      !all.some((b) => b.truckId === v.id && b.kind === 'maintenance' && b.status !== 'cancelled' && inDay(b, today))
+    );
+    const monthStatusChip = (v) => {
+      const ws = v.workshopId ? (AD.store.get('workshops', v.workshopId) || {}).name || '' : '';
+      const tip = `${v.id} · ${v.status}${ws ? ' · at ' + ws : ''}\nOpen vehicle profile`;
+      return `<a class="chip maintenance status-chip" data-status="${v.id}" href="#/vehicle/${v.id}?tab=overview" title="${esc(tip)}"><b>${esc(v.id)}</b> ${esc(v.status)}</a>`;
+    };
     body.innerHTML = `<div class="month">
       ${T.DOW.map((d) => `<div class="dow">${d}</div>`).join('')}
       ${cells.map((d) => {
         const list = all.filter((b) => inDay(b, d));
-        const max = 3;
+        const showStatus = d === today && inShop.length > 0;
+        const extras = showStatus ? inShop.length : 0;
+        const max = Math.max(1, 3 - Math.min(extras, 2));
         return `<div class="cell ${T.parseKey(d).m !== m ? 'out' : ''} ${d === today ? 'today' : ''}" data-day="${d}">
           <span class="num">${T.parseKey(d).d}</span>
+          ${showStatus ? inShop.slice(0, 2).map(monthStatusChip).join('') : ''}
+          ${showStatus && inShop.length > 2 ? `<div class="more">+${inShop.length - 2} in workshop</div>` : ''}
           ${list.slice(0, max).map((b) => chip(b, d, clashes, true)).join('')}
           ${list.length > max ? `<div class="more">+${list.length - max} more</div>` : ''}
         </div>`;
