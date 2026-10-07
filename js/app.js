@@ -190,6 +190,7 @@ AD.views = AD.views || {};
 
   async function enterApp(session) {
     showApp();
+    AD.currentUserEmail = session.user.email || '';
     $('#user-tag').textContent = session.user.email;
     try {
       await AD.store.load();

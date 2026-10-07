@@ -5,7 +5,13 @@ AD.views.dashboard = (function () {
   const { esc, stateBadge, bookingBadge, scheduleBadge, pageHeader, sectionHead, dash, relTime } = AD.ui;
   const L = AD.logic, T = AD.time, I = AD.icons;
   const LIST_MAX = 5;
-  const USER_FIRST_NAME = 'Will';
+  const FIRST_NAME_BY_EMAIL = {
+    'd.macwhinney@astrea.com.au': 'Dale',
+  };
+  function firstName() {
+    const email = (AD.currentUserEmail || '').toLowerCase();
+    return FIRST_NAME_BY_EMAIL[email] || 'Will';
+  }
   const OWNED_SCHEDULE_VAC_IDS = new Set(Array.from({ length: 8 }, (_, i) => `AVT${String(i + 1).padStart(2, '0')}`));
   let root = null, day = '', schedFilter = 'all';
   // Charts animate in when the page is opened, not on every in-page redraw
@@ -109,7 +115,7 @@ AD.views.dashboard = (function () {
           <div class="hero-lead">
             <img class="hero-logo" src="assets/logo-lockup.png?v=81" alt="Astrea Drive" width="169" height="46">
             <div class="hero-greet">
-              <h1>${greeting()}, ${esc(USER_FIRST_NAME)}.</h1>
+              <h1>${greeting()}, ${esc(firstName())}.</h1>
               <p class="hero-brand">Fleet operations</p>
               <p class="hero-date"><i class="hero-dot"></i>${esc(longDate)}</p>
             </div>
