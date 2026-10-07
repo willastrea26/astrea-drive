@@ -480,6 +480,7 @@ label.check { display: flex; gap: 8px; align-items: center; font-weight: 400; co
 .chip.conflict { box-shadow: inset 3px 0 0 var(--red), inset 0 0 0 1.5px var(--red); outline: 0; }
 .chip:hover { filter: brightness(.97); }
 .chip .warn { color: #fff; background: var(--red); border-radius: 2px; padding: 0 4px; margin-right: 5px; font-weight: 700; font-size: 12px; text-decoration: none; display: inline-block; }
+a.chip.status-chip { text-decoration: none; color: var(--ink); }
 
 /* Week: one row per truck */
 .sched { overflow-x: auto; }

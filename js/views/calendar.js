@@ -96,6 +96,8 @@ AD.views.calendar = (function () {
     body.addEventListener('click', (e) => {
       const chip = e.target.closest('[data-bk]');
       if (chip) { e.stopPropagation(); AD.bookingForm(AD.store.get('bookings', chip.dataset.bk)); return; }
+      // Status chip is an <a>; let it navigate, just block the slot handler.
+      if (e.target.closest('[data-status]')) { e.stopPropagation(); return; }
       const more = e.target.closest('[data-day]');
       if (more && st.view === 'month') { st.date = more.dataset.day; st.view = 'day'; save(); draw(); return; }
       const slot = e.target.closest('[data-slot]');
@@ -133,6 +135,18 @@ AD.views.calendar = (function () {
     return `<button class="chip ${cat} ${clash ? 'conflict' : ''}" data-bk="${b.id}" title="${esc(tip)}">${warn}<b>${chipTimes(b, key)}</b> ${esc(L.bookingTitle(b))}<span class="t2">${esc(site)}</span></button>`;
   }
 
+  // Non-booking chip for a vac truck that is currently In workshop / Out of service.
+  // Shown on today's cell when no maintenance booking already covers today.
+  function statusChip(v) {
+    const ws = v.workshopId ? (AD.store.get('workshops', v.workshopId) || {}).name : '';
+    const label = v.status === 'In workshop' ? 'In workshop' : 'Out of service';
+    const tip = `${v.id} · ${v.status}${ws ? ' · at ' + ws : ''}\nOpen vehicle profile`;
+    return `<a class="chip maintenance status-chip" data-status="${v.id}" href="#/vehicle/${v.id}?tab=overview" title="${esc(tip)}"><b>${esc(label)}</b>${ws ? `<span class="t2">${esc(ws)}</span>` : ''}</a>`;
+  }
+  const needsStatusChip = (v, bookingsToday) =>
+    (v.status === 'In workshop' || v.status === 'Out of service') &&
+    !bookingsToday.some((b) => b.kind === 'maintenance' && b.status !== 'cancelled');
+
   function week(body, trucks, clashes) {
     const [s] = range();
     const days = Array.from({ length: 7 }, (_, i) => T.addDays(s, i));
@@ -145,7 +159,8 @@ AD.views.calendar = (function () {
         ${days.map((d) => {
           const list = all.filter((b) => b.truckId === v.id && inDay(b, d)).sort((a, b) => a.start.localeCompare(b.start));
           const hasClash = list.some((b) => clashes.has(b.id) && list.some((o) => o !== b && clashes.has(o.id) && Date.parse(o.start) < Date.parse(b.end) && Date.parse(b.start) < Date.parse(o.end)));
-          return `<td class="${d === today ? 'today' : ''} ${T.dayOfWeek(d) >= 5 ? 'weekend' : ''} ${hasClash ? 'clash-cell' : ''}" data-slot="${v.id}|${d}|7" title="Add booking for ${v.id} on ${T.fmtKey(d)}">${list.map((b) => chip(b, d, clashes)).join('')}</td>`;
+          const sChip = (d === today && needsStatusChip(v, list)) ? statusChip(v) : '';
+          return `<td class="${d === today ? 'today' : ''} ${T.dayOfWeek(d) >= 5 ? 'weekend' : ''} ${hasClash ? 'clash-cell' : ''}" data-slot="${v.id}|${d}|7" title="Add booking for ${v.id} on ${T.fmtKey(d)}">${sChip}${list.map((b) => chip(b, d, clashes)).join('')}</td>`;
         }).join('')}
       </tr>`).join('')}</tbody></table></div>`;
   }
@@ -173,8 +188,10 @@ AD.views.calendar = (function () {
       });
       const n = Math.max(1, lanesEnd.length);
       const rowH = n === 1 ? 64 : 12 + n * 40;
+      const showStatus = key === T.todayKey() && needsStatusChip(v, list);
+      const statusLabel = showStatus ? `<span class="t2">${esc(v.status)}${v.workshopId ? ' · ' + esc(((AD.store.get('workshops', v.workshopId) || {}).name) || '') : ''}</span>` : '';
       return `<div class="tl-row" style="min-height:${rowH}px">
-        <div class="who"><a href="#/vehicle/${v.id}?tab=bookings">${v.id}</a><span class="t2">${v.driverId ? esc(L.driverName(v.driverId)) : 'No assigned driver'}</span></div>
+        <div class="who"><a href="#/vehicle/${v.id}?tab=bookings">${v.id}</a><span class="t2">${v.driverId ? esc(L.driverName(v.driverId)) : 'No assigned driver'}</span>${statusLabel}</div>
         <div class="lane" data-slot="${v.id}|${key}|" title="Click to add a booking for ${v.id}">
           ${hours.map((x) => `<div class="tl-grid" style="left:${x.p}%"></div>`).join('')}
           ${placed.map(({ b, lane }) => {
