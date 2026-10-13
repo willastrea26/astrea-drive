@@ -133,6 +133,21 @@ AD.logic = (function () {
     return d ? d.name : '';
   }
 
+  // Known teammates get their full name; anyone else falls back to a
+  // capitalised version of their email's local part (e.g. "a.jones").
+  const USER_NAMES = {
+    'w.hamilton@astrea.com.au': 'Will Hamilton',
+    'd.macwhinney@astrea.com.au': 'Dale Macwhinney',
+  };
+  /** Readable name for activity attribution, e.g. "Will Hamilton". Empty string in, empty string out. */
+  function userName(email) {
+    if (!email) return '';
+    const key = email.toLowerCase();
+    if (USER_NAMES[key]) return USER_NAMES[key];
+    return key.split('@')[0].split(/[._-]+/).filter(Boolean)
+      .map((p) => p[0].toUpperCase() + p.slice(1)).join(' ');
+  }
+
   // ---------- Scheduling ----------
   const vacTrucks = () => S().all('vehicles').filter((v) => v.type === 'Vac truck').sort((a, b) => a.id.localeCompare(b.id));
 
@@ -313,7 +328,7 @@ AD.logic = (function () {
 
   return {
     serviceState, serviceTriggers, HOURS_TYPES,
-    regoState, attentionTone, openDefects, fmtKm, fmtHours, fmtAUD, driverName,
+    regoState, attentionTone, openDefects, fmtKm, fmtHours, fmtAUD, driverName, userName,
     vacTrucks, bookingsFor, activeAt, overlaps, conflictIds, nextBooking, locate, hasCoords,
     bookingCategory, bookingTitle, SOON_DAYS, SOON_KM, SOON_HOURS, URGENT_HOURS,
     hourlyRate, revenue, revenueBy, costs, bookingHours, revenueSeries,

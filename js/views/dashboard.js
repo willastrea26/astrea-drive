@@ -302,7 +302,10 @@ AD.views.dashboard = (function () {
       <section class="section">
         ${sectionHead({ title: 'Recent activity', meta: 'Latest 6 changes' })}
         <ul class="rows activity">
-          ${AD.store.all('activity').slice(0, 6).map((a) => `<li><span class="what">${esc(a.text)}</span><span class="when">${esc(relTime(a.ts))}</span></li>`).join('') || '<li class="muted">No activity yet.</li>'}
+          ${AD.store.all('activity').slice(0, 6).map((a) => {
+            const who = L.userName(a.userEmail);
+            return `<li><span class="what">${esc(a.text)}${who ? `<span class="t2">by ${esc(who)}</span>` : ''}</span><span class="when">${esc(relTime(a.ts))}</span></li>`;
+          }).join('') || '<li class="muted">No activity yet.</li>'}
         </ul>
       </section>`;
 

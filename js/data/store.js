@@ -81,7 +81,16 @@ AD.store = (function () {
   }
 
   async function log(text, vehicleId) {
-    return insert('activity', { ts: new Date().toISOString(), vehicleId: vehicleId || '', text }, 'act');
+    const row = { ts: new Date().toISOString(), vehicleId: vehicleId || '', text, userEmail: AD.currentUserEmail || '' };
+    try {
+      return await insert('activity', row, 'act');
+    } catch (e) {
+      // Falls back to logging without the author until update-activity-user.sql has been run.
+      const msg = String((e && (e.message || e.details || e.hint)) || e);
+      if (!/pgrst204|42703|schema cache|could not find/i.test(msg)) throw e;
+      const stripped = Object.assign({}, row); delete stripped.userEmail;
+      return insert('activity', stripped, 'act');
+    }
   }
 
   function on(fn) { listeners.add(fn); return () => listeners.delete(fn); }
