@@ -26,12 +26,13 @@ AD.bookingForm = function (booking, defaults = {}) {
     const start = T.fromParts(y, m, d, sh, 0);
     b = {
       id: '', kind: defaults.kind || 'job', truckId: defaults.truckId || '', jobName: '', jobNumber: '', client: '',
-      driverId: '', status: defaults.kind === 'maintenance' ? 'confirmed' : 'confirmed', notes: '',
+      driverId: defaults.driverId || '', status: 'confirmed', notes: '',
       siteId: defaults.kind === 'maintenance' ? 'site-depot' : '', address: '', lat: null, lng: null, locationSource: 'none',
       start: new Date(start).toISOString(), end: new Date(T.fromParts(y, m, d, sh + 8, 0)).toISOString()
     };
     if (b.siteId) { const s = sites.find((x) => x.id === b.siteId); Object.assign(b, { address: s.address, lat: s.lat, lng: s.lng, locationSource: 'site' }); }
-    if (b.truckId) { const v = AD.store.get('vehicles', b.truckId); if (v && b.kind === 'job') b.driverId = v.driverId; }
+    // The vehicle's usual driver is only a fallback — a driver passed in wins.
+    if (b.truckId && !b.driverId) { const v = AD.store.get('vehicles', b.truckId); if (v && b.kind === 'job') b.driverId = v.driverId; }
   }
   // Location mode: a saved site id, 'pin' or 'none'
   let locMode = b.locationSource === 'site' && b.siteId ? b.siteId : b.locationSource === 'pin' ? 'pin' : 'none';
