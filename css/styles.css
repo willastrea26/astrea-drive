@@ -151,7 +151,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 /* Facts strip (vehicle key details) */
 .facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-top: 1px solid var(--ink); border-bottom: 1px solid var(--rule); margin: 0; }
 .facts > div { padding: 14px 20px; border-left: 1px solid var(--rule); min-width: 0; }
-.facts > div:first-child { border-left: 0; padding-left: 0; }
+.facts > div:first-child { border-left: 0; }
 .facts dt { font-size: 13.5px; color: var(--muted); margin-bottom: 3px; }
 .facts dd { margin: 0; font-size: 15.5px; font-weight: 600; }
 .facts dd .sub { display: block; font-size: 13.5px; font-weight: 400; margin-top: 2px; }
@@ -161,7 +161,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 @media (min-width: 1081px) {
   .facts-snapshot { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .facts-snapshot > div { padding: 16px 22px; }
-  .facts-snapshot > div:nth-child(3n+1) { border-left: 0; padding-left: 0; }
+  .facts-snapshot > div:nth-child(3n+1) { border-left: 0; }
   .facts-snapshot > div:nth-child(n+4) { border-top: 1px solid var(--rule); }
 }
 /* A trailing fact that doesn't fill a full row (e.g. "Currently at", only
@@ -799,7 +799,7 @@ a.chip.status-chip { text-decoration: none; color: var(--ink); }
   .cols-main-aside { grid-template-columns: minmax(0, 1fr); row-gap: 40px; }
   .strip, .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .strip { gap: 12px; }
-  .facts > div:nth-child(2n+3) { border-left: 0; padding-left: 0; }
+  .facts > div:nth-child(2n+3) { border-left: 0; }
   .facts > div:nth-child(n+3) { border-top: 1px solid var(--rule); }
 }
 @media (max-width: 860px) {
@@ -829,7 +829,7 @@ a.chip.status-chip { text-decoration: none; color: var(--ink); }
   .strip-item:first-child { padding-left: 18px !important; }
   .strip-item .v { font-size: 26px; }
   .facts { grid-template-columns: minmax(0, 1fr); }
-  .facts > div { border-left: 0; padding-left: 0; border-top: 1px solid var(--rule); }
+  .facts > div { border-left: 0; border-top: 1px solid var(--rule); }
   .facts > div:first-child { border-top: 0; }
   .rows li { grid-template-columns: 76px minmax(0, 1fr); }
   .rows li .when { grid-column: 2; text-align: left; }
@@ -964,7 +964,6 @@ h1, h2, h3 { font-family: var(--font-display); }
 .strip-item .v { font-family: var(--font-display); font-size: 32px; font-weight: 700; letter-spacing: -0.02em; }
 .facts { border-top: 1px solid var(--rule); }
 .facts > div { padding: 16px 20px; }
-.facts > div:first-child { padding-left: 20px; }
 
 /* Controls */
 .btn { border-radius: var(--r); }
