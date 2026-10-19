@@ -55,7 +55,8 @@ AD.views.calendar = (function () {
 
   function draw() {
     const el = root;
-    const fleet = L.allVehicles();
+    const fleet = L.schedulableVehicles();
+    const types = [...new Set(fleet.map((v) => v.type))].sort();
     const trucks = st.type ? fleet.filter((v) => v.type === st.type) : fleet;
     // A truck filter from a narrower type is dropped rather than showing nothing.
     if (st.truck && !trucks.some((v) => v.id === st.truck)) st.truck = '';
@@ -75,7 +76,7 @@ AD.views.calendar = (function () {
         <h2 aria-live="polite">${esc(title())}</h2>
         <div class="right">
           <input type="date" id="jump" value="${st.date}" aria-label="Go to date">
-          <select id="type" aria-label="Vehicle type">${options(AD.VEHICLE_TYPES || [], st.type, 'All types')}</select>
+          <select id="type" aria-label="Vehicle type">${options(types, st.type, 'All types')}</select>
           <select id="truck" aria-label="Vehicle">${options(trucks.map((v) => v.id), st.truck, 'All vehicles')}</select>
           ${st.view === 'month' ? '' : `<div class="seg" role="group" aria-label="Group rows by">${[['vehicle', 'Vehicle'], ['driver', 'Driver']].map(([g, lbl]) => `<button data-group="${g}" class="${st.group === g ? 'on' : ''}" aria-pressed="${st.group === g}">${lbl}</button>`).join('')}</div>`}
           <div class="seg" role="group" aria-label="View">${['day', 'week', 'month'].map((v) => `<button data-view="${v}" class="${st.view === v ? 'on' : ''}" aria-pressed="${st.view === v}">${v[0].toUpperCase() + v.slice(1)}</button>`).join('')}</div>

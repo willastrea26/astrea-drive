@@ -150,8 +150,16 @@ AD.logic = (function () {
 
   // ---------- Scheduling ----------
   const vacTrucks = () => S().all('vehicles').filter((v) => v.type === 'Vac truck').sort((a, b) => a.id.localeCompare(b.id));
-  /** Every vehicle, id-sorted — the calendar and booking form schedule the whole fleet. */
-  const allVehicles = () => S().all('vehicles').slice().sort((a, b) => a.id.localeCompare(b.id));
+  /* Utes and cars are assigned to a person rather than booked onto jobs, so they
+     stay off the calendar. Anything already carrying a booking is kept whatever
+     its type, so no existing booking can be hidden. */
+  const UNSCHEDULED_TYPES = new Set(['Ute', 'Car']);
+  function schedulableVehicles() {
+    const booked = new Set(S().all('bookings').map((b) => b.truckId));
+    return S().all('vehicles')
+      .filter((v) => !UNSCHEDULED_TYPES.has(v.type) || booked.has(v.id))
+      .sort((a, b) => a.id.localeCompare(b.id));
+  }
 
   const ms = (iso) => Date.parse(iso);
 
@@ -344,7 +352,7 @@ AD.logic = (function () {
   return {
     serviceState, serviceTriggers, HOURS_TYPES,
     regoState, attentionTone, openDefects, fmtKm, fmtHours, fmtAUD, driverName, userName,
-    vacTrucks, allVehicles, bookingsFor, activeAt, overlaps, conflictIds, driverConflictIds, nextBooking, locate, hasCoords,
+    vacTrucks, schedulableVehicles, bookingsFor, activeAt, overlaps, conflictIds, driverConflictIds, nextBooking, locate, hasCoords,
     bookingCategory, bookingTitle, SOON_DAYS, SOON_KM, SOON_HOURS, URGENT_HOURS,
     hourlyRate, revenue, revenueBy, costs, bookingHours, revenueSeries,
     workshopsFor, atWorkshop

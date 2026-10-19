@@ -8,7 +8,7 @@ AD.bookingForm = function (booking, defaults = {}) {
   const { esc, options, formData, showErrors, modal, toast, confirm } = AD.ui;
   const T = AD.time, L = AD.logic, I = AD.icons;
   const isNew = !booking;
-  const trucks = L.allVehicles();
+  const trucks = L.schedulableVehicles();
   const sites = AD.store.all('sites');
   const drivers = AD.store.all('drivers');
 
