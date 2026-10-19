@@ -1,15 +1,20 @@
-/* Calendar: day (timeline), week (one row per truck) and month views */
+/* Calendar: day (timeline), week (one row per vehicle) and month views */
 AD.views = AD.views || {};
 
 AD.views.calendar = (function () {
   const { esc, options } = AD.ui;
   const L = AD.logic, T = AD.time, I = AD.icons;
   let root = null;
-  let st = { view: 'week', date: '', truck: '' };
+  let st = { view: 'week', date: '', truck: '', type: '' };
 
   function render(el, params) {
     root = el;
-    st = { view: ['day', 'week', 'month'].includes(params.view) ? params.view : 'week', date: /^\d{4}-\d{2}-\d{2}$/.test(params.date || '') ? params.date : T.todayKey(), truck: params.truck || '' };
+    st = {
+      view: ['day', 'week', 'month'].includes(params.view) ? params.view : 'week',
+      date: /^\d{4}-\d{2}-\d{2}$/.test(params.date || '') ? params.date : T.todayKey(),
+      truck: params.truck || '',
+      type: (AD.VEHICLE_TYPES || []).includes(params.type) ? params.type : ''
+    };
     draw();
     if (params.new) {
       AD.setParams({ view: st.view, date: st.date, truck: st.truck });
@@ -49,11 +54,14 @@ AD.views.calendar = (function () {
 
   function draw() {
     const el = root;
-    const trucks = L.vacTrucks();
+    const fleet = L.allVehicles();
+    const trucks = st.type ? fleet.filter((v) => v.type === st.type) : fleet;
+    // A truck filter from a narrower type is dropped rather than showing nothing.
+    if (st.truck && !trucks.some((v) => v.id === st.truck)) st.truck = '';
     el.innerHTML = `
       ${AD.ui.pageHeader({
         title: 'Calendar',
-        sub: `${trucks.length} vac trucks · Times in Australia/Sydney (${T.abbr(T.startOfDay(st.date) + 12 * 3600000)} on the selected date)`,
+        sub: `${trucks.length} ${st.type ? esc(st.type.toLowerCase()) : 'vehicle'}${trucks.length === 1 ? '' : 's'} · Times in Australia/Sydney (${T.abbr(T.startOfDay(st.date) + 12 * 3600000)} on the selected date)`,
         actions: `<a class="btn btn-secondary" href="#/tracker?date=${st.date}">${I.map} View on Tracker</a>
                   <button class="btn btn-primary" id="new-bk">${I.plus} New booking</button>`
       })}
@@ -66,7 +74,8 @@ AD.views.calendar = (function () {
         <h2 aria-live="polite">${esc(title())}</h2>
         <div class="right">
           <input type="date" id="jump" value="${st.date}" aria-label="Go to date">
-          <select id="truck" aria-label="Truck">${options(trucks.map((v) => v.id), st.truck, 'All trucks')}</select>
+          <select id="type" aria-label="Vehicle type">${options(AD.VEHICLE_TYPES || [], st.type, 'All types')}</select>
+          <select id="truck" aria-label="Vehicle">${options(trucks.map((v) => v.id), st.truck, 'All vehicles')}</select>
           <div class="seg" role="group" aria-label="View">${['day', 'week', 'month'].map((v) => `<button data-view="${v}" class="${st.view === v ? 'on' : ''}" aria-pressed="${st.view === v}">${v[0].toUpperCase() + v.slice(1)}</button>`).join('')}</div>
         </div>
       </div>
@@ -83,15 +92,16 @@ AD.views.calendar = (function () {
     el.querySelector('#today').onclick = () => { st.date = T.todayKey(); save(); draw(); };
     el.querySelector('#jump').onchange = (e) => { if (e.target.value) { st.date = e.target.value; save(); draw(); } };
     el.querySelector('#truck').onchange = (e) => { st.truck = e.target.value; save(); draw(); };
+    el.querySelector('#type').onchange = (e) => { st.type = e.target.value; save(); draw(); };
     el.querySelectorAll('[data-view]').forEach((b) => (b.onclick = () => { st.view = b.dataset.view; save(); draw(); }));
     el.querySelector('#new-bk').onclick = () => AD.bookingForm(null, { truckId: st.truck, date: st.date });
 
     const body = el.querySelector('#cal-body');
     const shown = st.truck ? trucks.filter((v) => v.id === st.truck) : trucks;
-    const clashes = L.conflictIds();
+    const clashes = clashSet();
     if (st.view === 'week') week(body, shown, clashes);
     else if (st.view === 'day') day(body, shown, clashes);
-    else month(body, clashes);
+    else month(body, clashes, shown);
 
     body.addEventListener('click', (e) => {
       const chip = e.target.closest('[data-bk]');
@@ -115,7 +125,23 @@ AD.views.calendar = (function () {
   }
 
   const inDay = (b, key) => Date.parse(b.start) < T.startOfDay(T.addDays(key, 1)) && Date.parse(b.end) > T.startOfDay(key);
-  const visible = (b) => !st.truck || b.truckId === st.truck;
+
+  /* A vehicle can't be in two places at once, and neither can a driver. Both read
+     as one red "clash" chip; the tooltip says which. .has() keeps the call sites
+     that already treated this as a Set working unchanged. */
+  function clashSet() {
+    const truck = L.conflictIds(), driver = L.driverConflictIds();
+    return {
+      has: (id) => truck.has(id) || driver.has(id),
+      why: (id) => {
+        const t = truck.has(id), d = driver.has(id);
+        if (t && d) return 'CLASH · vehicle and driver double-booked';
+        if (t) return 'CLASH · vehicle double-booked';
+        if (d) return 'CLASH · driver double-booked';
+        return '';
+      }
+    };
+  }
 
   function chipTimes(b, key) {
     const s = Date.parse(b.start), e = Date.parse(b.end);
@@ -129,7 +155,7 @@ AD.views.calendar = (function () {
     const cat = L.bookingCategory(b);
     const clash = clashes.has(b.id);
     const site = b.siteId ? (AD.store.get('sites', b.siteId) || {}).name : L.hasCoords(b) ? 'Pinned site' : 'Site location required';
-    const tip = `${b.truckId} · ${L.bookingTitle(b)}\n${T.fmtDateTime(b.start)} – ${T.fmtDateTime(b.end)}\n${AD.ui.BOOKING_LABEL[cat]}${clash ? ' · CLASH' : ''}\n${b.address || site}`;
+    const tip = `${b.truckId} · ${L.bookingTitle(b)}\n${T.fmtDateTime(b.start)} – ${T.fmtDateTime(b.end)}\n${AD.ui.BOOKING_LABEL[cat]}${clash ? ' · ' + clashes.why(b.id) : ''}\n${b.address || site}`;
     const warn = clash ? '<span class="warn">!</span>' : '';
     if (compact) return `<button class="chip ${cat} ${clash ? 'conflict' : ''}" data-bk="${b.id}" title="${esc(tip)}">${warn}<b>${b.truckId}</b> ${esc(L.bookingTitle(b))}</button>`;
     return `<button class="chip ${cat} ${clash ? 'conflict' : ''}" data-bk="${b.id}" title="${esc(tip)}">${warn}<b>${chipTimes(b, key)}</b> ${esc(L.bookingTitle(b))}<span class="t2">${esc(site)}</span></button>`;
@@ -153,9 +179,9 @@ AD.views.calendar = (function () {
     const today = T.todayKey();
     const all = AD.store.all('bookings');
     body.innerHTML = `<div class="sched"><table>
-      <thead><tr><th class="truck">Truck</th>${days.map((d) => `<th class="${d === today ? 'today' : ''}">${T.DOW[T.dayOfWeek(d)]} ${T.fmtKey(d).slice(0, 5)}</th>`).join('')}</tr></thead>
+      <thead><tr><th class="truck">Vehicle</th>${days.map((d) => `<th class="${d === today ? 'today' : ''}">${T.DOW[T.dayOfWeek(d)]} ${T.fmtKey(d).slice(0, 5)}</th>`).join('')}</tr></thead>
       <tbody>${trucks.map((v) => `<tr>
-        <th class="truck"><a href="#/vehicle/${v.id}?tab=bookings">${v.id}</a><span class="t2">${v.driverId ? esc(L.driverName(v.driverId)) : 'No assigned driver'}</span>${v.status === 'In workshop' || v.status === 'Out of service' ? `<span class="t2">${esc(v.status)}</span>` : ''}</th>
+        <th class="truck"><a href="#/vehicle/${v.id}?tab=bookings">${v.id}</a>${st.type ? '' : `<span class="t2">${esc(v.type)}</span>`}<span class="t2">${v.driverId ? esc(L.driverName(v.driverId)) : 'No assigned driver'}</span>${v.status === 'In workshop' || v.status === 'Out of service' ? `<span class="t2">${esc(v.status)}</span>` : ''}</th>
         ${days.map((d) => {
           const list = all.filter((b) => b.truckId === v.id && inDay(b, d)).sort((a, b) => a.start.localeCompare(b.start));
           const hasClash = list.some((b) => clashes.has(b.id) && list.some((o) => o !== b && clashes.has(o.id) && Date.parse(o.start) < Date.parse(b.end) && Date.parse(b.start) < Date.parse(o.end)));
@@ -219,15 +245,15 @@ AD.views.calendar = (function () {
     </div></div>`;
   }
 
-  function month(body, clashes) {
+  function month(body, clashes, shown) {
     const [s] = range();
     const { m } = T.parseKey(st.date);
     const today = T.todayKey();
-    const all = AD.store.all('bookings').filter(visible).sort((a, b) => a.start.localeCompare(b.start) || a.truckId.localeCompare(b.truckId));
+    const ids = new Set(shown.map((v) => v.id));
+    const all = AD.store.all('bookings').filter((b) => ids.has(b.truckId)).sort((a, b) => a.start.localeCompare(b.start) || a.truckId.localeCompare(b.truckId));
     const cells = Array.from({ length: 42 }, (_, i) => T.addDays(s, i));
-    // Trucks currently in workshop / out of service with no maintenance booking covering today.
-    const inShop = L.vacTrucks().filter((v) =>
-      (!st.truck || v.id === st.truck) &&
+    // Vehicles currently in workshop / out of service with no maintenance booking covering today.
+    const inShop = shown.filter((v) =>
       (v.status === 'In workshop' || v.status === 'Out of service') &&
       !all.some((b) => b.truckId === v.id && b.kind === 'maintenance' && b.status !== 'cancelled' && inDay(b, today))
     );

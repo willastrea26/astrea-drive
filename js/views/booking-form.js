@@ -1,5 +1,5 @@
 /*
- * Create / edit / delete a vac truck booking.
+ * Create / edit / delete a vehicle booking.
  * Bookings are the single dataset behind both Calendar and Tracker.
  */
 window.AD = window.AD || {};
@@ -8,7 +8,7 @@ AD.bookingForm = function (booking, defaults = {}) {
   const { esc, options, formData, showErrors, modal, toast, confirm } = AD.ui;
   const T = AD.time, L = AD.logic, I = AD.icons;
   const isNew = !booking;
-  const trucks = L.vacTrucks();
+  const trucks = L.allVehicles();
   const sites = AD.store.all('sites');
   const drivers = AD.store.all('drivers');
 
@@ -49,9 +49,9 @@ AD.bookingForm = function (booking, defaults = {}) {
       <p class="modal-lede">${I.clock} Times are Australia/Sydney (AEST/AEDT).</p>
       <form class="form-grid" novalidate>
         <div class="field"><label>Booking type</label>
-          <select name="kind">${options([['job', 'Job'], ['maintenance', 'Maintenance (truck unavailable)'], ['depot', 'Depot assignment']], b.kind)}</select></div>
-        <div class="field"><label>Vac truck <span class="req">*</span></label>
-          <select name="truckId">${options(trucks.map((v) => [v.id, `${v.id} · ${v.rego}${v.status === 'Out of service' || v.status === 'In workshop' ? ' (' + v.status + ')' : ''}`]), b.truckId, 'Select truck')}</select></div>
+          <select name="kind">${options([['job', 'Job'], ['maintenance', 'Maintenance (vehicle unavailable)'], ['depot', 'Depot assignment']], b.kind)}</select></div>
+        <div class="field"><label>Vehicle <span class="req">*</span></label>
+          <select name="truckId">${options(trucks.map((v) => [v.id, `${v.id} · ${v.type} · ${v.rego}${v.status === 'Out of service' || v.status === 'In workshop' ? ' (' + v.status + ')' : ''}`]), b.truckId, 'Select vehicle')}</select></div>
         <div class="field"><label id="lbl-job">Job name <span class="req">*</span></label><input type="text" name="jobName" value="${esc(b.jobName)}" list="job-list">
           <datalist id="job-list">${suggestions('jobName')}</datalist></div>
         <div class="field job-only"><label>Job number</label><input type="text" name="jobNumber" value="${esc(b.jobNumber)}" placeholder="e.g. J-26301"></div>
@@ -131,7 +131,7 @@ AD.bookingForm = function (booking, defaults = {}) {
         const addr = f.address;
         if (locMode === 'none') {
           st.className = 'loc-status none';
-          st.innerHTML = `${I.alert} No coordinates. Tracker will list this truck as “Site location required” during the booking. Click the map to drop a pin.`;
+          st.innerHTML = `${I.alert} No coordinates. Tracker will list this vehicle as “Site location required” during the booking. Click the map to drop a pin.`;
           addr.readOnly = false;
           $('#lbl-addr').textContent = 'Site address (as typed — not looked up)';
           $('#addr-help').textContent = 'Typed addresses are stored as text only. No address search is implemented, so they are not placed on the map.';

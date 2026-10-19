@@ -150,6 +150,8 @@ AD.logic = (function () {
 
   // ---------- Scheduling ----------
   const vacTrucks = () => S().all('vehicles').filter((v) => v.type === 'Vac truck').sort((a, b) => a.id.localeCompare(b.id));
+  /** Every vehicle, id-sorted — the calendar and booking form schedule the whole fleet. */
+  const allVehicles = () => S().all('vehicles').slice().sort((a, b) => a.id.localeCompare(b.id));
 
   const ms = (iso) => Date.parse(iso);
 
@@ -172,13 +174,21 @@ AD.logic = (function () {
     return bookingsFor(draft.truckId).filter((b) => b.id !== draft.id && counts(b) && ms(b.start) < e && s < ms(b.end));
   }
 
-  /** Set of booking ids that clash with another booking. */
-  function conflictIds() {
+  /** Ids of non-cancelled bookings that overlap another booking sharing the same key. */
+  function overlapIds(keyOf) {
+    const groups = new Map();
+    for (const b of S().all('bookings')) {
+      if (!counts(b)) continue;
+      const k = keyOf(b);
+      if (!k) continue;
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(b);
+    }
     const ids = new Set();
-    for (const v of vacTrucks()) {
-      const list = bookingsFor(v.id).filter(counts);
+    for (const list of groups.values()) {
+      list.sort((a, b) => ms(a.start) - ms(b.start));
       for (let i = 0; i < list.length; i++) {
-        const iEnd = ms(list[i].end), iStart = ms(list[i].start);
+        const iStart = ms(list[i].start), iEnd = ms(list[i].end);
         for (let j = i + 1; j < list.length; j++) {
           // Sorted by start, so once one starts at/after i's end, so do the rest.
           if (ms(list[j].start) >= iEnd) break;
@@ -188,6 +198,11 @@ AD.logic = (function () {
     }
     return ids;
   }
+
+  /** Bookings double-booked on the same vehicle. */
+  const conflictIds = () => overlapIds((b) => b.truckId);
+  /** Bookings where one driver is in two places at once. */
+  const driverConflictIds = () => overlapIds((b) => b.driverId);
 
   function nextBooking(truckId, t) {
     return bookingsFor(truckId).find((b) => counts(b) && ms(b.start) > t) || null;
@@ -329,7 +344,7 @@ AD.logic = (function () {
   return {
     serviceState, serviceTriggers, HOURS_TYPES,
     regoState, attentionTone, openDefects, fmtKm, fmtHours, fmtAUD, driverName, userName,
-    vacTrucks, bookingsFor, activeAt, overlaps, conflictIds, nextBooking, locate, hasCoords,
+    vacTrucks, allVehicles, bookingsFor, activeAt, overlaps, conflictIds, driverConflictIds, nextBooking, locate, hasCoords,
     bookingCategory, bookingTitle, SOON_DAYS, SOON_KM, SOON_HOURS, URGENT_HOURS,
     hourlyRate, revenue, revenueBy, costs, bookingHours, revenueSeries,
     workshopsFor, atWorkshop
