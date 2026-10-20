@@ -10,6 +10,10 @@ AD.views['cost-sheet'] = (function () {
   const TREND_WEEKS = 12; // Spend over time, weekly mode
   const TREND_MONTHS = 12; // Spend over time, monthly mode
   let root = null, start = '', period = 'week';
+  // Replays the draw-in whenever the figures on screen actually change — opening
+  // the page, stepping a week, switching period — but not on a background refresh,
+  // which would make the page twitch while someone is reading it.
+  let fresh = true;
 
   const mondayOf = (key) => T.addDays(key, -T.dayOfWeek(key));
 
@@ -69,6 +73,7 @@ AD.views['cost-sheet'] = (function () {
     root = el;
     start = /^\d{4}-\d{2}-\d{2}$/.test(params.week || '') ? mondayOf(params.week) : mondayOf(T.todayKey());
     period = params.period === 'month' ? 'month' : 'week';
+    fresh = true;
     draw();
   }
 
@@ -86,6 +91,9 @@ AD.views['cost-sheet'] = (function () {
     const fleet = AD.store.all('vehicles').length;
     const vehicleCount = new Set(now.map((r) => r.vehicleId)).size;
     const avgVehicleCount = avgOf(base.map((w) => new Set(w.rows.map((r) => r.vehicleId)).size));
+
+    el.classList.toggle('anim-in', fresh);
+    fresh = false;
 
     el.innerHTML = `
       ${pageHeader({
@@ -130,6 +138,7 @@ AD.views['cost-sheet'] = (function () {
 
   function go(week) {
     start = week;
+    fresh = true;
     setParams();
     draw();
   }
@@ -137,6 +146,7 @@ AD.views['cost-sheet'] = (function () {
   function setPeriod(p) {
     if (p === period) return;
     period = p;
+    fresh = true;
     setParams();
     draw();
   }
@@ -217,9 +227,17 @@ AD.views['cost-sheet'] = (function () {
     const grid = gridY.map((gy) => `<line x1="${padL}" y1="${gy.toFixed(1)}" x2="${W - padR}" y2="${gy.toFixed(1)}" class="cs-grid"></line>`).join('');
     const yTicks = [0, top / 2, top].map((v, i) => `<text class="cs-axis-y" x="${padL - 8}" y="${(gridY[i] + 4).toFixed(1)}" text-anchor="end">${fmtAxis(v)}</text>`).join('');
     const xTicks = points.map((p, i) => `<text class="cs-axis-x" x="${x(i).toFixed(1)}" y="${H - 6}" text-anchor="middle">${esc(p.label)}</text>`).join('');
-    const marks = points.map((p, i) => `
-        <circle cx="${x(i).toFixed(1)}" cy="${y(p.total).toFixed(1)}" r="4" class="cs-dot"></circle>
-        <circle cx="${x(i).toFixed(1)}" cy="${y(p.total).toFixed(1)}" r="14" class="cs-hit" ${V.tipAttr(p.full, [['Spend', L.fmtAUD(p.total), 'var(--viz-confirmed)']])}></circle>`).join('');
+    // One group per point: the hit circle sits on top so the pointer never has to
+    // find the 4px dot, and hovering the group is what grows it. --i staggers the
+    // marks so they land behind the line as it draws.
+    const marks = points.map((p, i) => {
+      const cx = x(i).toFixed(1), cy = y(p.total).toFixed(1), last = i === n - 1;
+      return `<g class="cs-mark" style="--i:${i}">
+        ${last ? `<circle cx="${cx}" cy="${cy}" r="9" class="cs-halo"></circle>` : ''}
+        <circle cx="${cx}" cy="${cy}" r="4" class="cs-dot"></circle>
+        <circle cx="${cx}" cy="${cy}" r="16" class="cs-hit" ${V.tipAttr(p.full, [['Spend', L.fmtAUD(p.total), 'var(--viz-confirmed)']])}></circle>
+      </g>`;
+    }).join('');
     const ariaDesc = points.map((p) => `${p.full}: ${L.fmtAUD(p.total)}`).join(', ');
 
     return `<figure class="viz-card">
@@ -230,9 +248,15 @@ AD.views['cost-sheet'] = (function () {
       </div>
       <div class="cs-line-wrap">
         <svg viewBox="0 0 ${W} ${H}" class="cs-line-svg" role="img" aria-label="${esc('Spend per ' + period + ': ' + ariaDesc)}">
+          <defs>
+            <linearGradient id="cs-area-grad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" style="stop-color:var(--viz-confirmed);stop-opacity:.3"></stop>
+              <stop offset="100%" style="stop-color:var(--viz-confirmed);stop-opacity:0"></stop>
+            </linearGradient>
+          </defs>
           ${grid}
           <path d="${areaD}" class="cs-area"></path>
-          <path d="${lineD}" class="cs-line-path"></path>
+          <path d="${lineD}" class="cs-line-path" pathLength="1"></path>
           ${yTicks}${xTicks}${marks}
         </svg>
       </div>
@@ -259,7 +283,7 @@ AD.views['cost-sheet'] = (function () {
       const pct = (Math.min(Math.abs(n), maxChange) / maxChange) * 50;
       if (pct < 0.5) return '<span class="cs-divbar"></span>';
       const side = n > 0 ? `left:50%;width:${pct}%;background:var(--red)` : `right:50%;width:${pct}%;background:var(--green)`;
-      return `<span class="cs-divbar"><i style="${side}"></i></span>`;
+      return `<span class="cs-divbar"><i class="${n > 0 ? 'cs-up' : 'cs-down'}" style="${side}"></i></span>`;
     };
 
     return `<div class="table-wrap"><table class="data">

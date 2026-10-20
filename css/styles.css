@@ -1329,7 +1329,9 @@ input[type=text], input[type=number], input[type=date], input[type=datetime-loca
   min-width: 0; display: grid; gap: 4px; padding: 16px;
   border: 1px solid var(--rule); border-top: 4px solid var(--cs-tone); border-radius: var(--r-lg);
   background: var(--paper); box-shadow: var(--shadow-1);
+  transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
 }
+.cs-kpi:hover { transform: translateY(-2px); box-shadow: var(--shadow-2); border-color: var(--cs-tone); }
 .cs-kpi > span { color: var(--ink-2); font-size: 13px; font-weight: 700; }
 .cs-kpi strong { color: var(--ink); font-size: 28px; line-height: 1.1; font-variant-numeric: tabular-nums; }
 .cs-delta { color: var(--muted); font-size: 12px; }
@@ -1348,6 +1350,9 @@ input[type=text], input[type=number], input[type=date], input[type=datetime-loca
 .cs-divbar { position: relative; width: 100%; max-width: 110px; height: 5px; }
 .cs-divbar::before { content: ''; position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--rule-strong); }
 .cs-divbar i { position: absolute; top: 0; height: 100%; border-radius: 3px; }
+/* Each half grows out of the centre line, so the two sides mirror rather than both running left. */
+.cs-divbar i.cs-up { transform-origin: left; }
+.cs-divbar i.cs-down { transform-origin: right; }
 /* Running-cost spend: plain magnitude, one hue, dearest row sets the scale. */
 .cs-bar { position: relative; width: 100%; max-width: 110px; height: 5px; background: var(--rule); border-radius: 3px; overflow: hidden; }
 .cs-bar i { display: block; height: 100%; border-radius: 3px; background: var(--viz-confirmed); }
@@ -1357,9 +1362,13 @@ input[type=text], input[type=number], input[type=date], input[type=datetime-loca
 .cs-line-wrap { width: 100%; }
 .cs-line-svg { width: 100%; height: auto; display: block; overflow: visible; }
 .cs-grid { stroke: var(--viz-grid); stroke-width: 1; }
-.cs-area { fill: var(--viz-confirmed); fill-opacity: .12; stroke: none; }
+/* Fades out downwards so the fill reads as depth under the line, not a second band of data. */
+.cs-area { fill: url(#cs-area-grad); stroke: none; }
 .cs-line-path { fill: none; stroke: var(--viz-confirmed); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
-.cs-dot { fill: var(--viz-confirmed); stroke: var(--paper); stroke-width: 2; }
+.cs-dot { fill: var(--viz-confirmed); stroke: var(--paper); stroke-width: 2; transition: r .15s cubic-bezier(.2,.8,.3,1); }
+.cs-mark:hover .cs-dot { r: 6.5; }
+/* The point you are looking at — the week or month on screen — wears a soft ring. */
+.cs-halo { fill: var(--viz-confirmed); fill-opacity: .22; }
 .cs-hit { fill: transparent; cursor: pointer; }
 .cs-axis-x, .cs-axis-y { font-size: 11px; fill: var(--muted); font-family: var(--font); }
 
@@ -2387,6 +2396,24 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 .anim-in .hb-row:nth-child(3) i, .anim-in .hb-row:nth-child(3) .hb-stack { animation-delay: .17s; }
 .anim-in .hb-row:nth-child(4) i, .anim-in .hb-row:nth-child(4) .hb-stack { animation-delay: .23s; }
 .anim-in .hb-row:nth-child(5) i, .anim-in .hb-row:nth-child(5) .hb-stack { animation-delay: .29s; }
+
+/* Cost sheet: the headline cards settle, the line draws itself, the marks arrive behind it. */
+.anim-in .cs-kpi { animation: rise .45s cubic-bezier(.2,.8,.3,1) backwards; }
+.anim-in .cs-kpi:nth-child(1) { animation-delay: .02s; }
+.anim-in .cs-kpi:nth-child(2) { animation-delay: .08s; }
+.anim-in .cs-kpi:nth-child(3) { animation-delay: .14s; }
+.anim-in .cs-kpi:nth-child(4) { animation-delay: .20s; }
+/* Mon–Fri are covered by the shared .hb-row delays above; the weekend needs its own. */
+.anim-in .cs-days .hb-row:nth-child(6) i { animation-delay: .35s; }
+.anim-in .cs-days .hb-row:nth-child(7) i { animation-delay: .41s; }
+/* pathLength="1" on the path makes the dash a plain 0→1, no measuring in JS. */
+@keyframes draw-line { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+.anim-in .cs-line-path { stroke-dasharray: 1; animation: draw-line .9s cubic-bezier(.3,.7,.4,1) backwards; }
+.anim-in .cs-area { animation: fade .6s ease .25s backwards; }
+.anim-in .cs-mark { animation: fade .3s ease backwards; animation-delay: calc(.15s + var(--i, 0) * .06s); }
+/* Magnitude bars in the two tables fill from their own baseline. */
+.anim-in .cs-bar i, .anim-in .cs-divbar i { animation: grow-x .55s cubic-bezier(.2,.75,.3,1) .12s backwards; }
+.anim-in .cs-bar i { transform-origin: left; }
 
 /* Ranked legends follow their chart in */
 .anim-in .rev-legend li { animation: rise .4s ease backwards; }
