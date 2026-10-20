@@ -5,24 +5,28 @@ AD.views['cost-sheet'] = (function () {
   const { esc, pageHeader, sectionHead } = AD.ui;
   const L = AD.logic, T = AD.time, I = AD.icons;
   const AVG_WEEKS = 4; // same trailing window the dashboard uses for its utilisation trend
+  const RUN_WEEKS = 52; // running-cost window: a year of weeks, ending with the week on screen
+  const RUN_MAX = 15; // running-cost rows shown; the count of the rest is stated beside it
   let root = null, start = '';
 
   const mondayOf = (key) => T.addDays(key, -T.dayOfWeek(key));
 
   /**
-   * Everything the fleet was charged for in the week beginning `from`: a
-   * service on the day it was recorded, a defect on the day it was resolved,
-   * which is when the repair bill actually lands.
+   * Everything the fleet was charged for between two dates: a service on the
+   * day it was recorded, a defect on the day it was resolved, which is when
+   * the repair bill actually lands. Service meter readings come along so
+   * running cost can be put against distance or hours covered.
    */
-  function rowsFor(from) {
-    const to = T.addDays(from, 6);
-    const inWeek = (key) => !!key && key >= from && key <= to;
-    const services = AD.store.all('services').filter((s) => inWeek(s.date))
-      .map((s) => ({ vehicleId: s.vehicleId, date: s.date, cost: Number(s.cost || 0), kind: 'Service' }));
-    const defects = AD.store.all('defects').filter((d) => d.status === 'Resolved' && inWeek(d.resolvedDate))
+  function rowsBetween(from, to) {
+    const within = (key) => !!key && key >= from && key <= to;
+    const services = AD.store.all('services').filter((s) => within(s.date))
+      .map((s) => ({ vehicleId: s.vehicleId, date: s.date, cost: Number(s.cost || 0), odometer: s.odometer, hours: s.hours, kind: 'Service' }));
+    const defects = AD.store.all('defects').filter((d) => d.status === 'Resolved' && within(d.resolvedDate))
       .map((d) => ({ vehicleId: d.vehicleId, date: d.resolvedDate, cost: Number(d.cost || 0), kind: 'Defect' }));
     return services.concat(defects);
   }
+
+  const rowsFor = (from) => rowsBetween(from, T.addDays(from, 6));
 
   const sum = (rows) => rows.reduce((n, r) => n + r.cost, 0);
   const avgOf = (nums) => nums.reduce((a, b) => a + b, 0) / (nums.length || 1);
@@ -98,7 +102,12 @@ AD.views['cost-sheet'] = (function () {
         ${sheet(now, base)}
       </section>
 
-      <p class="section-foot muted small">Spend is recorded services plus resolved defects, counted on the day the service was recorded or the defect was resolved. The average is the ${AVG_WEEKS} weeks before this one.</p>`;
+      <section class="section">
+        ${sectionHead({ title: 'Running cost', meta: `${RUN_WEEKS} weeks to ${T.fmtKey(end)} · dearest first` })}
+        ${running(end)}
+      </section>
+
+      <p class="section-foot muted small">Spend is recorded services plus resolved defects, counted on the day the service was recorded or the defect was resolved. The average is the ${AVG_WEEKS} weeks before this one. Running cost divides a vehicle's spend by the distance or hours covered between its first and last service in the window, so it needs at least two services to show a rate.</p>`;
 
     el.querySelector('#w-prev').onclick = () => go(T.addDays(start, -7));
     el.querySelector('#w-next').onclick = () => go(T.addDays(start, 7));
@@ -155,6 +164,46 @@ AD.views['cost-sheet'] = (function () {
       <tfoot><tr><th>Fleet total</th><th class="num">${totals.jobs}</th><th class="num">${L.fmtAUD(totals.a)}</th><th class="num">${L.fmtAUD(totals.b)}</th>
         <th class="num cs-change ${changeTone(totals.a - totals.b)}">${fmtChange(totals.a - totals.b)}</th></tr></tfoot>
     </table></div>`;
+  }
+
+  /**
+   * What each vehicle has cost over the trailing year, against the distance or
+   * engine hours it covered in that time. Hours-tracked plant is rated per hour,
+   * everything else per kilometre; a vehicle with one service (or none carrying
+   * a reading) has no span to divide by, so it shows spend only.
+   */
+  function running(end) {
+    const from = T.addDays(end, -(7 * RUN_WEEKS - 1));
+    const rows = rowsBetween(from, end);
+    const ids = [...new Set(rows.map((r) => r.vehicleId))];
+    if (!ids.length) return '<p class="empty">No costs recorded in this period.</p>';
+
+    const lines = ids.map((id) => {
+      const mine = rows.filter((r) => r.vehicleId === id);
+      const v = AD.store.get('vehicles', id);
+      const byHours = !!v && L.HOURS_TYPES.has(v.type);
+      const reads = mine.map((r) => Number(byHours ? r.hours : r.odometer)).filter((n) => Number.isFinite(n) && n > 0);
+      const span = reads.length > 1 ? Math.max(...reads) - Math.min(...reads) : 0;
+      const total = sum(mine);
+      return { id, total, jobs: mine.length, span, byHours, type: v ? v.type : '', rate: span > 0 ? total / span : null };
+    }).sort((a, b) => b.total - a.total);
+
+    const shown = lines.slice(0, RUN_MAX);
+    const rated = (r) => r.rate == null ? '<span class="muted">—</span>'
+      : `${L.fmtAUD(r.rate)}<span class="t2">per ${r.byHours ? 'hour' : 'km'}</span>`;
+
+    return `<div class="table-wrap"><table class="data">
+      <thead><tr><th>Vehicle</th><th class="col-opt">Type</th><th class="num">Jobs</th><th class="num">Spend</th><th class="num">Covered</th><th class="num">Running cost</th></tr></thead>
+      <tbody>${shown.map((r) => `<tr class="row-link" data-veh="${esc(r.id)}" title="Open ${esc(r.id)}">
+        <td><span class="id">${esc(r.id)}</span></td>
+        <td class="col-opt">${esc(r.type) || '<span class="muted">Not in the fleet list</span>'}</td>
+        <td class="num">${r.jobs}</td>
+        <td class="num">${L.fmtAUD(r.total)}</td>
+        <td class="num">${r.span > 0 ? (r.byHours ? L.fmtHours(r.span) : L.fmtKm(r.span)) : '<span class="muted">—</span>'}</td>
+        <td class="num">${rated(r)}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>
+    ${lines.length > RUN_MAX ? `<p class="section-foot muted small">Showing the ${RUN_MAX} dearest of ${lines.length} vehicles with costs in this window.</p>` : ''}`;
   }
 
   return { title: 'Cost sheet', render, refresh: () => root && draw() };
