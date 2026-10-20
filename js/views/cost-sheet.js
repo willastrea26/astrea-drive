@@ -7,26 +7,30 @@ AD.views['cost-sheet'] = (function () {
   const AVG_WEEKS = 4; // same trailing window the dashboard uses for its utilisation trend
   const RUN_WEEKS = 52; // running-cost window: a year of weeks, ending with the week on screen
   const RUN_MAX = 15; // running-cost rows shown; the count of the rest is stated beside it
-  let root = null, start = '';
+  const TREND_WEEKS = 12; // Spend over time, weekly mode
+  const TREND_MONTHS = 12; // Spend over time, monthly mode
+  let root = null, start = '', period = 'week';
 
   const mondayOf = (key) => T.addDays(key, -T.dayOfWeek(key));
 
   /**
-   * Everything the fleet was charged for between two dates: a service on the
-   * day it was recorded, a defect on the day it was resolved, which is when
-   * the repair bill actually lands. Service meter readings come along so
-   * running cost can be put against distance or hours covered.
+   * Every service and resolved defect the fleet has ever been charged for, as
+   * one flat list: a service on the day it was recorded, a defect on the day
+   * it was resolved, which is when the repair bill actually lands. Service
+   * meter readings come along so running cost can be put against distance or
+   * hours covered. Date-filtered downstream by whichever window is needed.
    */
-  function rowsBetween(from, to) {
-    const within = (key) => !!key && key >= from && key <= to;
-    const services = AD.store.all('services').filter((s) => within(s.date))
+  function allRows() {
+    const services = AD.store.all('services').filter((s) => s.date)
       .map((s) => ({ vehicleId: s.vehicleId, date: s.date, cost: Number(s.cost || 0), odometer: s.odometer, hours: s.hours, kind: 'Service' }));
-    const defects = AD.store.all('defects').filter((d) => d.status === 'Resolved' && within(d.resolvedDate))
+    const defects = AD.store.all('defects').filter((d) => d.status === 'Resolved' && d.resolvedDate)
       .map((d) => ({ vehicleId: d.vehicleId, date: d.resolvedDate, cost: Number(d.cost || 0), kind: 'Defect' }));
     return services.concat(defects);
   }
 
+  const rowsBetween = (from, to) => allRows().filter((r) => r.date >= from && r.date <= to);
   const rowsFor = (from) => rowsBetween(from, T.addDays(from, 6));
+  const rowsForMonth = (key) => allRows().filter((r) => r.date.slice(0, 7) === key);
 
   const sum = (rows) => rows.reduce((n, r) => n + r.cost, 0);
   const avgOf = (nums) => nums.reduce((a, b) => a + b, 0) / (nums.length || 1);
@@ -64,6 +68,7 @@ AD.views['cost-sheet'] = (function () {
   function render(el, params) {
     root = el;
     start = /^\d{4}-\d{2}-\d{2}$/.test(params.week || '') ? mondayOf(params.week) : mondayOf(T.todayKey());
+    period = params.period === 'month' ? 'month' : 'week';
     draw();
   }
 
@@ -102,6 +107,8 @@ AD.views['cost-sheet'] = (function () {
 
       ${days(now, base)}
 
+      ${trend(end)}
+
       <section class="section">
         ${sectionHead({ title: 'By vehicle', meta: 'Biggest increases first' })}
         ${sheet(now, base)}
@@ -117,13 +124,25 @@ AD.views['cost-sheet'] = (function () {
     el.querySelector('#w-prev').onclick = () => go(T.addDays(start, -7));
     el.querySelector('#w-next').onclick = () => go(T.addDays(start, 7));
     el.querySelector('#w-this').onclick = () => go(thisWeek);
+    el.querySelectorAll('[data-period]').forEach((b) => (b.onclick = () => setPeriod(b.dataset.period)));
     el.querySelectorAll('tr[data-veh]').forEach((tr) => tr.addEventListener('click', () => AD.go('vehicle/' + tr.dataset.veh)));
   }
 
   function go(week) {
     start = week;
-    AD.setParams({ week: start === mondayOf(T.todayKey()) ? '' : start });
+    setParams();
     draw();
+  }
+
+  function setPeriod(p) {
+    if (p === period) return;
+    period = p;
+    setParams();
+    draw();
+  }
+
+  function setParams() {
+    AD.setParams({ week: start === mondayOf(T.todayKey()) ? '' : start, period: period === 'week' ? '' : period });
   }
 
   /** One row per weekday, this week's bar above the average for that weekday over the baseline weeks. */
@@ -148,6 +167,76 @@ AD.views['cost-sheet'] = (function () {
       ${V.legend([{ label: 'This week', color: COLOR_NOW }, { label: `${AVG_WEEKS}-week average`, color: COLOR_AVG }], { counts: false })}
       <div class="hb cs-days">${rows}</div>
       ${V.table(['Day', 'This week', `${AVG_WEEKS}-week average`], a.map((v, i) => [T.DOW[i], L.fmtAUD(v), L.fmtAUD(b[i])]))}
+    </figure>`;
+  }
+
+  /** A round axis ceiling above `max`, so ticks read as clean numbers rather than the raw data max. */
+  function niceTop(max) {
+    if (max <= 0) return 1;
+    const step = max > 20000 ? 5000 : max > 8000 ? 2000 : max > 2000 ? 500 : max > 400 ? 100 : 20;
+    return Math.ceil(max / step) * step;
+  }
+  const fmtAxis = (n) => '$' + Math.round(n).toLocaleString('en-AU');
+
+  /** TREND_WEEKS weekly totals ending with (and including) the week on screen. */
+  function weeklyPoints(end) {
+    let lastMonth = null;
+    return Array.from({ length: TREND_WEEKS }, (_, i) => {
+      const from = T.addDays(end, -6 - 7 * (TREND_WEEKS - 1 - i));
+      const p = T.parseKey(from);
+      const showMonth = p.m !== lastMonth;
+      lastMonth = p.m;
+      return { total: sum(rowsBetween(from, T.addDays(from, 6))), label: showMonth ? `${p.d} ${T.MONTHS[p.m - 1].slice(0, 3)}` : String(p.d), full: `Week of ${T.fmtKey(from)}` };
+    });
+  }
+
+  /** TREND_MONTHS calendar-month totals ending with the month that contains `end`. */
+  function monthlyPoints(end) {
+    const { y, m } = T.parseKey(end);
+    return Array.from({ length: TREND_MONTHS }, (_, i) => {
+      const dt = new Date(Date.UTC(y, m - 1 - (TREND_MONTHS - 1 - i), 1));
+      const key = dt.toISOString().slice(0, 7);
+      return {
+        total: sum(rowsForMonth(key)), label: T.MONTHS[dt.getUTCMonth()].slice(0, 3),
+        full: `${T.MONTHS[dt.getUTCMonth()]} ${dt.getUTCFullYear()}`
+      };
+    });
+  }
+
+  /** Weekly or monthly spend leading up to the week on screen — the trend a single week-to-week comparison can't show. */
+  function trend(end) {
+    const points = period === 'month' ? monthlyPoints(end) : weeklyPoints(end);
+    const top = niceTop(Math.max(...points.map((p) => p.total), 1));
+    const W = 760, H = 200, padL = 56, padR = 12, padT = 16, padB = 26;
+    const plotW = W - padL - padR, plotH = H - padT - padB, n = points.length;
+    const x = (i) => padL + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2);
+    const y = (v) => padT + plotH - (Math.min(v, top) / top) * plotH;
+    const lineD = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(p.total).toFixed(1)}`).join(' ');
+    const areaD = `${lineD} L${x(n - 1).toFixed(1)},${(padT + plotH).toFixed(1)} L${x(0).toFixed(1)},${(padT + plotH).toFixed(1)} Z`;
+    const gridY = [0, 0.5, 1].map((f) => padT + plotH * (1 - f));
+    const grid = gridY.map((gy) => `<line x1="${padL}" y1="${gy.toFixed(1)}" x2="${W - padR}" y2="${gy.toFixed(1)}" class="cs-grid"></line>`).join('');
+    const yTicks = [0, top / 2, top].map((v, i) => `<text class="cs-axis-y" x="${padL - 8}" y="${(gridY[i] + 4).toFixed(1)}" text-anchor="end">${fmtAxis(v)}</text>`).join('');
+    const xTicks = points.map((p, i) => `<text class="cs-axis-x" x="${x(i).toFixed(1)}" y="${H - 6}" text-anchor="middle">${esc(p.label)}</text>`).join('');
+    const marks = points.map((p, i) => `
+        <circle cx="${x(i).toFixed(1)}" cy="${y(p.total).toFixed(1)}" r="4" class="cs-dot"></circle>
+        <circle cx="${x(i).toFixed(1)}" cy="${y(p.total).toFixed(1)}" r="14" class="cs-hit" ${V.tipAttr(p.full, [['Spend', L.fmtAUD(p.total), 'var(--viz-confirmed)']])}></circle>`).join('');
+    const ariaDesc = points.map((p) => `${p.full}: ${L.fmtAUD(p.total)}`).join(', ');
+
+    return `<figure class="viz-card">
+      <figcaption><h3>Spend over time</h3><span class="viz-sub">${period === 'month' ? TREND_MONTHS + ' months' : TREND_WEEKS + ' weeks'} to ${T.fmtKey(end)}</span></figcaption>
+      <div class="seg cs-period" role="group" aria-label="Chart period">
+        <button type="button" data-period="week" class="${period === 'week' ? 'on' : ''}">Weekly</button>
+        <button type="button" data-period="month" class="${period === 'month' ? 'on' : ''}">Monthly</button>
+      </div>
+      <div class="cs-line-wrap">
+        <svg viewBox="0 0 ${W} ${H}" class="cs-line-svg" role="img" aria-label="${esc('Spend per ' + period + ': ' + ariaDesc)}">
+          ${grid}
+          <path d="${areaD}" class="cs-area"></path>
+          <path d="${lineD}" class="cs-line-path"></path>
+          ${yTicks}${xTicks}${marks}
+        </svg>
+      </div>
+      ${V.table([period === 'month' ? 'Month' : 'Week starting', 'Spend'], points.map((p) => [p.full, L.fmtAUD(p.total)]))}
     </figure>`;
   }
 

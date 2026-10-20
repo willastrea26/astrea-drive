@@ -1352,6 +1352,17 @@ input[type=text], input[type=number], input[type=date], input[type=datetime-loca
 .cs-bar { position: relative; width: 100%; max-width: 110px; height: 5px; background: var(--rule); border-radius: 3px; overflow: hidden; }
 .cs-bar i { display: block; height: 100%; border-radius: 3px; background: var(--viz-confirmed); }
 
+/* Spend-over-time line chart */
+.cs-period { margin-bottom: 2px; }
+.cs-line-wrap { width: 100%; }
+.cs-line-svg { width: 100%; height: auto; display: block; overflow: visible; }
+.cs-grid { stroke: var(--viz-grid); stroke-width: 1; }
+.cs-area { fill: var(--viz-confirmed); fill-opacity: .12; stroke: none; }
+.cs-line-path { fill: none; stroke: var(--viz-confirmed); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.cs-dot { fill: var(--viz-confirmed); stroke: var(--paper); stroke-width: 2; }
+.cs-hit { fill: transparent; cursor: pointer; }
+.cs-axis-x, .cs-axis-y { font-size: 11px; fill: var(--muted); font-family: var(--font); }
+
 /* Table view twin */
 .viz-table { font-size: 13.5px; }
 .viz-table summary { cursor: pointer; color: var(--blue); font-weight: 600; width: max-content; }
