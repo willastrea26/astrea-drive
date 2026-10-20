@@ -156,6 +156,7 @@ AD.views.dashboard = (function () {
     const high = defects.filter((d) => d.priority === 'High').length;
     const rego = vehicles.map((v) => ({ v, r: L.regoState(v) })).filter((x) => x.r.state !== 'ok').sort((a, b) => a.r.days - b.r.days);
     const expired = rego.filter((x) => x.r.state === 'overdue').length;
+    const activityLog = AD.store.all('activity');
 
     const V = AD.viz;
 
@@ -302,11 +303,12 @@ AD.views.dashboard = (function () {
       <section class="section">
         ${sectionHead({ title: 'Recent activity', meta: 'Latest 6 changes' })}
         <ul class="rows activity">
-          ${AD.store.all('activity').slice(0, 6).map((a) => {
+          ${activityLog.slice(0, 6).map((a) => {
             const who = L.userName(a.userEmail);
             return `<li><span class="what">${esc(a.text)}${who ? `<span class="t2">by ${esc(who)}</span>` : ''}</span><span class="when">${esc(relTime(a.ts))}</span></li>`;
           }).join('') || '<li class="muted">No activity yet.</li>'}
         </ul>
+        <p class="section-foot"><a href="#/activity">View all activity${activityLog.length > 6 ? ` (${activityLog.length})` : ''}</a></p>
       </section>`;
 
     el.querySelectorAll('[data-go]').forEach((b) => b.addEventListener('click', () => { const [r, p] = JSON.parse(b.dataset.go); AD.go(r, p); }));
