@@ -70,7 +70,7 @@ AD.defectForm = function (vehicleId) {
 };
 
 AD.resolveDefect = function (defectId) {
-  const { esc, modal, toast, photoPicker } = AD.ui;
+  const { esc, formData, showErrors, modal, toast, photoPicker } = AD.ui;
   const T = AD.time;
   const d = AD.store.get('defects', defectId);
   if (!d) return;
@@ -80,6 +80,8 @@ AD.resolveDefect = function (defectId) {
       <p class="modal-lede" style="color:var(--ink)">${esc(d.description)}</p>
       <form novalidate>
         <div class="field"><label>Resolution notes</label><textarea name="notes" rows="3" placeholder="What was done to fix it"></textarea></div>
+        <div class="field"><label>Cost (AUD, inc. GST)</label><input type="number" name="cost" min="0" step="0.01" placeholder="0.00" value="${d.cost ? esc(String(d.cost)) : ''}">
+          <div class="help">What the repair cost. Counts towards the weekly cost sheet.</div></div>
         <div class="field">
           <label>Resolution photos <span class="help" style="font-weight:400;color:var(--muted)">(optional, up to 8)</span></label>
           <div id="resolve-photos"></div>
@@ -90,14 +92,21 @@ AD.resolveDefect = function (defectId) {
         <button class="btn btn-primary" data-save type="button">${AD.icons.check} Mark as resolved</button>
       </div>`,
     onMount(el, close) {
+      const f = el.querySelector('form');
       el.querySelector('[data-close]').onclick = close;
       const picker = photoPicker(el.querySelector('#resolve-photos'), d.resolvedPhotos || [], { label: 'Resolution photo' });
       const saveBtn = el.querySelector('[data-save]');
       saveBtn.onclick = async () => {
-        const notes = el.querySelector('textarea').value.trim();
+        const x = formData(f);
+        const err = {};
+        if (x.cost !== '' && !(Number(x.cost) >= 0)) err.cost = 'Enter a valid amount.';
+        if (!showErrors(f, err)) return;
         saveBtn.disabled = true;
         try {
-          await AD.store.update('defects', d.id, { status: 'Resolved', resolvedDate: T.todayKey(), resolutionNotes: notes, resolvedPhotos: picker.get() });
+          await AD.store.update('defects', d.id, {
+            status: 'Resolved', resolvedDate: T.todayKey(), resolutionNotes: x.notes,
+            cost: x.cost === '' ? 0 : Number(x.cost), resolvedPhotos: picker.get()
+          });
           await AD.store.log(`Defect resolved on ${d.vehicleId}: ${d.description.slice(0, 60)}`, d.vehicleId);
         } catch (err) {
           saveBtn.disabled = false;
@@ -131,6 +140,7 @@ AD.editDefect = function (defectId) {
         <div class="field"><label>Reported by <span class="req">*</span></label><input type="text" name="reportedBy" value="${esc(d.reportedBy)}" list="edit-drv-list"><datalist id="edit-drv-list">${AD.store.all('drivers').map((x) => `<option value="${esc(x.name)}">`).join('')}</datalist></div>
         <div class="field"><label>Date reported</label><input type="date" name="reportedDate" value="${esc(d.reportedDate || today)}" max="${today}"></div>
         <div class="field"><label>Date resolved</label><input type="date" name="resolvedDate" value="${esc(d.resolvedDate || '')}" max="${today}"></div>
+        <div class="field"><label>Cost (AUD, inc. GST)</label><input type="number" name="cost" min="0" step="0.01" placeholder="0.00" value="${d.cost ? esc(String(d.cost)) : ''}"></div>
         <div class="field full"><label>Resolution notes</label><textarea name="resolutionNotes" rows="3">${esc(d.resolutionNotes || '')}</textarea></div>
         <div class="field full"><label>Resolution photos <span class="help" style="font-weight:400;color:var(--muted)">(up to 8)</span></label><div id="edit-resolution-photos"></div></div>
       </form>
@@ -153,6 +163,7 @@ AD.editDefect = function (defectId) {
         if (!x.reportedBy) errors.reportedBy = 'Who reported it?';
         if (x.reportedDate > today) errors.reportedDate = 'Can’t be in the future.';
         if (x.resolvedDate > today) errors.resolvedDate = 'Can’t be in the future.';
+        if (x.cost !== '' && !(Number(x.cost) >= 0)) errors.cost = 'Enter a valid amount.';
         if (!showErrors(f, errors)) return;
         saveBtn.disabled = true;
         try {
@@ -160,7 +171,8 @@ AD.editDefect = function (defectId) {
             vehicleId: x.vehicleId, description: x.description, priority: x.priority, status: x.status,
             reportedBy: x.reportedBy, reportedDate: x.reportedDate || today,
             resolvedDate: x.status === 'Resolved' ? (x.resolvedDate || today) : null,
-            resolutionNotes: x.resolutionNotes, photos: reportedPicker.get(), resolvedPhotos: resolvedPicker.get()
+            resolutionNotes: x.resolutionNotes, cost: x.cost === '' ? 0 : Number(x.cost),
+            photos: reportedPicker.get(), resolvedPhotos: resolvedPicker.get()
           });
           await AD.store.log(`Defect updated on ${x.vehicleId}: ${x.description.slice(0, 60)}`, x.vehicleId);
         } catch (err) {
@@ -214,7 +226,7 @@ AD.deleteDefect = async function (defectId) {
 /** Open the complete defect record from a register tile. */
 AD.viewDefect = function (defectId) {
   const { esc, modal, priorityBadge, defectBadge } = AD.ui;
-  const T = AD.time;
+  const T = AD.time, L = AD.logic;
   const d = AD.store.get('defects', defectId);
   if (!d) return;
   const vehicle = AD.store.get('vehicles', d.vehicleId);
@@ -247,6 +259,7 @@ AD.viewDefect = function (defectId) {
         <div><dt>Reported</dt><dd>${T.fmtKey(d.reportedDate)}</dd></div>
         <div><dt>Reported by</dt><dd>${esc(d.reportedBy)}</dd></div>
         ${d.resolvedDate ? `<div><dt>Resolved</dt><dd>${T.fmtKey(d.resolvedDate)}</dd></div>` : ''}
+        ${d.cost ? `<div><dt>Cost</dt><dd>${L.fmtAUD(d.cost)}</dd></div>` : ''}
       </dl>
       ${photoSection('Reported photos', reported, 0)}
       ${d.resolutionNotes || resolved.length ? `<section class="defect-detail-section"><h3>Resolution</h3>${d.resolutionNotes ? `<p class="defect-detail-description">${esc(d.resolutionNotes)}</p>` : '<p class="muted">No resolution notes recorded.</p>'}</section>` : ''}
@@ -391,7 +404,7 @@ AD.views.defects = (function () {
             <div><dt>Reported by</dt><dd>${esc(d.reportedBy)}</dd></div>
             ${vehicle && vehicle.type ? `<div><dt>Vehicle type</dt><dd>${esc(vehicle.type)}</dd></div>` : ''}
           </dl>
-          ${resolved ? `<div class="defect-resolution"><b>Resolved ${T.fmtKey(d.resolvedDate)}</b>${d.resolutionNotes ? `<span>${esc(d.resolutionNotes)}</span>` : ''}</div>` : ''}
+          ${resolved ? `<div class="defect-resolution"><b>Resolved ${T.fmtKey(d.resolvedDate)}${d.cost ? ` · ${L.fmtAUD(d.cost)}` : ''}</b>${d.resolutionNotes ? `<span>${esc(d.resolutionNotes)}</span>` : ''}</div>` : ''}
         </div>
         <div class="defect-card-actions">${actions}</div>
       </article>`;

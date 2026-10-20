@@ -1322,6 +1322,26 @@ input[type=text], input[type=number], input[type=date], input[type=datetime-loca
 .hb-stack i:last-child { border-radius: 0 4px 4px 0; }
 .hb-val { font-size: 14px; font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
 
+/* Cost sheet — week against week. */
+.cs-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 28px; }
+.cs-kpi {
+  min-width: 0; display: grid; gap: 4px; padding: 16px;
+  border: 1px solid var(--rule); border-top: 4px solid var(--blue); border-radius: var(--r-lg);
+  background: var(--paper); box-shadow: var(--shadow-1);
+}
+.cs-kpi > span { color: var(--ink-2); font-size: 13px; font-weight: 700; }
+.cs-kpi strong { color: var(--ink); font-size: 28px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.cs-delta { color: var(--muted); font-size: 12px; }
+.cs-delta-worse { color: var(--red); }
+.cs-delta-better { color: var(--green); }
+.cs-change { font-variant-numeric: tabular-nums; }
+/* Short day labels, and room for a currency figure the shared .hb-val can't hold. */
+.cs-days .hb-row { cursor: default; grid-template-columns: 56px minmax(0, 1fr) 96px; }
+.cs-track { flex-direction: column; align-items: flex-start; justify-content: center; gap: 3px; }
+.cs-track > i { height: 7px; min-width: 0; }
+@media (max-width: 900px) { .cs-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .cs-kpis { grid-template-columns: 1fr; } }
+
 /* Table view twin */
 .viz-table { font-size: 13.5px; }
 .viz-table summary { cursor: pointer; color: var(--blue); font-weight: 600; width: max-content; }
