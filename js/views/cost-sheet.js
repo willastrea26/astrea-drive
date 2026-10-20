@@ -221,10 +221,25 @@ AD.views['cost-sheet'] = (function () {
     const plotW = W - padL - padR, plotH = H - padT - padB, n = points.length;
     const x = (i) => padL + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2);
     const y = (v) => padT + plotH - (Math.min(v, top) / top) * plotH;
-    const lineD = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(p.total).toFixed(1)}`).join(' ');
+    const coords = points.map((p, i) => ({ x: x(i), y: y(p.total) }));
+    // Catmull–Rom points converted to cubic Béziers. The control points are
+    // clamped to the plot so a steep change never bows beyond the chart frame.
+    const clampY = (v) => Math.max(padT, Math.min(padT + plotH, v));
+    const lineD = coords.length < 2 ? `M${coords[0].x.toFixed(1)},${coords[0].y.toFixed(1)}` : coords.reduce((d, p1, i) => {
+      if (i === coords.length - 1) return d;
+      const p0 = coords[i - 1] || p1;
+      const p2 = coords[i + 1];
+      const p3 = coords[i + 2] || p2;
+      const c1x = p1.x + (p2.x - p0.x) / 6;
+      const c1y = clampY(p1.y + (p2.y - p0.y) / 6);
+      const c2x = p2.x - (p3.x - p1.x) / 6;
+      const c2y = clampY(p2.y - (p3.y - p1.y) / 6);
+      return `${d} C${c1x.toFixed(1)},${c1y.toFixed(1)} ${c2x.toFixed(1)},${c2y.toFixed(1)} ${p2.x.toFixed(1)},${p2.y.toFixed(1)}`;
+    }, `M${coords[0].x.toFixed(1)},${coords[0].y.toFixed(1)}`);
     const areaD = `${lineD} L${x(n - 1).toFixed(1)},${(padT + plotH).toFixed(1)} L${x(0).toFixed(1)},${(padT + plotH).toFixed(1)} Z`;
     const gridY = [0, 0.5, 1].map((f) => padT + plotH * (1 - f));
-    const grid = gridY.map((gy) => `<line x1="${padL}" y1="${gy.toFixed(1)}" x2="${W - padR}" y2="${gy.toFixed(1)}" class="cs-grid"></line>`).join('');
+    const grid = gridY.map((gy) => `<line x1="${padL}" y1="${gy.toFixed(1)}" x2="${W - padR}" y2="${gy.toFixed(1)}" class="cs-grid"></line>`).join('')
+      + coords.map((p) => `<line x1="${p.x.toFixed(1)}" y1="${padT}" x2="${p.x.toFixed(1)}" y2="${padT + plotH}" class="cs-grid cs-grid-x"></line>`).join('');
     const yTicks = [0, top / 2, top].map((v, i) => `<text class="cs-axis-y" x="${padL - 8}" y="${(gridY[i] + 4).toFixed(1)}" text-anchor="end">${fmtAxis(v)}</text>`).join('');
     const xTicks = points.map((p, i) => `<text class="cs-axis-x" x="${x(i).toFixed(1)}" y="${H - 6}" text-anchor="middle">${esc(p.label)}</text>`).join('');
     // One group per point: the hit circle sits on top so the pointer never has to
@@ -232,10 +247,10 @@ AD.views['cost-sheet'] = (function () {
     // marks so they land behind the line as it draws.
     const marks = points.map((p, i) => {
       const cx = x(i).toFixed(1), cy = y(p.total).toFixed(1), last = i === n - 1;
-      return `<g class="cs-mark" style="--i:${i}">
+      return `<g class="cs-mark${last ? ' cs-current' : ''}" style="--i:${i}">
         ${last ? `<circle cx="${cx}" cy="${cy}" r="9" class="cs-halo"></circle>` : ''}
         <circle cx="${cx}" cy="${cy}" r="4" class="cs-dot"></circle>
-        <circle cx="${cx}" cy="${cy}" r="16" class="cs-hit" ${V.tipAttr(p.full, [['Spend', L.fmtAUD(p.total), 'var(--viz-confirmed)']])}></circle>
+        <circle cx="${cx}" cy="${cy}" r="16" class="cs-hit" ${V.tipAttr(p.full, [['Spend', L.fmtAUD(p.total), 'var(--mint)']])}></circle>
       </g>`;
     }).join('');
     const ariaDesc = points.map((p) => `${p.full}: ${L.fmtAUD(p.total)}`).join(', ');
@@ -250,8 +265,8 @@ AD.views['cost-sheet'] = (function () {
         <svg viewBox="0 0 ${W} ${H}" class="cs-line-svg" role="img" aria-label="${esc('Spend per ' + period + ': ' + ariaDesc)}">
           <defs>
             <linearGradient id="cs-area-grad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" style="stop-color:var(--viz-confirmed);stop-opacity:.3"></stop>
-              <stop offset="100%" style="stop-color:var(--viz-confirmed);stop-opacity:0"></stop>
+              <stop offset="0%" style="stop-color:var(--mint);stop-opacity:.32"></stop>
+              <stop offset="100%" style="stop-color:var(--mint);stop-opacity:0"></stop>
             </linearGradient>
           </defs>
           ${grid}

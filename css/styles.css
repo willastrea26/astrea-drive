@@ -1362,13 +1362,15 @@ input[type=text], input[type=number], input[type=date], input[type=datetime-loca
 .cs-line-wrap { width: 100%; }
 .cs-line-svg { width: 100%; height: auto; display: block; overflow: visible; }
 .cs-grid { stroke: var(--viz-grid); stroke-width: 1; }
+.cs-grid-x { stroke-opacity: .48; }
 /* Fades out downwards so the fill reads as depth under the line, not a second band of data. */
 .cs-area { fill: url(#cs-area-grad); stroke: none; }
-.cs-line-path { fill: none; stroke: var(--viz-confirmed); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
-.cs-dot { fill: var(--viz-confirmed); stroke: var(--paper); stroke-width: 2; transition: r .15s cubic-bezier(.2,.8,.3,1); }
+.cs-line-path { fill: none; stroke: var(--mint); stroke-width: 2.25; stroke-linejoin: round; stroke-linecap: round; }
+.cs-dot { fill: var(--paper); stroke: var(--mint); stroke-width: 2; transition: r .15s cubic-bezier(.2,.8,.3,1); }
 .cs-mark:hover .cs-dot { r: 6.5; }
 /* The point you are looking at — the week or month on screen — wears a soft ring. */
-.cs-halo { fill: var(--viz-confirmed); fill-opacity: .22; }
+.cs-halo { fill: var(--mint); fill-opacity: .25; }
+.cs-current .cs-dot { fill: var(--mint); stroke: var(--paper); filter: drop-shadow(0 0 3px var(--mint)); }
 .cs-hit { fill: transparent; cursor: pointer; }
 .cs-axis-x, .cs-axis-y { font-size: 11px; fill: var(--muted); font-family: var(--font); }
 
