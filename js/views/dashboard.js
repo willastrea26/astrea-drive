@@ -305,7 +305,7 @@ AD.views.dashboard = (function () {
         <ul class="rows activity">
           ${activityLog.slice(0, 6).map((a) => {
             const who = L.userName(a.userEmail);
-            return `<li><span class="what">${esc(a.text)}${who ? `<span class="t2">by ${esc(who)}</span>` : ''}</span><span class="when">${esc(relTime(a.ts))}</span></li>`;
+            return `<li><span class="what">${esc(a.text)}${who ? `<span class="t2">by ${esc(who)} · ${esc(a.userEmail)}</span>` : ''}</span><span class="when">${esc(relTime(a.ts))}</span></li>`;
           }).join('') || '<li class="muted">No activity yet.</li>'}
         </ul>
         <p class="section-foot"><a href="#/activity">View all activity${activityLog.length > 6 ? ` (${activityLog.length})` : ''}</a></p>

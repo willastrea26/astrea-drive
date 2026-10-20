@@ -46,7 +46,7 @@ AD.views.activity = (function () {
     root.querySelector('#a-list').innerHTML = list.map((a) => {
       const who = L.userName(a.userEmail);
       return `<li${a.vehicleId ? ` class="link" data-veh="${esc(a.vehicleId)}" title="Open ${esc(a.vehicleId)}"` : ''}>
-        <span class="what">${esc(a.text)}${who ? `<span class="t2">by ${esc(who)}</span>` : ''}</span>
+        <span class="what">${esc(a.text)}${who ? `<span class="t2">by ${esc(who)} · ${esc(a.userEmail)}</span>` : ''}</span>
         <span class="when">${esc(AD.ui.relTime(a.ts))}<span class="t2">${esc(T.fmtDateTime(a.ts))}</span></span>
       </li>`;
     }).join('') || '<li class="muted">No activity matches these filters.</li>';
