@@ -1325,8 +1325,9 @@ input[type=text], input[type=number], input[type=date], input[type=datetime-loca
 /* Cost sheet — week against week. */
 .cs-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 28px; }
 .cs-kpi {
+  --cs-tone: var(--blue);
   min-width: 0; display: grid; gap: 4px; padding: 16px;
-  border: 1px solid var(--rule); border-top: 4px solid var(--blue); border-radius: var(--r-lg);
+  border: 1px solid var(--rule); border-top: 4px solid var(--cs-tone); border-radius: var(--r-lg);
   background: var(--paper); box-shadow: var(--shadow-1);
 }
 .cs-kpi > span { color: var(--ink-2); font-size: 13px; font-weight: 700; }
@@ -1341,6 +1342,15 @@ input[type=text], input[type=number], input[type=date], input[type=datetime-loca
 .cs-track > i { height: 7px; min-width: 0; }
 @media (max-width: 900px) { .cs-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 520px) { .cs-kpis { grid-template-columns: 1fr; } }
+
+/* By-vehicle change: a zero-centred bar under the figure, red growing right, green left. */
+.cs-change-cell, .cs-spend-cell { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.cs-divbar { position: relative; width: 100%; max-width: 110px; height: 5px; }
+.cs-divbar::before { content: ''; position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--rule-strong); }
+.cs-divbar i { position: absolute; top: 0; height: 100%; border-radius: 3px; }
+/* Running-cost spend: plain magnitude, one hue, dearest row sets the scale. */
+.cs-bar { position: relative; width: 100%; max-width: 110px; height: 5px; background: var(--rule); border-radius: 3px; overflow: hidden; }
+.cs-bar i { display: block; height: 100%; border-radius: 3px; background: var(--viz-confirmed); }
 
 /* Table view twin */
 .viz-table { font-size: 13.5px; }
