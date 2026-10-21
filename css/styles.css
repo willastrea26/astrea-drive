@@ -1631,15 +1631,15 @@ input[type=text], input[type=number], input[type=date], input[type=datetime-loca
 }
 
 /* ---- KPI card frame ---- */
-.strip { gap: 18px; align-items: stretch; }
+.strip { gap: 20px; align-items: stretch; }
 .strip-item {
-  padding: 24px 26px 26px; gap: 0;
+  padding: 26px 28px 24px; gap: 0;
   display: flex; flex-direction: column;
 }
-.strip-item:first-child { padding-left: 26px; }
+.strip-item:first-child { padding-left: 28px; }
 
 /* Icon + title + chevron on one row */
-.kpi-top { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+.kpi-top { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
 .kpi-top .kpi-ico { margin-bottom: 0; flex: none; }
 .kpi-title {
   font-family: var(--font-display); font-size: 13px; font-weight: 700;
@@ -1658,32 +1658,35 @@ input[type=text], input[type=number], input[type=date], input[type=datetime-loca
   font-family: var(--font-display); font-size: 46px; font-weight: 700;
   line-height: 1; letter-spacing: -0.035em; margin-bottom: 18px;
 }
-.kpi-foot { display: block; margin-top: auto; padding-top: 14px; font-size: 13px; color: var(--muted); }
+.kpi-foot {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px;
+  margin-top: auto; padding-top: 16px; border-top: 1px solid var(--rule);
+  font-size: 13px; color: var(--muted);
+}
 
 /* ---- Legend ---- */
 .kpi-legend {
   display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px 14px; font-size: 13px; color: var(--muted);
 }
-.kpi-legend-item { display: flex; align-items: center; gap: 8px; white-space: nowrap; min-width: 0; }
-.kpi-legend-item i { width: 11px; height: 11px; border-radius: 2px; flex: none; }
-.kpi-legend-item b { color: var(--ink); font-weight: 700; flex: none; font-variant-numeric: tabular-nums; }
+.kpi-legend-item { display: flex; align-items: center; gap: 10px; white-space: nowrap; min-width: 0; }
+.kpi-legend-item i { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+.kpi-legend-item b { color: var(--ink); font-size: 16px; font-weight: 700; flex: none; font-variant-numeric: tabular-nums; }
 .kpi-legend-item > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.kpi-legend-stack { grid-template-columns: 1fr; gap: 10px; }
+.kpi-legend-stack { grid-template-columns: 1fr; gap: 12px; }
 
 /* ---- Donut ring card ---- */
 .kpi-card-ring {
   display: grid; grid-template-columns: auto minmax(0, 1fr);
-  gap: 0 14px; align-items: center;
+  gap: 0 24px; align-items: center;
 }
 .kpi-card-ring .kpi-top { grid-column: 1 / -1; }
-.kpi-card-ring .kpi-foot { grid-column: 1 / -1; margin-top: 4px; }
+.kpi-card-ring .kpi-foot { grid-column: 1 / -1; margin-top: 8px; }
 .kpi-ring-wrap { display: flex; align-items: center; }
-.kpi-ring-side { min-width: 0; display: flex; flex-direction: column; gap: 12px; }
-.kpi-donut { width: 176px; height: 176px; flex: none; display: block; }
-.kpi-donut-big { font-family: var(--font-display); font-weight: 700; font-size: 31px; fill: var(--ink); letter-spacing: -0.03em; }
+.kpi-ring-side { min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+.kpi-donut { width: 160px; height: 160px; flex: none; display: block; }
+.kpi-donut-big { font-family: var(--font-display); font-weight: 700; font-size: 30px; fill: var(--ink); letter-spacing: -0.03em; }
 .kpi-donut-small { font-size: 10px; font-weight: 700; fill: var(--muted); letter-spacing: .1em; text-transform: uppercase; }
-/* Fleet availability carries two facts under the ring: the counts and the trend. */
 .kpi-footline { margin-right: 10px; }
 
 /* ---- Vertical column chart ---- */
@@ -1837,12 +1840,13 @@ input[type=text], input[type=number], input[type=date], input[type=datetime-loca
    better than two and an orphan. Below that the strip halves, then stacks. */
 @media (min-width: 1281px) and (max-width: 1450px) {
   .strip { gap: 14px; }
-  .strip-item, .strip-item:first-child { padding: 20px 20px 22px; }
-  .kpi-donut { width: 146px; height: 146px; }
-  .kpi-donut-big { font-size: 27px; }
+  .strip-item, .strip-item:first-child { padding: 22px 22px 20px; }
+  .kpi-donut { width: 130px; height: 130px; }
+  .kpi-donut-big { font-size: 26px; }
   .kpi-donut-small { font-size: 9px; }
-  .kpi-card-ring { gap: 0 12px; }
-  .kpi-legend { font-size: 12.5px; gap: 7px 10px; }
+  .kpi-card-ring { gap: 0 18px; }
+  .kpi-legend { font-size: 12.5px; gap: 8px 10px; }
+  .kpi-legend-item b { font-size: 14px; }
   .kpi-ico { width: 38px; height: 38px; border-radius: 8px; }
   .kpi-ico .ico { width: 19px; height: 19px; }
   .kpi-title { font-size: 12px; letter-spacing: .06em; }
