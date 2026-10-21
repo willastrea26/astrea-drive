@@ -301,7 +301,7 @@ AD.views['cost-sheet'] = (function () {
       return `<span class="cs-divbar"><i class="${n > 0 ? 'cs-up' : 'cs-down'}" style="${side}"></i></span>`;
     };
 
-    return `<div class="table-wrap"><table class="data">
+    return `<div class="table-wrap"><table class="data cs-table">
       <thead><tr><th>Vehicle</th><th class="num">Jobs</th><th class="num">This week</th><th class="num">Weekly average</th><th class="num">Change</th></tr></thead>
       <tbody>${lines.map((r) => `<tr class="row-link" data-veh="${esc(r.id)}" title="Open ${esc(r.id)}">
         <td><span class="id">${esc(r.id)}</span></td>
@@ -340,9 +340,9 @@ AD.views['cost-sheet'] = (function () {
     const shown = lines.slice(0, RUN_MAX);
     const maxSpend = Math.max(...shown.map((r) => r.total), 1);
     const rated = (r) => r.rate == null ? '<span class="muted">—</span>'
-      : `${L.fmtAUD(r.rate)}<span class="t2">per ${r.byHours ? 'hour' : 'km'}</span>`;
+      : `${L.fmtAUD(r.rate)}<span class="cs-rate-unit">/${r.byHours ? 'hr' : 'km'}</span>`;
 
-    return `<div class="table-wrap"><table class="data">
+    return `<div class="table-wrap"><table class="data cs-table">
       <thead><tr><th>Vehicle</th><th class="col-opt">Type</th><th class="num">Jobs</th><th class="num">Spend</th><th class="num">Covered</th><th class="num">Running cost</th></tr></thead>
       <tbody>${shown.map((r) => `<tr class="row-link" data-veh="${esc(r.id)}" title="Open ${esc(r.id)}">
         <td><span class="id">${esc(r.id)}</span></td>
