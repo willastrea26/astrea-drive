@@ -39,6 +39,13 @@ AD.views['cost-sheet'] = (function () {
   const sum = (rows) => rows.reduce((n, r) => n + r.cost, 0);
   const avgOf = (nums) => nums.reduce((a, b) => a + b, 0) / (nums.length || 1);
 
+  // A service is work we chose to do; a resolved defect is work that chose us.
+  // Spend rising on planned servicing and spend rising on unplanned repairs call
+  // for opposite responses, so every figure that can carry the split, does.
+  const PLANNED = 'Service', UNPLANNED = 'Defect';
+  const sumKind = (rows, kind) => sum(rows.filter((r) => r.kind === kind));
+  const COLOR_PLANNED = 'var(--mint)', COLOR_UNPLANNED = 'var(--amber)';
+
   /** The AVG_WEEKS weeks immediately before `before` — the baseline "an average week" is measured against. */
   function baseline(before) {
     return Array.from({ length: AVG_WEEKS }, (_, i) => {
@@ -92,6 +99,17 @@ AD.views['cost-sheet'] = (function () {
     const vehicleCount = new Set(now.map((r) => r.vehicleId)).size;
     const avgVehicleCount = avgOf(base.map((w) => new Set(w.rows.map((r) => r.vehicleId)).size));
 
+    // Share rather than dollars: unplanned spend rises with a heavy week either way,
+    // but the proportion is what says whether maintenance is keeping ahead of failure.
+    const unplanned = sumKind(now, UNPLANNED);
+    const share = spend ? (unplanned / spend) * 100 : 0;
+    const avgUnplanned = avgOf(base.map((w) => sumKind(w.rows, UNPLANNED)));
+    const avgShare = avgSpend ? (avgUnplanned / avgSpend) * 100 : 0;
+    const shareTone = !haveBaseline || !avgSpend ? null
+      : share > avgShare + 0.5 ? 'worse' : share < avgShare - 0.5 ? 'better' : null;
+    const shareFoot = !spend ? '<small class="cs-delta">Nothing recorded</small>'
+      : `<small class="cs-delta${shareTone ? ' cs-delta-' + shareTone : ''}">${L.fmtAUD(unplanned)} of ${L.fmtAUD(spend)}${haveBaseline && avgSpend ? ` · ${Math.round(avgShare)}% avg` : ''}</small>`;
+
     el.classList.toggle('anim-in', fresh);
     fresh = false;
 
@@ -111,12 +129,13 @@ AD.views['cost-sheet'] = (function () {
         ${kpi('Total spend', L.fmtAUD(spend), delta(spend, avgSpend, haveBaseline, L.fmtAUD, true), trendTone(spend, avgSpend, haveBaseline, true))}
         ${kpi('Jobs recorded', String(jobs), delta(jobs, avgJobs, haveBaseline, (n) => n.toFixed(1), false))}
         ${kpi('Average per job', L.fmtAUD(perJob), delta(perJob, avgPerJob, haveBaseline, L.fmtAUD, true), trendTone(perJob, avgPerJob, haveBaseline, true))}
+        ${kpi('Unplanned share', `${Math.round(share)}%`, shareFoot, shareTone)}
         ${kpi('Vehicles with costs', `${vehicleCount}`, `<small class="cs-delta">of ${fleet} in the fleet · ${haveBaseline ? avgVehicleCount.toFixed(1) + ' avg' : 'no prior weeks'}</small>`)}
       </div>
 
       ${trend(end)}
 
-      ${days(now, base)}
+      ${months(end)}
 
       <section class="section">
         ${sectionHead({ title: 'By vehicle', meta: 'Biggest increases first' })}
@@ -128,7 +147,7 @@ AD.views['cost-sheet'] = (function () {
         ${running(end)}
       </section>
 
-      <p class="section-foot muted small">Spend is recorded services plus resolved defects, counted on the day the service was recorded or the defect was resolved. The average is the ${AVG_WEEKS} weeks before this one. Running cost divides a vehicle's spend by the distance or hours covered between its first and last service in the window, so it needs at least two services to show a rate.</p>`;
+      <p class="section-foot muted small">Spend is recorded services plus resolved defects, counted on the day the service was recorded or the defect was resolved. Planned is scheduled servicing; unplanned is a defect repair. The average is the ${AVG_WEEKS} weeks before this one. Running cost divides a vehicle's spend by the distance or hours covered between its first and last service in the window, so it needs at least two services to show a rate.</p>`;
 
     el.querySelector('#w-prev').onclick = () => go(T.addDays(start, -7));
     el.querySelector('#w-next').onclick = () => go(T.addDays(start, 7));
@@ -157,28 +176,29 @@ AD.views['cost-sheet'] = (function () {
     AD.setParams({ week: start === mondayOf(T.todayKey()) ? '' : start, period: period === 'month' ? '' : period });
   }
 
-  /** One row per weekday, this week's bar above the average for that weekday over the baseline weeks. */
-  function days(now, base) {
-    const byDay = (rows, from) => Array.from({ length: 7 }, (_, i) => sum(rows.filter((r) => r.date === T.addDays(from, i))));
-    const a = byDay(now, start);
-    const perWeek = base.map((w) => byDay(w.rows, w.from));
-    const b = Array.from({ length: 7 }, (_, i) => avgOf(perWeek.map((week) => week[i])));
-    const top = Math.max(...a, ...b, 1);
-    const COLOR_NOW = 'var(--mint)', COLOR_AVG = 'var(--viz-free-key)';
-    const rows = a.map((v, i) => `
-      <div class="hb-row" ${V.tipAttr(T.DOW[i], [['This week', L.fmtAUD(v), COLOR_NOW], [`${AVG_WEEKS}-week average`, L.fmtAUD(b[i]), COLOR_AVG]])}>
-        <span class="hb-label">${T.DOW[i]}</span>
-        <span class="hb-track cs-track">
-          <i style="width:${(v / top) * 100}%;background:${COLOR_NOW}"></i>
-          <i style="width:${(b[i] / top) * 100}%;background:${COLOR_AVG}"></i>
+  /** One row per calendar month over the trailing year, each bar split planned against unplanned. */
+  function months(end) {
+    const pts = monthlyPoints(end);
+    const top = Math.max(...pts.map((p) => p.total), 1);
+    const pct = (v) => (v / top) * 100;
+    const rows = pts.map((p, i) => `
+      <div class="hb-row" ${V.tipAttr(p.full, [
+        ['Planned', L.fmtAUD(p.planned), COLOR_PLANNED],
+        ['Unplanned', L.fmtAUD(p.unplanned), COLOR_UNPLANNED],
+        ['Total', L.fmtAUD(p.total), 'var(--ink)']
+      ])}>
+        <span class="hb-label">${esc(p.short)}</span>
+        <span class="cs-mbar" style="--i:${i}">
+          ${p.planned ? `<i style="width:${pct(p.planned)}%;background:${COLOR_PLANNED}"></i>` : ''}
+          ${p.unplanned ? `<i style="width:${pct(p.unplanned)}%;background:${COLOR_UNPLANNED}"></i>` : ''}
         </span>
-        <span class="hb-val">${v ? L.fmtAUD(v) : '—'}</span>
+        <span class="hb-val">${p.total ? L.fmtAUD(p.total) : '—'}</span>
       </div>`).join('');
     return `<figure class="viz-card">
-      <figcaption><h3>Day by day</h3><span class="viz-sub">This week against the ${AVG_WEEKS}-week average</span></figcaption>
-      ${V.legend([{ label: 'This week', color: COLOR_NOW }, { label: `${AVG_WEEKS}-week average`, color: COLOR_AVG }], { counts: false })}
-      <div class="hb cs-days">${rows}</div>
-      ${V.table(['Day', 'This week', `${AVG_WEEKS}-week average`], a.map((v, i) => [T.DOW[i], L.fmtAUD(v), L.fmtAUD(b[i])]))}
+      <figcaption><h3>Month by month</h3><span class="viz-sub">${TREND_MONTHS} months to ${T.fmtKey(end)} · planned servicing against unplanned repairs</span></figcaption>
+      ${V.legend([{ label: 'Planned servicing', color: COLOR_PLANNED }, { label: 'Unplanned repairs', color: COLOR_UNPLANNED }], { counts: false })}
+      <div class="hb cs-months">${rows}</div>
+      ${V.table(['Month', 'Planned', 'Unplanned', 'Total'], pts.map((p) => [p.full, L.fmtAUD(p.planned), L.fmtAUD(p.unplanned), L.fmtAUD(p.total)]))}
     </figure>`;
   }
 
@@ -198,7 +218,11 @@ AD.views['cost-sheet'] = (function () {
       const p = T.parseKey(from);
       const showMonth = p.m !== lastMonth;
       lastMonth = p.m;
-      return { total: sum(rowsBetween(from, T.addDays(from, 6))), label: showMonth ? `${p.d} ${T.MONTHS[p.m - 1].slice(0, 3)}` : String(p.d), full: `Week of ${T.fmtKey(from)}` };
+      const rows = rowsBetween(from, T.addDays(from, 6));
+      return {
+        total: sum(rows), planned: sumKind(rows, PLANNED), unplanned: sumKind(rows, UNPLANNED),
+        label: showMonth ? `${p.d} ${T.MONTHS[p.m - 1].slice(0, 3)}` : String(p.d), full: `Week of ${T.fmtKey(from)}`
+      };
     });
   }
 
@@ -208,8 +232,11 @@ AD.views['cost-sheet'] = (function () {
     return Array.from({ length: TREND_MONTHS }, (_, i) => {
       const dt = new Date(Date.UTC(y, m - 1 - (TREND_MONTHS - 1 - i), 1));
       const key = dt.toISOString().slice(0, 7);
+      const rows = rowsForMonth(key);
       return {
-        total: sum(rowsForMonth(key)), label: T.MONTHS[dt.getUTCMonth()].slice(0, 3),
+        total: sum(rows), planned: sumKind(rows, PLANNED), unplanned: sumKind(rows, UNPLANNED),
+        label: T.MONTHS[dt.getUTCMonth()].slice(0, 3),
+        short: `${T.MONTHS[dt.getUTCMonth()].slice(0, 3)} ${String(dt.getUTCFullYear()).slice(2)}`,
         full: `${T.MONTHS[dt.getUTCMonth()]} ${dt.getUTCFullYear()}`
       };
     });
@@ -226,21 +253,29 @@ AD.views['cost-sheet'] = (function () {
     const x = (i) => padL + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2);
     const y = (v) => padT + plotH - (Math.min(v, top) / top) * plotH;
     const coords = points.map((p, i) => ({ x: x(i), y: y(p.total) }));
+    const plannedCoords = points.map((p, i) => ({ x: x(i), y: y(p.planned) }));
     // Catmull–Rom points converted to cubic Béziers. The control points are
     // clamped to the plot so a steep change never bows beyond the chart frame.
     const clampY = (v) => Math.max(padT, Math.min(padT + plotH, v));
-    const lineD = coords.length < 2 ? `M${coords[0].x.toFixed(1)},${coords[0].y.toFixed(1)}` : coords.reduce((d, p1, i) => {
-      if (i === coords.length - 1) return d;
-      const p0 = coords[i - 1] || p1;
-      const p2 = coords[i + 1];
-      const p3 = coords[i + 2] || p2;
+    const spline = (pts) => pts.length < 2 ? `M${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}` : pts.reduce((d, p1, i) => {
+      if (i === pts.length - 1) return d;
+      const p0 = pts[i - 1] || p1;
+      const p2 = pts[i + 1];
+      const p3 = pts[i + 2] || p2;
       const c1x = p1.x + (p2.x - p0.x) / 6;
       const c1y = clampY(p1.y + (p2.y - p0.y) / 6);
       const c2x = p2.x - (p3.x - p1.x) / 6;
       const c2y = clampY(p2.y - (p3.y - p1.y) / 6);
       return `${d} C${c1x.toFixed(1)},${c1y.toFixed(1)} ${c2x.toFixed(1)},${c2y.toFixed(1)} ${p2.x.toFixed(1)},${p2.y.toFixed(1)}`;
-    }, `M${coords[0].x.toFixed(1)},${coords[0].y.toFixed(1)}`);
-    const areaD = `${lineD} L${x(n - 1).toFixed(1)},${(padT + plotH).toFixed(1)} L${x(0).toFixed(1)},${(padT + plotH).toFixed(1)} Z`;
+    }, `M${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}`);
+    const lineD = spline(coords);
+    const plannedD = spline(plannedCoords);
+    const floorY = (padT + plotH).toFixed(1);
+    // Planned fills from the baseline to its own curve; unplanned is the band
+    // between that curve and the total. Catmull–Rom is symmetric, so walking the
+    // planned points backwards retraces the same curve and the seam closes exactly.
+    const areaD = `${plannedD} L${x(n - 1).toFixed(1)},${floorY} L${x(0).toFixed(1)},${floorY} Z`;
+    const bandD = `${lineD} ${spline([...plannedCoords].reverse()).replace(/^M/, 'L')} Z`;
     const gridY = [0, 0.5, 1].map((f) => padT + plotH * (1 - f));
     const hline = (gy, cls) => `<line x1="${padL}" y1="${gy.toFixed(1)}" x2="${W - padR}" y2="${gy.toFixed(1)}" class="${cls}"></line>`;
     // Quarter lines carry no label — they give the plot enough grid to read as a
@@ -258,10 +293,14 @@ AD.views['cost-sheet'] = (function () {
       return `<g class="cs-mark${last ? ' cs-current' : ''}" style="--i:${i}">
         ${last ? `<circle cx="${cx}" cy="${cy}" r="9" class="cs-halo"></circle>` : ''}
         <circle cx="${cx}" cy="${cy}" r="4" class="cs-dot"></circle>
-        <circle cx="${cx}" cy="${cy}" r="16" class="cs-hit" ${V.tipAttr(p.full, [['Spend', L.fmtAUD(p.total), 'var(--mint)']])}></circle>
+        <circle cx="${cx}" cy="${cy}" r="16" class="cs-hit" ${V.tipAttr(p.full, [
+          ['Planned', L.fmtAUD(p.planned), COLOR_PLANNED],
+          ['Unplanned', L.fmtAUD(p.unplanned), COLOR_UNPLANNED],
+          ['Total', L.fmtAUD(p.total), 'var(--ink)']
+        ])}></circle>
       </g>`;
     }).join('');
-    const ariaDesc = points.map((p) => `${p.full}: ${L.fmtAUD(p.total)}`).join(', ');
+    const ariaDesc = points.map((p) => `${p.full}: ${L.fmtAUD(p.total)} total, ${L.fmtAUD(p.unplanned)} unplanned`).join(', ');
 
     return `<figure class="viz-card">
       <figcaption><h3>Spend over time</h3><span class="viz-sub">${period === 'month' ? TREND_MONTHS + ' months' : TREND_WEEKS + ' weeks'} to ${T.fmtKey(end)}</span></figcaption>
@@ -269,21 +308,29 @@ AD.views['cost-sheet'] = (function () {
         <button type="button" data-period="week" class="${period === 'week' ? 'on' : ''}">Weekly</button>
         <button type="button" data-period="month" class="${period === 'month' ? 'on' : ''}">Monthly</button>
       </div>
+      ${V.legend([{ label: 'Planned servicing', color: COLOR_PLANNED }, { label: 'Unplanned repairs', color: COLOR_UNPLANNED }], { counts: false })}
       <div class="cs-line-wrap">
         <svg viewBox="0 0 ${W} ${H}" class="cs-line-svg" role="img" aria-label="${esc('Spend per ' + period + ': ' + ariaDesc)}">
           <defs>
             <linearGradient id="cs-area-grad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" style="stop-color:var(--mint);stop-opacity:.32"></stop>
+              <stop offset="0%" style="stop-color:var(--mint);stop-opacity:.34"></stop>
               <stop offset="100%" style="stop-color:var(--mint);stop-opacity:0"></stop>
+            </linearGradient>
+            <linearGradient id="cs-band-grad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" style="stop-color:var(--amber);stop-opacity:.46"></stop>
+              <stop offset="100%" style="stop-color:var(--amber);stop-opacity:.16"></stop>
             </linearGradient>
           </defs>
           ${grid}
           <path d="${areaD}" class="cs-area"></path>
+          <path d="${bandD}" class="cs-band"></path>
+          <path d="${plannedD}" class="cs-line-planned" pathLength="1"></path>
           <path d="${lineD}" class="cs-line-path" pathLength="1"></path>
           ${yTicks}${xTicks}${marks}
         </svg>
       </div>
-      ${V.table([period === 'month' ? 'Month' : 'Week starting', 'Spend'], points.map((p) => [p.full, L.fmtAUD(p.total)]))}
+      ${V.table([period === 'month' ? 'Month' : 'Week starting', 'Planned', 'Unplanned', 'Total'],
+        points.map((p) => [p.full, L.fmtAUD(p.planned), L.fmtAUD(p.unplanned), L.fmtAUD(p.total)]))}
     </figure>`;
   }
 

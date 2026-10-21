@@ -1324,7 +1324,7 @@ input[type=text], input[type=number], input[type=date], input[type=datetime-loca
 
 /* Cost sheet — week against week. */
 .cs-jump { width: 150px; }
-.cs-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 28px; }
+.cs-kpis { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-bottom: 28px; }
 .cs-kpis + .viz-card { margin-bottom: 28px; }
 .cs-kpi {
   --cs-tone: var(--mint);
@@ -1341,9 +1341,12 @@ input[type=text], input[type=number], input[type=date], input[type=datetime-loca
 .cs-delta-better { color: var(--green); }
 .cs-change { font-variant-numeric: tabular-nums; }
 /* Short day labels, and room for a currency figure the shared .hb-val can't hold. */
-.cs-days .hb-row { cursor: default; grid-template-columns: 56px minmax(0, 1fr) 96px; }
-.cs-track { flex-direction: column; align-items: flex-start; justify-content: center; gap: 3px; }
-.cs-track > i { height: 7px; min-width: 0; }
+.cs-months .hb-row { cursor: default; grid-template-columns: 60px minmax(0, 1fr) 116px; }
+/* One bar per month, planned then unplanned, with a 2px surface gap so the two
+   segments stay legible where one of them is thin. */
+.cs-mbar { height: 16px; display: flex; align-items: center; gap: 2px; }
+.cs-mbar i { display: block; height: 100%; min-width: 0; border-radius: 2px; }
+@media (max-width: 1180px) { .cs-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 900px) { .cs-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 520px) { .cs-kpis { grid-template-columns: 1fr; } }
 
@@ -1370,14 +1373,18 @@ input[type=text], input[type=number], input[type=date], input[type=datetime-loca
 .cs-grid { stroke: var(--viz-grid); stroke-width: 1; }
 .cs-grid-x { stroke-opacity: .48; }
 .cs-grid-minor { stroke-opacity: .42; }
-/* Fades out downwards so the fill reads as depth under the line, not a second band of data. */
+/* Stacked: planned fades out downwards so it reads as depth, while the unplanned
+   band above it stays denser — its thickness is the point of the whole chart. */
+.cs-line-svg { --cs-line: var(--amber); }
 .cs-area { fill: url(#cs-area-grad); stroke: none; }
-.cs-line-path { fill: none; stroke: var(--mint); stroke-width: 2.25; stroke-linejoin: round; stroke-linecap: round; }
-.cs-dot { fill: var(--paper); stroke: var(--mint); stroke-width: 2; transition: r .15s cubic-bezier(.2,.8,.3,1); }
+.cs-band { fill: url(#cs-band-grad); stroke: none; }
+.cs-line-planned { fill: none; stroke: var(--mint); stroke-width: 1.75; stroke-linejoin: round; stroke-linecap: round; opacity: .9; }
+.cs-line-path { fill: none; stroke: var(--cs-line); stroke-width: 2.25; stroke-linejoin: round; stroke-linecap: round; }
+.cs-dot { fill: var(--paper); stroke: var(--cs-line); stroke-width: 2; transition: r .15s cubic-bezier(.2,.8,.3,1); }
 .cs-mark:hover .cs-dot { r: 6.5; }
 /* The point you are looking at — the week or month on screen — wears a soft ring. */
-.cs-halo { fill: var(--mint); fill-opacity: .25; }
-.cs-current .cs-dot { fill: var(--mint); stroke: var(--paper); filter: drop-shadow(0 0 3px var(--mint)); }
+.cs-halo { fill: var(--cs-line); fill-opacity: .25; }
+.cs-current .cs-dot { fill: var(--cs-line); stroke: var(--paper); filter: drop-shadow(0 0 3px var(--cs-line)); }
 .cs-hit { fill: transparent; cursor: pointer; }
 .cs-axis-x, .cs-axis-y { font-size: 11px; fill: var(--muted); font-family: var(--font); }
 
@@ -2412,13 +2419,19 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 .anim-in .cs-kpi:nth-child(2) { animation-delay: .08s; }
 .anim-in .cs-kpi:nth-child(3) { animation-delay: .14s; }
 .anim-in .cs-kpi:nth-child(4) { animation-delay: .20s; }
-/* Mon–Fri are covered by the shared .hb-row delays above; the weekend needs its own. */
-.anim-in .cs-days .hb-row:nth-child(6) i { animation-delay: .35s; }
-.anim-in .cs-days .hb-row:nth-child(7) i { animation-delay: .41s; }
+.anim-in .cs-kpi:nth-child(5) { animation-delay: .26s; }
+/* Twelve rows is too many for nth-child delays; --i carries the row index instead.
+   The whole bar scales, so the planned/unplanned split holds while it grows. */
+.anim-in .cs-mbar {
+  transform-origin: left;
+  animation: grow-x .55s cubic-bezier(.2,.75,.3,1) backwards;
+  animation-delay: calc(.05s + var(--i, 0) * .045s);
+}
 /* pathLength="1" on the path makes the dash a plain 0→1, no measuring in JS. */
 @keyframes draw-line { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
-.anim-in .cs-line-path { stroke-dasharray: 1; animation: draw-line .9s cubic-bezier(.3,.7,.4,1) backwards; }
+.anim-in .cs-line-path, .anim-in .cs-line-planned { stroke-dasharray: 1; animation: draw-line .9s cubic-bezier(.3,.7,.4,1) backwards; }
 .anim-in .cs-area { animation: fade .6s ease .25s backwards; }
+.anim-in .cs-band { animation: fade .6s ease .35s backwards; }
 .anim-in .cs-mark { animation: fade .3s ease backwards; animation-delay: calc(.15s + var(--i, 0) * .06s); }
 /* Magnitude bars in the two tables fill from their own baseline. */
 .anim-in .cs-bar i, .anim-in .cs-divbar i { animation: grow-x .55s cubic-bezier(.2,.75,.3,1) .12s backwards; }
