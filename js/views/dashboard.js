@@ -325,6 +325,7 @@ AD.views.dashboard = (function () {
           </div>
           <div class="hero-wx" id="hero-wx">${wxStrip(AD.weather.cached())}</div>
           <div class="hero-actions">
+            <button type="button" class="btn btn-secondary" id="hero-report-btn" title="Download Fleet Performance Report (Excel)">${I.download} Monthly report</button>
             <a class="btn btn-secondary" href="#/defects?new=1">Report defect</a>
             <a class="btn btn-primary" href="#/calendar?new=1">${I.plus} New booking</a>
           </div>
@@ -334,6 +335,29 @@ AD.views.dashboard = (function () {
       const box = document.getElementById('hero-wx');
       if (box) box.innerHTML = wxStrip(days);
     });
+    const reportBtn = document.getElementById('hero-report-btn');
+    if (reportBtn) reportBtn.addEventListener('click', onReportClick);
+  }
+
+  async function onReportClick(e) {
+    const btn = e.currentTarget;
+    if (btn.dataset.busy === '1') return;
+    const originalHtml = btn.innerHTML;
+    btn.dataset.busy = '1';
+    btn.disabled = true;
+    btn.innerHTML = 'Preparing…';
+    try {
+      const filename = await AD.fleetReport.generate((text) => { btn.innerHTML = esc(text); });
+      btn.innerHTML = originalHtml;
+      if (AD.ui.toast) AD.ui.toast(`Downloaded ${filename}`);
+    } catch (err) {
+      console.error('Fleet report failed:', err);
+      btn.innerHTML = originalHtml;
+      if (AD.ui.toast) AD.ui.toast('Report failed — check the console');
+    } finally {
+      btn.disabled = false;
+      delete btn.dataset.busy;
+    }
   }
 
   function render(el, params) {

@@ -1,0 +1,772 @@
+/* Fleet performance report — monthly branded Excel workbook.
+ *
+ * Pulls everything the dashboard already knows (vehicles, services, defects,
+ * bookings, rego and service states) and lays it out as an Astrea-branded
+ * .xlsx: a cover sheet, an executive summary, the twelve-month spend table
+ * with projection against target, a compliance snapshot, and a full vehicle
+ * register. ExcelJS is fetched on demand so the dashboard stays light.
+ */
+window.AD = window.AD || {};
+
+AD.fleetReport = (function () {
+  const L = AD.logic, T = AD.time;
+
+  // Astrea palette, in ExcelJS's AARRGGBB format.
+  const COLOR = {
+    navy:      'FF12283D',  // sidebar / primary brand
+    navy2:     'FF1E3A52',
+    paper:     'FF2C4762',
+    mint:      'FF5FE0B4',  // accent + "under target" positive
+    mintSoft:  'FFCFF5E6',
+    ink:       'FF1E3148',  // body text
+    muted:     'FF657C92',
+    rule:      'FFD6DEE5',
+    ruleSoft:  'FFEDF2F6',
+    white:     'FFFFFFFF',
+    red:       'FFD9534F',  // over target / overdue
+    redSoft:   'FFFDE2E1',
+    amber:     'FFD98A1F',
+    amberSoft: 'FFFBE9CC',
+    green:     'FF2F8F56',  // on target / clear
+    greenSoft: 'FFDCF1E4'
+  };
+
+  const FONT_HEAD = 'Calibri';
+  const FONT_BODY = 'Calibri';
+
+  // Lazy loader for ExcelJS — ~900KB, no point blocking page load.
+  function loadExcelJS() {
+    return new Promise((resolve, reject) => {
+      if (window.ExcelJS) return resolve(window.ExcelJS);
+      const s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js';
+      s.onload = () => resolve(window.ExcelJS);
+      s.onerror = () => reject(new Error('Failed to load ExcelJS'));
+      document.head.appendChild(s);
+    });
+  }
+
+  // Fetch the horizontal Astrea mark for the cover sheet.
+  async function loadLogo() {
+    try {
+      const r = await fetch('assets/logo-horizontal-navy.png');
+      return await r.arrayBuffer();
+    } catch (e) { return null; }
+  }
+
+  /* ------------------------------------------------------------------ data
+   * One pass over the stores so every sheet works from the same snapshot.
+   */
+  function gather() {
+    const today = T.todayKey();
+    const p = T.parts(Date.now());
+    const vehicles = AD.store.all('vehicles');
+    const services = AD.store.all('services');
+    const defects  = AD.store.all('defects');
+
+    // Twelve calendar months ending with the current one.
+    const months = Array.from({ length: 12 }, (_, i) => {
+      const d = new Date(Date.UTC(p.year, p.month - 1 - (11 - i), 1));
+      const key = d.toISOString().slice(0, 7);
+      return { key, label: T.MONTHS[d.getUTCMonth()] + ' ' + d.getUTCFullYear(), year: d.getUTCFullYear(), m: d.getUTCMonth() };
+    });
+
+    months.forEach((mo) => {
+      const svc = services.filter((s) => (s.date || '').slice(0, 7) === mo.key);
+      const def = defects.filter((d) => d.status === 'Resolved' && (d.resolvedDate || '').slice(0, 7) === mo.key);
+      mo.planned   = svc.reduce((t, s) => t + Number(s.cost || 0), 0);
+      mo.unplanned = def.reduce((t, d) => t + Number(d.cost || 0), 0);
+      mo.total     = mo.planned + mo.unplanned;
+      mo.svcCount  = svc.length;
+      mo.defCount  = def.length;
+    });
+
+    // Baseline target: rolling 12-month average of total spend. Noted on the
+    // sheet so the reader knows this is trend-derived, not a formal budget.
+    const annualTotal = months.reduce((t, m) => t + m.total, 0);
+    const monthlyTarget = annualTotal / 12 || 0;
+
+    const curMonth = months[11];
+    const daysInMonth = new Date(Date.UTC(p.year, p.month, 0)).getUTCDate();
+    const dayOfMonth = p.day;
+    const mtdExpected = monthlyTarget * (dayOfMonth / daysInMonth);
+    const mtdActual = curMonth.total;
+    const mtdVariance = mtdActual - mtdExpected;
+
+    // YTD: calendar-year to date. Prior months in this year + current month MTD.
+    const ytdMonths = months.filter((m) => m.year === p.year);
+    const ytdActual = ytdMonths.reduce((t, m) => t + m.total, 0);
+    const monthsElapsedFull = ytdMonths.length - 1;  // excluding current partial
+    const ytdExpected = monthlyTarget * monthsElapsedFull + mtdExpected;
+    const ytdVariance = ytdActual - ytdExpected;
+
+    // Full-year projection: current run rate × 12. If we're in month 1 with
+    // thin data this will be rough, which is honest.
+    const runRateMonthly = ytdActual / (monthsElapsedFull + (dayOfMonth / daysInMonth)) || 0;
+    const projectedYearEnd = runRateMonthly * 12;
+    const remainingMonths = 12 - ytdMonths.length;
+    const projectedRemaining = runRateMonthly * (remainingMonths + (1 - dayOfMonth / daysInMonth));
+
+    // Compliance snapshot — mirrors the dashboard donuts.
+    const svcState = vehicles.map((v) => ({ v, s: L.serviceState(v) }));
+    const regoState = vehicles.map((v) => ({ v, r: L.regoState(v) }));
+    const SOON = 14;
+    const svcOverdue = svcState.filter((x) => x.s.state === 'overdue');
+    const svcSoon    = svcState.filter((x) => x.s.state !== 'overdue' && (x.s.daysLeft <= SOON || x.s.kmLeft <= 500));
+    const svcOk      = svcState.filter((x) => !svcOverdue.includes(x) && !svcSoon.includes(x));
+    const regoExp    = regoState.filter((x) => x.r.state === 'overdue');
+    const regoSoon   = regoState.filter((x) => x.r.state !== 'overdue' && x.r.days <= SOON);
+    const regoOk     = regoState.filter((x) => !regoExp.includes(x) && !regoSoon.includes(x));
+
+    const openDefects = defects.filter((d) => d.status !== 'Resolved');
+    const defByPri = (p) => openDefects.filter((d) => d.priority === p).length;
+
+    // Status counts.
+    const statusCounts = {
+      'Available':      vehicles.filter((v) => v.status === 'Available').length,
+      'In use':         vehicles.filter((v) => v.status === 'In use').length,
+      'In workshop':    vehicles.filter((v) => v.status === 'In workshop').length,
+      'Out of service': vehicles.filter((v) => v.status === 'Out of service').length
+    };
+    const availabilityPct = vehicles.length ? statusCounts['Available'] / vehicles.length : 0;
+
+    return {
+      today, now: p,
+      vehicles,
+      months, curMonth,
+      monthlyTarget, annualTotal, annualTarget: monthlyTarget * 12,
+      mtdActual, mtdExpected, mtdVariance, daysInMonth, dayOfMonth,
+      ytdActual, ytdExpected, ytdVariance, monthsElapsedFull,
+      projectedYearEnd, projectedRemaining,
+      svcOverdue, svcSoon, svcOk,
+      regoExp, regoSoon, regoOk,
+      openDefects,
+      defCounts: {
+        Critical: defByPri('Critical'), High: defByPri('High'),
+        Medium: defByPri('Medium'),     Low: defByPri('Low')
+      },
+      statusCounts, availabilityPct
+    };
+  }
+
+  /* ------------------------------------------------------------------ style helpers */
+  const border = (color = COLOR.rule) => ({ style: 'thin', color: { argb: color } });
+  const borderAll = (color = COLOR.rule) => ({ top: border(color), left: border(color), bottom: border(color), right: border(color) });
+
+  const styles = {
+    title:    { font: { name: FONT_HEAD, size: 28, bold: true, color: { argb: COLOR.white } } },
+    sub:      { font: { name: FONT_HEAD, size: 14, color: { argb: COLOR.mint } } },
+    smallW:   { font: { name: FONT_BODY, size: 10, color: { argb: COLOR.white } } },
+
+    h1:       { font: { name: FONT_HEAD, size: 20, bold: true, color: { argb: COLOR.navy } } },
+    h2:       { font: { name: FONT_HEAD, size: 14, bold: true, color: { argb: COLOR.navy } } },
+    sectionBar: {
+      font: { name: FONT_HEAD, size: 11, bold: true, color: { argb: COLOR.white } },
+      fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR.navy } },
+      alignment: { vertical: 'middle', horizontal: 'left', indent: 1 }
+    },
+    th: {
+      font: { name: FONT_HEAD, size: 11, bold: true, color: { argb: COLOR.white } },
+      fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR.navy } },
+      alignment: { vertical: 'middle', horizontal: 'left', indent: 1 },
+      border: borderAll(COLOR.navy)
+    },
+    thRight: {
+      font: { name: FONT_HEAD, size: 11, bold: true, color: { argb: COLOR.white } },
+      fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR.navy } },
+      alignment: { vertical: 'middle', horizontal: 'right' },
+      border: borderAll(COLOR.navy)
+    },
+    cell:     { font: { name: FONT_BODY, size: 11, color: { argb: COLOR.ink } }, alignment: { vertical: 'middle', horizontal: 'left', indent: 1 }, border: borderAll() },
+    cellNum:  { font: { name: FONT_BODY, size: 11, color: { argb: COLOR.ink } }, alignment: { vertical: 'middle', horizontal: 'right' }, border: borderAll(), numFmt: '"$"#,##0' },
+    cellPct:  { font: { name: FONT_BODY, size: 11, color: { argb: COLOR.ink } }, alignment: { vertical: 'middle', horizontal: 'right' }, border: borderAll(), numFmt: '0.0%' },
+    cellInt:  { font: { name: FONT_BODY, size: 11, color: { argb: COLOR.ink } }, alignment: { vertical: 'middle', horizontal: 'right' }, border: borderAll() },
+    cellDate: { font: { name: FONT_BODY, size: 11, color: { argb: COLOR.ink } }, alignment: { vertical: 'middle', horizontal: 'left', indent: 1 }, border: borderAll() },
+
+    // Zebra fill for alternating rows.
+    zebra:    { fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR.ruleSoft } } },
+
+    // Totals row — bold with top double rule.
+    total:    {
+      font: { name: FONT_HEAD, size: 11, bold: true, color: { argb: COLOR.navy } },
+      fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR.mintSoft } },
+      border: { ...borderAll(), top: { style: 'double', color: { argb: COLOR.navy } } }
+    },
+
+    // Metric tile for the summary sheet.
+    tileLabel: {
+      font: { name: FONT_HEAD, size: 10, bold: true, color: { argb: COLOR.muted } },
+      alignment: { vertical: 'middle', horizontal: 'left', indent: 1 },
+      border: { bottom: border(COLOR.rule) }
+    },
+    tileValue: {
+      font: { name: FONT_HEAD, size: 20, bold: true, color: { argb: COLOR.navy } },
+      alignment: { vertical: 'middle', horizontal: 'left', indent: 1 }
+    },
+    tileSub: {
+      font: { name: FONT_BODY, size: 10, color: { argb: COLOR.muted } },
+      alignment: { vertical: 'middle', horizontal: 'left', indent: 1 }
+    }
+  };
+
+  // Tone colour for variance / status cells.
+  function tone(kind) {
+    if (kind === 'good')  return { font: { color: { argb: COLOR.green } }, fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR.greenSoft } } };
+    if (kind === 'warn')  return { font: { color: { argb: COLOR.amber } }, fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR.amberSoft } } };
+    if (kind === 'bad')   return { font: { color: { argb: COLOR.red }   }, fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR.redSoft   } } };
+    return {};
+  }
+
+  function applyStyle(cell, ...parts) {
+    parts.forEach((p) => {
+      if (!p) return;
+      Object.entries(p).forEach(([k, v]) => {
+        if (v && typeof v === 'object' && !Array.isArray(v) && cell[k] && typeof cell[k] === 'object') {
+          cell[k] = { ...cell[k], ...v };
+        } else {
+          cell[k] = v;
+        }
+      });
+    });
+  }
+
+  /* ------------------------------------------------------------------ sheets */
+
+  async function buildCover(wb, data, logoBuf) {
+    const ws = wb.addWorksheet('Cover', {
+      views: [{ showGridLines: false }],
+      pageSetup: { orientation: 'portrait', paperSize: 9, margins: { left: 0.5, right: 0.5, top: 0.5, bottom: 0.5, header: 0.3, footer: 0.3 } }
+    });
+
+    // Navy band
+    ws.getColumn(1).width = 4;
+    for (let c = 2; c <= 10; c++) ws.getColumn(c).width = 12;
+
+    // Band rows 1..7 — solid navy, logo on left, title on right.
+    for (let r = 1; r <= 7; r++) {
+      ws.getRow(r).height = 24;
+      for (let c = 1; c <= 10; c++) {
+        ws.getCell(r, c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR.navy } };
+      }
+    }
+
+    // Logo as embedded image. Positioned by cell coords.
+    if (logoBuf) {
+      const imgId = wb.addImage({ buffer: logoBuf, extension: 'png' });
+      ws.addImage(imgId, { tl: { col: 1.2, row: 1.6 }, ext: { width: 220, height: 60 } });
+    } else {
+      ws.getCell('B3').value = 'ASTREA';
+      ws.getCell('B3').font = { name: FONT_HEAD, size: 24, bold: true, color: { argb: COLOR.white } };
+    }
+
+    // Title block, further down the band.
+    ws.mergeCells('B9:J10');
+    const title = ws.getCell('B9');
+    title.value = 'Fleet Performance Report';
+    title.font = { name: FONT_HEAD, size: 32, bold: true, color: { argb: COLOR.navy } };
+    title.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+
+    ws.mergeCells('B11:J11');
+    const sub = ws.getCell('B11');
+    sub.value = `${T.MONTHS[data.now.month - 1]} ${data.now.year} · issued ${T.fmtKey(data.today)}`;
+    sub.font = { name: FONT_HEAD, size: 14, color: { argb: COLOR.muted } };
+    sub.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+
+    // Mint accent rule under the title.
+    for (let c = 2; c <= 10; c++) {
+      ws.getCell(13, c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR.mint } };
+    }
+    ws.getRow(13).height = 4;
+
+    // Overview block — plain prose, kept short.
+    ws.mergeCells('B16:J16');
+    ws.getCell('B16').value = 'Overview';
+    applyStyle(ws.getCell('B16'), styles.h2);
+
+    ws.mergeCells('B18:J22');
+    const overview = ws.getCell('B18');
+    overview.value =
+      `This report summarises fleet performance for ${T.MONTHS[data.now.month - 1]} ${data.now.year} against the ` +
+      `12-month rolling baseline. It covers monthly and year-to-date spend against ` +
+      `target, a snapshot of compliance and defects, and the full vehicle register.\n\n` +
+      `The spend target is derived from the trailing twelve months of recorded ` +
+      `services and resolved defects. Replace it with a formally set budget once ` +
+      `one is in place.`;
+    overview.font = { name: FONT_BODY, size: 11, color: { argb: COLOR.ink } };
+    overview.alignment = { wrapText: true, vertical: 'top', horizontal: 'left', indent: 1 };
+
+    // Contents block.
+    ws.mergeCells('B25:J25');
+    ws.getCell('B25').value = 'Contents';
+    applyStyle(ws.getCell('B25'), styles.h2);
+
+    const contents = [
+      ['1', 'Executive summary',     'Key metrics with variance against target'],
+      ['2', 'Monthly spend',          'Twelve-month table with planned, unplanned and total'],
+      ['3', 'Compliance and risk',    'Rego, servicing and open defects'],
+      ['4', 'Vehicle register',       'All vehicles in the fleet']
+    ];
+    contents.forEach((row, i) => {
+      const r = 27 + i;
+      ws.getCell(`B${r}`).value = row[0];
+      ws.getCell(`B${r}`).font = { name: FONT_HEAD, size: 11, bold: true, color: { argb: COLOR.mint } };
+      ws.getCell(`B${r}`).alignment = { vertical: 'middle', horizontal: 'left' };
+      ws.mergeCells(`C${r}:D${r}`);
+      ws.getCell(`C${r}`).value = row[1];
+      ws.getCell(`C${r}`).font = { name: FONT_HEAD, size: 11, bold: true, color: { argb: COLOR.navy } };
+      ws.mergeCells(`E${r}:J${r}`);
+      ws.getCell(`E${r}`).value = row[2];
+      ws.getCell(`E${r}`).font = { name: FONT_BODY, size: 11, color: { argb: COLOR.muted } };
+    });
+
+    // Footer bar.
+    for (let c = 1; c <= 10; c++) {
+      ws.getCell(46, c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR.navy } };
+    }
+    ws.getRow(46).height = 22;
+    ws.mergeCells('B46:J46');
+    const foot = ws.getCell('B46');
+    foot.value = 'Astrea Group Pty Ltd · Fleet Operations · Confidential';
+    foot.font = { name: FONT_BODY, size: 10, color: { argb: COLOR.white } };
+    foot.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+  }
+
+  function buildSummary(wb, data) {
+    const ws = wb.addWorksheet('Summary', { views: [{ showGridLines: false, state: 'frozen', ySplit: 3 }] });
+
+    ws.getColumn(1).width = 3;
+    [26, 18, 18, 18, 18].forEach((w, i) => { ws.getColumn(i + 2).width = w; });
+
+    // Title row
+    ws.getRow(1).height = 36;
+    ws.mergeCells('B1:F1');
+    const h = ws.getCell('B1');
+    h.value = `Executive summary · ${T.MONTHS[data.now.month - 1]} ${data.now.year}`;
+    h.font = { name: FONT_HEAD, size: 18, bold: true, color: { argb: COLOR.navy } };
+    h.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+
+    // Mint rule
+    for (let c = 2; c <= 6; c++) ws.getCell(2, c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR.mint } };
+    ws.getRow(2).height = 3;
+
+    // Spend block
+    const curMonthName = T.MONTHS[data.now.month - 1];
+    const varianceKind = (actual, target) => {
+      if (!target) return '';
+      const pct = (actual - target) / target;
+      if (pct > 0.1) return 'bad';
+      if (pct < -0.1) return 'good';
+      return 'warn';
+    };
+
+    sectionBar(ws, 4, 'B', 'F', 'Spend performance');
+
+    const rows = [
+      // label, value, target, variance, kind
+      [`${curMonthName} spend (month to date)`, data.mtdActual, data.mtdExpected, data.mtdVariance,
+        varianceKind(data.mtdActual, data.mtdExpected), 'money'],
+      [`Year to date (${data.now.year})`, data.ytdActual, data.ytdExpected, data.ytdVariance,
+        varianceKind(data.ytdActual, data.ytdExpected), 'money'],
+      [`Projected year-end`, data.projectedYearEnd, data.annualTarget, data.projectedYearEnd - data.annualTarget,
+        varianceKind(data.projectedYearEnd, data.annualTarget), 'money'],
+      [`Monthly target (rolling 12-mo avg)`, data.monthlyTarget, null, null, '', 'money'],
+      [`Annual target (rolling)`, data.annualTarget, null, null, '', 'money']
+    ];
+
+    // Header row
+    const hdrRow = 6;
+    const hdrs = ['Metric', 'Actual', 'Target', 'Variance', 'Status'];
+    hdrs.forEach((text, i) => {
+      const cell = ws.getCell(hdrRow, 2 + i);
+      cell.value = text;
+      applyStyle(cell, i === 0 ? styles.th : styles.thRight);
+    });
+    ws.getRow(hdrRow).height = 24;
+
+    rows.forEach((row, i) => {
+      const r = hdrRow + 1 + i;
+      ws.getRow(r).height = 22;
+      const [label, val, tgt, varc, kind, fmt] = row;
+      const money = fmt === 'money';
+
+      ws.getCell(r, 2).value = label;  applyStyle(ws.getCell(r, 2), styles.cell);
+      ws.getCell(r, 3).value = val;    applyStyle(ws.getCell(r, 3), styles.cellNum);
+      ws.getCell(r, 4).value = tgt;    applyStyle(ws.getCell(r, 4), styles.cellNum);
+      ws.getCell(r, 5).value = varc;   applyStyle(ws.getCell(r, 5), styles.cellNum);
+      const statusText = kind === 'good' ? 'Under target' : kind === 'bad' ? 'Over target' : kind === 'warn' ? 'On track' : '';
+      ws.getCell(r, 6).value = statusText;
+      applyStyle(ws.getCell(r, 6), styles.cell, tone(kind));
+      ws.getCell(r, 6).alignment = { ...styles.cell.alignment, horizontal: 'center', indent: 0 };
+      if (kind) applyStyle(ws.getCell(r, 5), tone(kind));
+      if (i % 2 === 1) [2, 3, 4, 5].forEach((c) => applyStyle(ws.getCell(r, c), styles.zebra));
+    });
+
+    // Fleet block
+    const fleetTop = hdrRow + 1 + rows.length + 2;
+    sectionBar(ws, fleetTop, 'B', 'F', 'Fleet & compliance snapshot');
+
+    const fleetRows = [
+      ['Vehicles in fleet',              data.vehicles.length,              null, 'int'],
+      ['Available',                      data.statusCounts['Available'],    null, 'int'],
+      ['In workshop',                    data.statusCounts['In workshop'],  null, 'int'],
+      ['Out of service',                 data.statusCounts['Out of service'], null, 'int'],
+      ['Availability',                   data.availabilityPct,              null, 'pct'],
+      ['Overdue services',               data.svcOverdue.length,            data.svcOverdue.length ? 'bad' : 'good', 'int'],
+      ['Services due in 2 weeks',        data.svcSoon.length,               data.svcSoon.length ? 'warn' : 'good', 'int'],
+      ['Expired registrations',          data.regoExp.length,               data.regoExp.length ? 'bad' : 'good', 'int'],
+      ['Registrations due in 2 weeks',   data.regoSoon.length,              data.regoSoon.length ? 'warn' : 'good', 'int'],
+      ['Open critical defects',          data.defCounts.Critical,           data.defCounts.Critical ? 'bad' : 'good', 'int'],
+      ['Open high defects',              data.defCounts.High,               data.defCounts.High ? 'warn' : 'good', 'int']
+    ];
+
+    const fh = fleetTop + 2;
+    ['Measure', 'Value'].forEach((text, i) => {
+      const cell = ws.getCell(fh, 2 + i);
+      cell.value = text;
+      applyStyle(cell, i === 0 ? styles.th : styles.thRight);
+    });
+    ws.getRow(fh).height = 24;
+
+    fleetRows.forEach(([label, val, kind, fmt], i) => {
+      const r = fh + 1 + i;
+      ws.getRow(r).height = 20;
+      ws.getCell(r, 2).value = label; applyStyle(ws.getCell(r, 2), styles.cell);
+      const valCell = ws.getCell(r, 3);
+      valCell.value = val;
+      applyStyle(valCell, fmt === 'pct' ? styles.cellPct : styles.cellInt);
+      if (kind) applyStyle(valCell, tone(kind));
+      if (i % 2 === 1) [2, 3].forEach((c) => applyStyle(ws.getCell(r, c), styles.zebra));
+    });
+  }
+
+  function buildSpend(wb, data) {
+    const ws = wb.addWorksheet('Monthly spend', { views: [{ showGridLines: false, state: 'frozen', ySplit: 6 }] });
+    ws.getColumn(1).width = 3;
+    const widths = [18, 16, 16, 16, 16, 16, 14, 12];
+    widths.forEach((w, i) => { ws.getColumn(i + 2).width = w; });
+
+    ws.getRow(1).height = 36;
+    ws.mergeCells('B1:I1');
+    const h = ws.getCell('B1');
+    h.value = 'Monthly spend · last 12 months';
+    h.font = { name: FONT_HEAD, size: 18, bold: true, color: { argb: COLOR.navy } };
+    h.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+
+    for (let c = 2; c <= 9; c++) ws.getCell(2, c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR.mint } };
+    ws.getRow(2).height = 3;
+
+    // Sub note
+    ws.mergeCells('B4:I4');
+    ws.getCell('B4').value = `Monthly target: ${aud(data.monthlyTarget)}  ·  derived from 12-month rolling average`;
+    ws.getCell('B4').font = { name: FONT_BODY, size: 10, italic: true, color: { argb: COLOR.muted } };
+    ws.getCell('B4').alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+
+    const hdrRow = 6;
+    const headers = ['Month', 'Planned', 'Unplanned', 'Total', 'Target', 'Variance', '% of target', 'Services'];
+    headers.forEach((text, i) => {
+      const cell = ws.getCell(hdrRow, 2 + i);
+      cell.value = text;
+      applyStyle(cell, i === 0 ? styles.th : styles.thRight);
+    });
+    ws.getRow(hdrRow).height = 24;
+
+    data.months.forEach((mo, i) => {
+      const r = hdrRow + 1 + i;
+      ws.getRow(r).height = 20;
+      const isCurrent = i === data.months.length - 1;
+      const target = isCurrent ? data.mtdExpected : data.monthlyTarget;
+      const variance = mo.total - target;
+      const pctOfTarget = target > 0 ? mo.total / target : 0;
+      const kind = target > 0 ? (variance / target > 0.1 ? 'bad' : variance / target < -0.1 ? 'good' : 'warn') : '';
+
+      ws.getCell(r, 2).value = mo.label + (isCurrent ? ' (MTD)' : '');
+      applyStyle(ws.getCell(r, 2), styles.cell);
+      ws.getCell(r, 3).value = mo.planned;    applyStyle(ws.getCell(r, 3), styles.cellNum);
+      ws.getCell(r, 4).value = mo.unplanned;  applyStyle(ws.getCell(r, 4), styles.cellNum);
+      ws.getCell(r, 5).value = mo.total;      applyStyle(ws.getCell(r, 5), styles.cellNum);
+      ws.getCell(r, 6).value = target;        applyStyle(ws.getCell(r, 6), styles.cellNum);
+      ws.getCell(r, 7).value = variance;      applyStyle(ws.getCell(r, 7), styles.cellNum);
+      if (kind) applyStyle(ws.getCell(r, 7), tone(kind));
+      ws.getCell(r, 8).value = pctOfTarget;   applyStyle(ws.getCell(r, 8), styles.cellPct);
+      ws.getCell(r, 9).value = mo.svcCount + mo.defCount; applyStyle(ws.getCell(r, 9), styles.cellInt);
+
+      if (isCurrent) {
+        for (let c = 2; c <= 9; c++) {
+          applyStyle(ws.getCell(r, c), { font: { bold: true }, fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR.mintSoft } } });
+        }
+      } else if (i % 2 === 1) {
+        for (let c = 2; c <= 9; c++) applyStyle(ws.getCell(r, c), styles.zebra);
+      }
+    });
+
+    // Totals
+    const totRow = hdrRow + 1 + data.months.length;
+    ws.getRow(totRow).height = 24;
+    const plannedTotal   = data.months.reduce((t, m) => t + m.planned, 0);
+    const unplannedTotal = data.months.reduce((t, m) => t + m.unplanned, 0);
+    ws.getCell(totRow, 2).value = 'Twelve-month total';
+    ws.getCell(totRow, 3).value = plannedTotal;
+    ws.getCell(totRow, 4).value = unplannedTotal;
+    ws.getCell(totRow, 5).value = data.annualTotal;
+    ws.getCell(totRow, 6).value = data.annualTarget;
+    ws.getCell(totRow, 7).value = data.annualTotal - data.annualTarget;
+    ws.getCell(totRow, 8).value = data.annualTarget ? data.annualTotal / data.annualTarget : 0;
+    ws.getCell(totRow, 9).value = data.months.reduce((t, m) => t + m.svcCount + m.defCount, 0);
+    for (let c = 2; c <= 9; c++) {
+      const money = c >= 3 && c <= 7;
+      applyStyle(ws.getCell(totRow, c), money ? styles.cellNum : c === 8 ? styles.cellPct : c === 2 ? styles.cell : styles.cellInt);
+      applyStyle(ws.getCell(totRow, c), styles.total);
+    }
+
+    // Projection block
+    const projRow = totRow + 3;
+    sectionBar(ws, projRow, 'B', 'I', 'Year outlook');
+
+    const projRows = [
+      [`${data.now.year} year-to-date actual`, data.ytdActual, data.ytdExpected, data.ytdVariance],
+      [`Projected year-end spend`,              data.projectedYearEnd, data.annualTarget, data.projectedYearEnd - data.annualTarget],
+      [`Projected remainder of year`,           data.projectedRemaining, null, null]
+    ];
+    const pHdr = projRow + 2;
+    ['Measure', 'Actual / Projected', 'Target', 'Variance'].forEach((t, i) => {
+      const cell = ws.getCell(pHdr, 2 + i);
+      cell.value = t;
+      applyStyle(cell, i === 0 ? styles.th : styles.thRight);
+    });
+    ws.getRow(pHdr).height = 24;
+    projRows.forEach(([label, val, tgt, varc], i) => {
+      const r = pHdr + 1 + i;
+      ws.getRow(r).height = 22;
+      ws.getCell(r, 2).value = label; applyStyle(ws.getCell(r, 2), styles.cell);
+      ws.getCell(r, 3).value = val;   applyStyle(ws.getCell(r, 3), styles.cellNum);
+      ws.getCell(r, 4).value = tgt;   applyStyle(ws.getCell(r, 4), styles.cellNum);
+      ws.getCell(r, 5).value = varc;  applyStyle(ws.getCell(r, 5), styles.cellNum);
+      if (tgt) {
+        const kind = varc / tgt > 0.1 ? 'bad' : varc / tgt < -0.1 ? 'good' : 'warn';
+        applyStyle(ws.getCell(r, 5), tone(kind));
+      }
+      if (i % 2 === 1) [2, 3, 4, 5].forEach((c) => applyStyle(ws.getCell(r, c), styles.zebra));
+    });
+  }
+
+  function buildCompliance(wb, data) {
+    const ws = wb.addWorksheet('Compliance', { views: [{ showGridLines: false }] });
+    ws.getColumn(1).width = 3;
+    [12, 32, 16, 20, 16].forEach((w, i) => { ws.getColumn(i + 2).width = w; });
+
+    ws.getRow(1).height = 36;
+    ws.mergeCells('B1:F1');
+    const h = ws.getCell('B1');
+    h.value = 'Compliance and risk';
+    h.font = { name: FONT_HEAD, size: 18, bold: true, color: { argb: COLOR.navy } };
+    h.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+    for (let c = 2; c <= 6; c++) ws.getCell(2, c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR.mint } };
+    ws.getRow(2).height = 3;
+
+    // Registration section — list every vehicle needing attention.
+    let row = 4;
+    sectionBar(ws, row, 'B', 'F', `Registrations needing attention (${data.regoExp.length} expired, ${data.regoSoon.length} within 2 weeks)`);
+    row += 2;
+    ['Vehicle', 'Rego', 'Status', 'Expiry', 'Days'].forEach((t, i) => {
+      const cell = ws.getCell(row, 2 + i);
+      cell.value = t;
+      applyStyle(cell, i < 3 ? styles.th : styles.thRight);
+    });
+    ws.getRow(row).height = 24;
+    const regoAll = [...data.regoExp, ...data.regoSoon];
+    if (!regoAll.length) {
+      row += 1;
+      ws.mergeCells(`B${row}:F${row}`);
+      ws.getCell(row, 2).value = 'Nothing to action — every registration is current.';
+      applyStyle(ws.getCell(row, 2), styles.cell, { font: { italic: true, color: { argb: COLOR.muted } } });
+      row += 1;
+    } else {
+      regoAll.forEach((x, i) => {
+        row += 1;
+        ws.getRow(row).height = 20;
+        ws.getCell(row, 2).value = x.v.id;    applyStyle(ws.getCell(row, 2), styles.cell);
+        ws.getCell(row, 3).value = x.v.rego || ''; applyStyle(ws.getCell(row, 3), styles.cell);
+        const kind = x.r.state === 'overdue' ? 'bad' : 'warn';
+        ws.getCell(row, 4).value = x.r.state === 'overdue' ? 'Expired' : 'Within 2 weeks';
+        applyStyle(ws.getCell(row, 4), styles.cell, tone(kind));
+        ws.getCell(row, 5).value = x.v.regoExpiry || ''; applyStyle(ws.getCell(row, 5), styles.cellDate);
+        ws.getCell(row, 5).alignment = { ...styles.cellDate.alignment, horizontal: 'right' };
+        ws.getCell(row, 6).value = x.r.days; applyStyle(ws.getCell(row, 6), styles.cellInt);
+        if (i % 2 === 1) [2, 3, 4, 5, 6].forEach((c) => applyStyle(ws.getCell(row, c), styles.zebra));
+      });
+    }
+
+    // Servicing section
+    row += 3;
+    sectionBar(ws, row, 'B', 'F', `Servicing (${data.svcOverdue.length} overdue, ${data.svcSoon.length} within 2 weeks)`);
+    row += 2;
+    ['Vehicle', 'Type', 'Status', 'Next service', 'Days / km'].forEach((t, i) => {
+      const cell = ws.getCell(row, 2 + i);
+      cell.value = t;
+      applyStyle(cell, i < 3 ? styles.th : styles.thRight);
+    });
+    ws.getRow(row).height = 24;
+    const svcAll = [...data.svcOverdue, ...data.svcSoon];
+    if (!svcAll.length) {
+      row += 1;
+      ws.mergeCells(`B${row}:F${row}`);
+      ws.getCell(row, 2).value = 'Nothing overdue — all services scheduled.';
+      applyStyle(ws.getCell(row, 2), styles.cell, { font: { italic: true, color: { argb: COLOR.muted } } });
+    } else {
+      svcAll.forEach((x, i) => {
+        row += 1;
+        ws.getRow(row).height = 20;
+        ws.getCell(row, 2).value = x.v.id;    applyStyle(ws.getCell(row, 2), styles.cell);
+        ws.getCell(row, 3).value = x.v.type || ''; applyStyle(ws.getCell(row, 3), styles.cell);
+        const kind = x.s.state === 'overdue' ? 'bad' : 'warn';
+        ws.getCell(row, 4).value = x.s.state === 'overdue' ? 'Overdue' : 'Within 2 weeks';
+        applyStyle(ws.getCell(row, 4), styles.cell, tone(kind));
+        ws.getCell(row, 5).value = x.v.nextServiceDate || ''; applyStyle(ws.getCell(row, 5), styles.cellDate);
+        ws.getCell(row, 5).alignment = { ...styles.cellDate.alignment, horizontal: 'right' };
+        const daysKm = x.s.daysLeft >= 0 ? `${x.s.daysLeft} days` : `${-x.s.daysLeft} days over`;
+        ws.getCell(row, 6).value = daysKm; applyStyle(ws.getCell(row, 6), styles.cell);
+        ws.getCell(row, 6).alignment = { ...styles.cell.alignment, horizontal: 'right', indent: 0 };
+        if (i % 2 === 1) [2, 3, 4, 5, 6].forEach((c) => applyStyle(ws.getCell(row, c), styles.zebra));
+      });
+    }
+
+    // Open defects
+    row += 3;
+    sectionBar(ws, row, 'B', 'F', `Open defects by priority (${data.openDefects.length} total)`);
+    row += 2;
+    ['Priority', 'Open count'].forEach((t, i) => {
+      const cell = ws.getCell(row, 2 + i);
+      cell.value = t;
+      applyStyle(cell, i === 0 ? styles.th : styles.thRight);
+    });
+    ws.getRow(row).height = 24;
+    const priList = [
+      ['Critical', data.defCounts.Critical, data.defCounts.Critical ? 'bad' : 'good'],
+      ['High',     data.defCounts.High,     data.defCounts.High     ? 'warn': 'good'],
+      ['Medium',   data.defCounts.Medium,   data.defCounts.Medium   ? 'warn': 'good'],
+      ['Low',      data.defCounts.Low,      '']
+    ];
+    priList.forEach(([label, val, kind], i) => {
+      row += 1;
+      ws.getRow(row).height = 20;
+      ws.getCell(row, 2).value = label; applyStyle(ws.getCell(row, 2), styles.cell);
+      ws.getCell(row, 3).value = val;   applyStyle(ws.getCell(row, 3), styles.cellInt);
+      if (kind) applyStyle(ws.getCell(row, 3), tone(kind));
+      if (i % 2 === 1) [2, 3].forEach((c) => applyStyle(ws.getCell(row, c), styles.zebra));
+    });
+  }
+
+  function buildRegister(wb, data) {
+    const ws = wb.addWorksheet('Vehicle register', { views: [{ showGridLines: false, state: 'frozen', ySplit: 4 }] });
+    ws.getColumn(1).width = 3;
+    const widths = [10, 10, 12, 20, 16, 14, 14, 14, 14];
+    widths.forEach((w, i) => { ws.getColumn(i + 2).width = w; });
+
+    ws.getRow(1).height = 36;
+    ws.mergeCells('B1:J1');
+    const h = ws.getCell('B1');
+    h.value = `Vehicle register · ${data.vehicles.length} vehicles`;
+    h.font = { name: FONT_HEAD, size: 18, bold: true, color: { argb: COLOR.navy } };
+    h.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+    for (let c = 2; c <= 10; c++) ws.getCell(2, c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR.mint } };
+    ws.getRow(2).height = 3;
+
+    const headers = ['ID', 'Rego', 'Type', 'Make / Model', 'Status', 'Odometer', 'Next service', 'Rego expiry', 'Owner'];
+    const hdrRow = 4;
+    headers.forEach((t, i) => {
+      const cell = ws.getCell(hdrRow, 2 + i);
+      cell.value = t;
+      applyStyle(cell, i < 5 ? styles.th : styles.thRight);
+    });
+    ws.getRow(hdrRow).height = 24;
+
+    const sorted = [...data.vehicles].sort((a, b) => (a.id || '').localeCompare(b.id || ''));
+    sorted.forEach((v, i) => {
+      const r = hdrRow + 1 + i;
+      ws.getRow(r).height = 20;
+      ws.getCell(r, 2).value = v.id || '';
+      ws.getCell(r, 3).value = v.rego || '';
+      ws.getCell(r, 4).value = v.type || '';
+      ws.getCell(r, 5).value = [v.make, v.model].filter(Boolean).join(' ');
+      ws.getCell(r, 6).value = v.status || '';
+      ws.getCell(r, 7).value = v.odometer != null ? Number(v.odometer) : '';
+      ws.getCell(r, 8).value = v.nextServiceDate || '';
+      ws.getCell(r, 9).value = v.regoExpiry || '';
+      ws.getCell(r, 10).value = v.hired ? `Hired · ${v.hireCompany || ''}` : 'Owned';
+
+      for (let c = 2; c <= 6; c++) applyStyle(ws.getCell(r, c), styles.cell);
+      applyStyle(ws.getCell(r, 7), styles.cellInt);
+      ws.getCell(r, 7).numFmt = '#,##0 "km"';
+      applyStyle(ws.getCell(r, 8), styles.cellDate);
+      ws.getCell(r, 8).alignment = { ...styles.cellDate.alignment, horizontal: 'right' };
+      applyStyle(ws.getCell(r, 9), styles.cellDate);
+      ws.getCell(r, 9).alignment = { ...styles.cellDate.alignment, horizontal: 'right' };
+      applyStyle(ws.getCell(r, 10), styles.cell);
+      ws.getCell(r, 10).alignment = { ...styles.cell.alignment, horizontal: 'right', indent: 0 };
+
+      // Status cell tone
+      const st = v.status;
+      if (st === 'Out of service') applyStyle(ws.getCell(r, 6), tone('bad'));
+      else if (st === 'In workshop') applyStyle(ws.getCell(r, 6), tone('warn'));
+
+      if (i % 2 === 1) [2, 3, 4, 5, 6, 7, 8, 9, 10].forEach((c) => applyStyle(ws.getCell(r, c), styles.zebra));
+    });
+
+    ws.autoFilter = { from: { row: hdrRow, column: 2 }, to: { row: hdrRow, column: 10 } };
+  }
+
+  // Section bar — navy row spanning columns, used to break up a sheet.
+  function sectionBar(ws, row, startCol, endCol, text) {
+    ws.mergeCells(`${startCol}${row}:${endCol}${row}`);
+    const cell = ws.getCell(`${startCol}${row}`);
+    cell.value = text;
+    applyStyle(cell, styles.sectionBar);
+    ws.getRow(row).height = 22;
+  }
+
+  function aud(n) {
+    return Number(n || 0).toLocaleString('en-AU', { style: 'currency', currency: 'AUD', maximumFractionDigits: 0 });
+  }
+
+  /* ------------------------------------------------------------------ public */
+
+  async function generate(onProgress) {
+    const notify = (text) => onProgress && onProgress(text);
+    notify('Loading Excel engine…');
+    const ExcelJS = await loadExcelJS();
+    notify('Gathering fleet data…');
+    const data = gather();
+    const logoBuf = await loadLogo();
+    notify('Building workbook…');
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'Astrea Drive';
+    wb.company = 'Astrea Group Pty Ltd';
+    wb.created = new Date();
+    wb.title = 'Fleet Performance Report';
+    wb.subject = `${T.MONTHS[data.now.month - 1]} ${data.now.year}`;
+
+    await buildCover(wb, data, logoBuf);
+    buildSummary(wb, data);
+    buildSpend(wb, data);
+    buildCompliance(wb, data);
+    buildRegister(wb, data);
+
+    notify('Writing file…');
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+    const monthName = T.MONTHS[data.now.month - 1];
+    const filename = `Astrea Fleet Report — ${monthName} ${data.now.year}.xlsx`;
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    notify('Done.');
+    return filename;
+  }
+
+  return { generate };
+})();
