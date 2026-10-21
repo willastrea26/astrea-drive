@@ -1368,6 +1368,7 @@ input[type=text], input[type=number], input[type=date], input[type=datetime-loca
 .cs-line-svg { width: 100%; height: auto; display: block; overflow: visible; }
 .cs-grid { stroke: var(--viz-grid); stroke-width: 1; }
 .cs-grid-x { stroke-opacity: .48; }
+.cs-grid-minor { stroke-opacity: .42; }
 /* Fades out downwards so the fill reads as depth under the line, not a second band of data. */
 .cs-area { fill: url(#cs-area-grad); stroke: none; }
 .cs-line-path { fill: none; stroke: var(--mint); stroke-width: 2.25; stroke-linejoin: round; stroke-linecap: round; }

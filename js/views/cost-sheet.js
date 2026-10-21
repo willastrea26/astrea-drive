@@ -216,8 +216,10 @@ AD.views['cost-sheet'] = (function () {
   /** Weekly or monthly spend leading up to the week on screen — the trend a single week-to-week comparison can't show. */
   function trend(end) {
     const points = period === 'month' ? monthlyPoints(end) : weeklyPoints(end);
-    const top = niceTop(Math.max(...points.map((p) => p.total), 1));
-    const W = 760, H = 200, padL = 56, padR = 12, padT = 16, padB = 26;
+    // Headroom above the tallest point: without it the peak sits on the frame and
+    // every chart fills its full height, which reads as zoomed in however flat the data.
+    const top = niceTop(Math.max(...points.map((p) => p.total), 1) * 1.15);
+    const W = 880, H = 184, padL = 56, padR = 12, padT = 16, padB = 26;
     const plotW = W - padL - padR, plotH = H - padT - padB, n = points.length;
     const x = (i) => padL + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2);
     const y = (v) => padT + plotH - (Math.min(v, top) / top) * plotH;
@@ -238,7 +240,11 @@ AD.views['cost-sheet'] = (function () {
     }, `M${coords[0].x.toFixed(1)},${coords[0].y.toFixed(1)}`);
     const areaD = `${lineD} L${x(n - 1).toFixed(1)},${(padT + plotH).toFixed(1)} L${x(0).toFixed(1)},${(padT + plotH).toFixed(1)} Z`;
     const gridY = [0, 0.5, 1].map((f) => padT + plotH * (1 - f));
-    const grid = gridY.map((gy) => `<line x1="${padL}" y1="${gy.toFixed(1)}" x2="${W - padR}" y2="${gy.toFixed(1)}" class="cs-grid"></line>`).join('')
+    const hline = (gy, cls) => `<line x1="${padL}" y1="${gy.toFixed(1)}" x2="${W - padR}" y2="${gy.toFixed(1)}" class="${cls}"></line>`;
+    // Quarter lines carry no label — they give the plot enough grid to read as a
+    // measured scale rather than a single line floating in an empty box.
+    const grid = gridY.map((gy) => hline(gy, 'cs-grid')).join('')
+      + [0.25, 0.75].map((f) => hline(padT + plotH * (1 - f), 'cs-grid cs-grid-minor')).join('')
       + coords.map((p) => `<line x1="${p.x.toFixed(1)}" y1="${padT}" x2="${p.x.toFixed(1)}" y2="${padT + plotH}" class="cs-grid cs-grid-x"></line>`).join('');
     const yTicks = [0, top / 2, top].map((v, i) => `<text class="cs-axis-y" x="${padL - 8}" y="${(gridY[i] + 4).toFixed(1)}" text-anchor="end">${fmtAxis(v)}</text>`).join('');
     const xTicks = points.map((p, i) => `<text class="cs-axis-x" x="${x(i).toFixed(1)}" y="${H - 6}" text-anchor="middle">${esc(p.label)}</text>`).join('');
