@@ -106,6 +106,8 @@ AD.views['cost-sheet'] = (function () {
           </div>`
       })}
 
+      ${trend(end)}
+
       <div class="cs-kpis" role="group" aria-label="This week against the average week">
         ${kpi('Total spend', L.fmtAUD(spend), delta(spend, avgSpend, haveBaseline, L.fmtAUD, true), trendTone(spend, avgSpend, haveBaseline, true))}
         ${kpi('Jobs recorded', String(jobs), delta(jobs, avgJobs, haveBaseline, (n) => n.toFixed(1), false))}
@@ -114,8 +116,6 @@ AD.views['cost-sheet'] = (function () {
       </div>
 
       ${days(now, base)}
-
-      ${trend(end)}
 
       <section class="section">
         ${sectionHead({ title: 'By vehicle', meta: 'Biggest increases first' })}
