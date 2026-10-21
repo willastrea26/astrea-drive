@@ -459,11 +459,11 @@ AD.views.dashboard = (function () {
         })}
       </div>
 
+      ${insights(vehicles, vac, priParts)}
+
       <section class="section" aria-labelledby="sched-h">
         ${schedule(ownedScheduleVac, today)}
       </section>
-
-      ${insights(vehicles, vac, priParts)}
 
       <div class="cols-2">
         <section class="section">
