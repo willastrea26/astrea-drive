@@ -9,7 +9,7 @@ AD.views['cost-sheet'] = (function () {
   const RUN_MAX = 15; // running-cost rows shown; the count of the rest is stated beside it
   const TREND_WEEKS = 12; // Spend over time, weekly mode
   const TREND_MONTHS = 12; // Spend over time, monthly mode
-  let root = null, start = '', period = 'week';
+  let root = null, start = '', period = 'month';
   // Replays the draw-in whenever the figures on screen actually change — opening
   // the page, stepping a week, switching period — but not on a background refresh,
   // which would make the page twitch while someone is reading it.
@@ -72,7 +72,7 @@ AD.views['cost-sheet'] = (function () {
   function render(el, params) {
     root = el;
     start = /^\d{4}-\d{2}-\d{2}$/.test(params.week || '') ? mondayOf(params.week) : mondayOf(T.todayKey());
-    period = params.period === 'month' ? 'month' : 'week';
+    period = params.period === 'week' ? 'week' : 'month';
     fresh = true;
     draw();
   }
@@ -152,7 +152,7 @@ AD.views['cost-sheet'] = (function () {
   }
 
   function setParams() {
-    AD.setParams({ week: start === mondayOf(T.todayKey()) ? '' : start, period: period === 'week' ? '' : period });
+    AD.setParams({ week: start === mondayOf(T.todayKey()) ? '' : start, period: period === 'month' ? '' : period });
   }
 
   /** One row per weekday, this week's bar above the average for that weekday over the baseline weeks. */
