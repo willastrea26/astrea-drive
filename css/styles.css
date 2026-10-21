@@ -1323,6 +1323,7 @@ input[type=text], input[type=number], input[type=date], input[type=datetime-loca
 .hb-val { font-size: 14px; font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
 
 /* Cost sheet — week against week. */
+.cs-jump { width: 150px; }
 .cs-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 28px; }
 .cs-kpis + .viz-card { margin-bottom: 28px; }
 .cs-kpi {

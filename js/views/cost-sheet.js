@@ -103,7 +103,8 @@ AD.views['cost-sheet'] = (function () {
             <button type="button" id="w-prev" aria-label="Previous week">${I.chevL}</button>
             <button type="button" id="w-this"${start === thisWeek ? ' class="on"' : ''}>This week</button>
             <button type="button" id="w-next" aria-label="Next week">${I.chevR}</button>
-          </div>`
+          </div>
+          <input type="date" id="w-jump" class="cs-jump" value="${start}" aria-label="Go to week">`
       })}
 
       <div class="cs-kpis" role="group" aria-label="This week against the average week">
@@ -132,6 +133,7 @@ AD.views['cost-sheet'] = (function () {
     el.querySelector('#w-prev').onclick = () => go(T.addDays(start, -7));
     el.querySelector('#w-next').onclick = () => go(T.addDays(start, 7));
     el.querySelector('#w-this').onclick = () => go(thisWeek);
+    el.querySelector('#w-jump').onchange = (e) => { if (e.target.value) go(mondayOf(e.target.value)); };
     el.querySelectorAll('[data-period]').forEach((b) => (b.onclick = () => setPeriod(b.dataset.period)));
     el.querySelectorAll('tr[data-veh]').forEach((tr) => tr.addEventListener('click', () => AD.go('vehicle/' + tr.dataset.veh)));
   }
