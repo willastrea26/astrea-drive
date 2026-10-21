@@ -1547,6 +1547,89 @@ input[type=text], input[type=number], input[type=date], input[type=datetime-loca
    DASHBOARD V5 — greeting, KPI analytics, schedule tabs
    ===================================================================== */
 
+/* ---- Fleet insights band ----
+   One finding at a time, rotating. The accent follows the current card's tone,
+   so the whole band shifts colour as it moves between good news and bad. */
+.ib {
+  --ib-tone: var(--mint);
+  position: relative; margin: 20px 0 0; padding: 14px 18px 0;
+  background: var(--paper); border: 1px solid var(--rule); border-left: 3px solid var(--ib-tone);
+  border-radius: var(--r-lg); box-shadow: var(--shadow-1); overflow: hidden;
+  transition: border-color .45s ease;
+}
+.ib[data-tone="critical"] { --ib-tone: var(--red); }
+.ib[data-tone="warn"] { --ib-tone: var(--amber); }
+.ib[data-tone="good"] { --ib-tone: var(--green); }
+.ib[data-tone="info"] { --ib-tone: var(--mint); }
+
+.ib-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ib-eyebrow {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-family: var(--font-display); font-size: 12px; font-weight: 700;
+  letter-spacing: .09em; text-transform: uppercase; color: var(--muted);
+}
+.ib-eyebrow .ico { width: 15px; height: 15px; color: var(--ib-tone); transition: color .45s ease; }
+
+.ib-nav { display: flex; align-items: center; gap: 4px; }
+.ib-arrow {
+  width: 26px; height: 26px; display: grid; place-items: center; padding: 0;
+  background: none; border: 0; border-radius: 6px; color: var(--muted); cursor: pointer;
+}
+.ib-arrow:hover { background: var(--hover); color: var(--ink); }
+.ib-arrow .ico { width: 15px; height: 15px; }
+.ib-dots { display: flex; align-items: center; gap: 5px; margin: 0 4px; }
+.ib-dot {
+  width: 6px; height: 6px; padding: 0; border: 0; border-radius: 50%;
+  background: var(--rule-strong); cursor: pointer; transition: background .2s ease, width .25s ease;
+}
+.ib-dot:hover { background: var(--muted); }
+.ib-dot.on { width: 18px; border-radius: 3px; background: var(--ib-tone); }
+
+/* Every card occupies the same grid cell, so the band keeps one height and
+   nothing below it shifts as the text changes length. */
+.ib-stage { display: grid; margin-top: 10px; }
+.ib-item {
+  grid-area: 1 / 1; display: grid; grid-template-columns: 40px minmax(0, 1fr) auto;
+  align-items: center; gap: 14px; padding: 2px 0 16px; color: var(--ink); text-decoration: none;
+  visibility: hidden; opacity: 0; transform: translateY(7px);
+  transition: opacity .4s ease, transform .4s ease, visibility .4s;
+}
+.ib-item.is-on { visibility: visible; opacity: 1; transform: none; }
+.ib-item:hover { text-decoration: none; }
+.ib-ico {
+  width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center;
+  background: color-mix(in srgb, var(--ib-tone) 16%, transparent); color: var(--ib-tone);
+  transition: background .45s ease, color .45s ease;
+}
+.ib-ico .ico { width: 20px; height: 20px; }
+.ib-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ib-text { font-size: 17px; line-height: 1.35; letter-spacing: -0.01em; }
+.ib-text b { font-weight: 700; color: var(--ib-tone); transition: color .45s ease; }
+.ib-sub { font-size: 13px; color: var(--muted); }
+.ib-go { color: var(--muted); display: grid; place-items: center; }
+.ib-go .ico { width: 18px; height: 18px; }
+.ib-item:hover .ib-go { color: var(--ib-tone); }
+
+/* Shows how long the current card has left. The JS timer is what actually
+   advances the band; this is kept in step with it, and paused alongside it. */
+.ib-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--rule); }
+.ib-bar i { display: block; height: 100%; width: 0; background: var(--ib-tone); animation: ib-fill 7s linear forwards; }
+@keyframes ib-fill { from { width: 0; } to { width: 100%; } }
+.ib.is-held .ib-bar i { animation-play-state: paused; }
+
+@media (prefers-reduced-motion: reduce) {
+  /* Rotation is switched off in JS too, so the band waits for the arrows. */
+  .ib-bar i { animation: none; width: 100%; }
+  .ib-item { transition: none; }
+}
+@media (max-width: 720px) {
+  .ib-item { grid-template-columns: 34px minmax(0, 1fr); gap: 11px; }
+  .ib-ico { width: 34px; height: 34px; border-radius: 8px; }
+  .ib-ico .ico { width: 17px; height: 17px; }
+  .ib-text { font-size: 15.5px; }
+  .ib-go { display: none; }
+}
+
 /* ---- KPI card frame ---- */
 .strip { gap: 18px; align-items: stretch; }
 .strip-item {

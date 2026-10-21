@@ -14,6 +14,9 @@ AD.views.dashboard = (function () {
   }
   const OWNED_SCHEDULE_VAC_IDS = new Set(Array.from({ length: 8 }, (_, i) => `AVT${String(i + 1).padStart(2, '0')}`));
   let root = null, day = '', schedFilter = 'all';
+  // Which insight is on screen. Held across redraws so a background refresh
+  // doesn't yank the band back to the first card while it's being read.
+  let insightIdx = 0, insightTimer = null;
   // Charts animate in when the page is opened, not on every in-page redraw
   // (changing the schedule tab or date would otherwise replay the whole page).
   let fresh = true;
@@ -37,6 +40,214 @@ AD.views.dashboard = (function () {
     const pct = Math.min(100, Math.max(0, ((now - s) / (e - s)) * 100));
     return `<span class="job-prog"><span class="job-prog-fill" style="width:${pct.toFixed(1)}%"></span></span>`;
   }
+
+  /* ------------------------------------------------------------------ insights
+   * Plain-language findings read off whatever the data happens to say today.
+   * Every generator stays silent when it has nothing worth reporting, so the
+   * band only ever carries live facts; `weight` decides what leads, and the
+   * closing "all clear" lines guarantee it is never empty.
+   */
+  function facts({ vehicles, vac, svc, rego, defects, today }) {
+    const out = [];
+    const add = (weight, tone, icon, text, sub, href) => out.push({ weight, tone, icon, text, sub, href });
+    const b = (x) => `<b>${x}</b>`;
+    const isAre = (c) => (c === 1 ? 'is' : 'are');
+    const s = (c) => (c === 1 ? '' : 's');
+    const few = (ids) => ids.slice(0, 3).map(esc).join(', ') + (ids.length > 3 ? ` and ${ids.length - 3} more` : '');
+    const vHref = (id) => `#/vehicle/${encodeURIComponent(id)}`;
+
+    // ---- needs attention
+    const critical = defects.filter((d) => d.priority === 'Critical');
+    if (critical.length) add(100, 'critical', I.alert,
+      `${b(critical.length)} critical defect${s(critical.length)} ${isAre(critical.length)} open`,
+      'Raised as unsafe — clear these before the vehicle goes out',
+      '#/defects?status=open&priority=Critical');
+
+    const regoGone = rego.filter((x) => x.r.state === 'overdue');
+    if (regoGone.length) add(96, 'critical', I.file,
+      `${b(regoGone.length)} registration${s(regoGone.length)} ${regoGone.length === 1 ? 'has' : 'have'} expired`,
+      few(regoGone.map((x) => x.v.id)), '#/fleet?flag=rego');
+
+    const svcLate = svc.filter((x) => x.s.state === 'overdue');
+    if (svcLate.length) add(92, 'critical', I.wrench,
+      `${b(svcLate.length)} vehicle${s(svcLate.length)} ${isAre(svcLate.length)} overdue for a service`,
+      few(svcLate.map((x) => x.v.id)), '#/maintenance?filter=due');
+
+    const oos = vehicles.filter((v) => v.status === 'Out of service');
+    if (oos.length) add(88, 'critical', I.truck,
+      `${b(oos.length)} vehicle${s(oos.length)} ${isAre(oos.length)} out of service`,
+      few(oos.map((v) => v.id)), '#/fleet?status=' + encodeURIComponent('Out of service'));
+
+    // ---- coming up
+    const rego30 = rego.filter((x) => x.r.state !== 'overdue' && x.r.days <= 30);
+    if (rego30.length) add(74, 'warn', I.file,
+      `${b(rego30.length)} registration${s(rego30.length)} expire${rego30.length === 1 ? 's' : ''} within 30 days`,
+      `Soonest: ${esc(rego30[0].v.id)} on ${T.fmtKey(rego30[0].v.regoExpiry)}`, '#/fleet?flag=rego');
+
+    // "This month" means the days that are actually left in it, not a flat 30.
+    const p = T.parts(Date.now());
+    const leftInMonth = new Date(Date.UTC(p.year, p.month, 0)).getUTCDate() - p.day;
+    const svcMonth = svc.filter((x) => x.s.state !== 'overdue' && x.s.daysLeft >= 0 && x.s.daysLeft <= leftInMonth);
+    if (svcMonth.length) add(72, 'warn', I.wrench,
+      `${b(svcMonth.length)} vehicle${s(svcMonth.length)} ${svcMonth.length === 1 ? 'needs' : 'need'} servicing this month`,
+      `${leftInMonth} day${s(leftInMonth)} left in ${T.MONTHS[p.month - 1]}`, '#/maintenance?filter=due');
+
+    // ---- idle plant: last booking finished, nothing since
+    const IDLE_MIN = 10;
+    const idle = vehicles.map((v) => {
+      const bs = L.bookingsFor(v.id).filter((x) => x.status !== 'cancelled');
+      if (!bs.length) return null;
+      const last = Math.max(...bs.map((x) => Date.parse(x.end)));
+      if (!Number.isFinite(last) || last > Date.now()) return null;
+      return { v, days: T.daysBetween(T.dateKey(last), today) };
+    }).filter((x) => x && x.days >= IDLE_MIN).sort((a, b2) => b2.days - a.days);
+    if (idle.length) add(68, 'warn', I.clock,
+      `${b(esc(idle[0].v.id))} has been idle for ${b(idle[0].days)} days`,
+      idle.length > 1 ? `${idle.length} vehicles have had no booking for ${IDLE_MIN}+ days`
+        : `No booking since ${T.fmtKey(T.addDays(today, -idle[0].days))}`,
+      vHref(idle[0].v.id) + '?tab=bookings');
+
+    // ---- money: rolling 30 days against the 30 before, so a part-finished
+    // calendar month is never compared against a whole one.
+    const spend = (from, to) => {
+      const within = (d) => d && d >= from && d <= to;
+      const serviced = AD.store.all('services').filter((x) => within(x.date)).reduce((t, x) => t + Number(x.cost || 0), 0);
+      const fixed = AD.store.all('defects').filter((x) => x.status === 'Resolved' && within(x.resolvedDate)).reduce((t, x) => t + Number(x.cost || 0), 0);
+      return { total: serviced + fixed, unplanned: fixed };
+    };
+    const cur = spend(T.addDays(today, -29), today);
+    const prev = spend(T.addDays(today, -59), T.addDays(today, -30));
+    if (cur.total > 0 && prev.total > 0) {
+      const pct = Math.round(((cur.total - prev.total) / prev.total) * 100);
+      if (Math.abs(pct) >= 5) add(64, pct > 0 ? 'warn' : 'good', I.receipt,
+        `Spend is ${b((pct > 0 ? 'up ' : 'down ') + Math.abs(pct) + '%')} on the previous 30 days`,
+        `${L.fmtAUD(cur.total)} in the last 30 days · ${L.fmtAUD(prev.total)} before that`, '#/cost-sheet');
+    }
+    if (cur.total > 0) {
+      const share = Math.round((cur.unplanned / cur.total) * 100);
+      if (share >= 40) add(60, 'warn', I.wrench,
+        `${b(share + '%')} of the last 30 days' spend was unplanned repairs`,
+        `${L.fmtAUD(cur.unplanned)} on defects against ${L.fmtAUD(cur.total)} all up`, '#/cost-sheet');
+    }
+
+    const yearFrom = T.addDays(today, -364);
+    const perVehicle = new Map();
+    const tally = (id, n2) => perVehicle.set(id, (perVehicle.get(id) || 0) + n2);
+    AD.store.all('services').forEach((x) => { if (x.date >= yearFrom && x.date <= today) tally(x.vehicleId, Number(x.cost || 0)); });
+    AD.store.all('defects').forEach((x) => { if (x.status === 'Resolved' && x.resolvedDate >= yearFrom && x.resolvedDate <= today) tally(x.vehicleId, Number(x.cost || 0)); });
+    const dearest = [...perVehicle.entries()].sort((a, b2) => b2[1] - a[1])[0];
+    if (dearest && dearest[1] > 0) add(46, 'info', I.receipt,
+      `${b(esc(dearest[0]))} has cost the most this year — ${b(L.fmtAUD(dearest[1]))}`,
+      'Services and resolved defects over the last 12 months', vHref(dearest[0]));
+
+    // ---- what the fortnight looks like
+    if (vac.length) {
+      let peak = null;
+      for (let i = 0; i < 14; i++) {
+        const dk = T.addDays(today, i), ds = T.startOfDay(dk), de = T.startOfDay(T.addDays(dk, 1));
+        const busy = vac.filter((v) => L.bookingsFor(v.id).some((x) => x.status !== 'cancelled' && Date.parse(x.start) < de && Date.parse(x.end) > ds)).length;
+        if (!peak || busy > peak.busy) peak = { dk, busy, i };
+      }
+      if (peak && peak.busy) add(50, 'info', I.calendar,
+        `${b(T.DOW[T.dayOfWeek(peak.dk)] + ' ' + T.fmtKey(peak.dk))} is the busiest day ahead — ${b(peak.busy + ' of ' + vac.length)} vac trucks booked`,
+        peak.i === 0 ? 'That is today' : `In ${peak.i} day${s(peak.i)}`, `#/calendar?view=day&date=${peak.dk}`);
+    }
+
+    const inShop = vehicles.filter((v) => v.status === 'In workshop');
+    if (inShop.length) add(44, 'info', I.garage,
+      `${b(inShop.length)} vehicle${s(inShop.length)} ${isAre(inShop.length)} in the workshop`,
+      few(inShop.map((v) => v.id)), '#/fleet?status=' + encodeURIComponent('In workshop'));
+
+    // ---- all clear, so the band always has something to say
+    if (!regoGone.length && !rego30.length) add(25, 'good', I.file,
+      'Every registration is current', 'Nothing expires in the next 30 days', '#/fleet?flag=rego');
+    if (!svcLate.length) add(24, 'good', I.wrench,
+      'No vehicle is overdue for a service', `${svc.length} due in the period ahead`, '#/maintenance');
+    if (!critical.length) add(23, 'good', I.checkCircle,
+      'No critical defects are open', `${defects.length} open at lower priorities`, '#/defects?status=open');
+
+    return out.sort((a, b2) => b2.weight - a.weight).slice(0, 8);
+  }
+
+  /** The rotating band itself. */
+  function insightsBand(list) {
+    if (!list.length) return '';
+    const many = list.length > 1;
+    const items = list.map((f, i) => `
+      <a class="ib-item${i === 0 ? ' is-on' : ''}" href="${f.href}" data-tone="${f.tone}">
+        <span class="ib-ico">${f.icon}</span>
+        <span class="ib-copy"><span class="ib-text">${f.text}</span><span class="ib-sub">${f.sub}</span></span>
+        <span class="ib-go">${I.chevR}</span>
+      </a>`).join('');
+    return `<section class="ib" data-tone="${list[0].tone}" aria-label="Fleet insights">
+      <div class="ib-head">
+        <span class="ib-eyebrow">${I.activity}Fleet insights</span>
+        ${many ? `<div class="ib-nav">
+          <button type="button" class="ib-arrow ib-prev" aria-label="Previous insight">${I.chevL}</button>
+          <span class="ib-dots">${list.map((_, i) => `<button type="button" class="ib-dot${i === 0 ? ' on' : ''}" data-i="${i}" aria-label="Insight ${i + 1} of ${list.length}"></button>`).join('')}</span>
+          <button type="button" class="ib-arrow ib-next" aria-label="Next insight">${I.chevR}</button>
+        </div>` : ''}
+      </div>
+      <div class="ib-stage" aria-live="polite">${items}</div>
+      ${many ? '<span class="ib-bar"><i></i></span>' : ''}
+    </section>`;
+  }
+
+  /**
+   * Rotation runs on a timeout chain rather than the progress bar's
+   * animationend: browsers throttle animation clocks in backgrounded or
+   * non-painting tabs, which would stall the band indefinitely. The bar is
+   * decoration synced to the same dwell — if it stalls, rotation still works.
+   */
+  const INSIGHT_DWELL = 7000;
+
+  function wireInsights(el) {
+    stopInsights();
+    const band = el.querySelector('.ib');
+    if (!band) return;
+    const items = [...band.querySelectorAll('.ib-item')];
+    const dots = [...band.querySelectorAll('.ib-dot')];
+    const bar = band.querySelector('.ib-bar i');
+    if (!items.length) return;
+    const auto = items.length > 1 && !(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+
+    let i = Math.min(insightIdx, items.length - 1);
+    let held = false;
+
+    const queue = () => {
+      clearTimeout(insightTimer);
+      if (!auto || held) return;
+      insightTimer = setTimeout(() => {
+        // The view may have been replaced since the timer was set.
+        if (!band.isConnected) return stopInsights();
+        show(i + 1);
+      }, INSIGHT_DWELL);
+    };
+    const show = (next, restart = true) => {
+      i = (next + items.length) % items.length;
+      insightIdx = i;
+      items.forEach((it, k) => it.classList.toggle('is-on', k === i));
+      dots.forEach((d, k) => d.classList.toggle('on', k === i));
+      band.dataset.tone = items[i].dataset.tone;
+      // Restart the fill in step with the dwell: drop it, force a reflow, hand it back.
+      if (bar && restart) { bar.style.animation = 'none'; void bar.offsetWidth; bar.style.animation = ''; }
+      queue();
+    };
+
+    const hold = (on) => { held = on; band.classList.toggle('is-held', on); queue(); };
+    band.addEventListener('mouseenter', () => hold(true));
+    band.addEventListener('mouseleave', () => hold(false));
+    band.addEventListener('focusin', () => hold(true));
+    band.addEventListener('focusout', () => { if (!band.contains(document.activeElement)) hold(false); });
+
+    const prev = band.querySelector('.ib-prev'), next = band.querySelector('.ib-next');
+    if (prev) prev.onclick = () => show(i - 1);
+    if (next) next.onclick = () => show(i + 1);
+    dots.forEach((d) => (d.onclick = () => show(Number(d.dataset.i))));
+    show(i, false);
+  }
+
+  function stopInsights() { clearTimeout(insightTimer); insightTimer = null; }
 
   /** Multi-segment ring. Each part becomes an arc; the centre carries the headline. */
   function donutRing(parts, big, small) {
@@ -268,6 +479,8 @@ AD.views.dashboard = (function () {
         })}
       </div>
 
+      ${insightsBand(facts({ vehicles, vac, svc, rego, defects, today }))}
+
       <section class="section" aria-labelledby="sched-h">
         ${schedule(ownedScheduleVac, today)}
       </section>
@@ -312,6 +525,7 @@ AD.views.dashboard = (function () {
       </section>`;
 
     el.querySelectorAll('[data-go]').forEach((b) => b.addEventListener('click', () => { const [r, p] = JSON.parse(b.dataset.go); AD.go(r, p); }));
+    wireInsights(el);
     el.querySelectorAll('.rows li[data-veh]').forEach((li) => li.addEventListener('click', (e) => {
       if (e.target.closest('a')) return;
       AD.go('vehicle/' + li.dataset.veh);
@@ -414,7 +628,7 @@ AD.views.dashboard = (function () {
     const busyToday = n - util[0].c.free;
     return `
       <section class="section">
-        ${sectionHead({ title: 'Fleet insights', meta: 'Bookings for the next 14 days, costs for the last 12 months' })}
+        ${sectionHead({ title: 'Fleet charts', meta: 'Bookings for the next 14 days, costs for the last 12 months' })}
         <div class="insights">
           <figure class="viz-card viz-wide">
             <figcaption><h3>Vac truck utilisation</h3><span class="viz-sub">Trucks busy each day, next 14 days · ${busyToday} of ${n} today</span></figcaption>
@@ -600,5 +814,5 @@ AD.views.dashboard = (function () {
     return `<span class="t2">${cancelled ? '' : `<span class="flag flag-amber">Site location required</span>`}${b.address ? ` <span class="${strike}">${esc(b.address)} (not located)</span>` : ''}</span>`;
   }
 
-  return { title: 'Fleet overview', render, refresh: () => root && draw() };
+  return { title: 'Fleet overview', render, refresh: () => root && draw(), destroy: stopInsights };
 })();
