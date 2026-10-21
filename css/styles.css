@@ -1552,7 +1552,7 @@ input[type=text], input[type=number], input[type=date], input[type=datetime-loca
    so the whole band shifts colour as it moves between good news and bad. */
 .ib {
   --ib-tone: var(--mint);
-  position: relative; margin: 20px 0 0; padding: 14px 18px 0;
+  position: relative; margin: 20px 0 28px; padding: 14px 18px 0;
   background: var(--paper); border: 1px solid var(--rule); border-left: 3px solid var(--ib-tone);
   border-radius: var(--r-lg); box-shadow: var(--shadow-1); overflow: hidden;
   transition: border-color .45s ease;
