@@ -1324,7 +1324,7 @@ input[type=text], input[type=number], input[type=date], input[type=datetime-loca
 
 /* Cost sheet — week against week. */
 .cs-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 28px; }
-.viz-card + .cs-kpis { margin-top: 28px; }
+.cs-kpis + .viz-card { margin-bottom: 28px; }
 .cs-kpi {
   --cs-tone: var(--blue);
   min-width: 0; display: grid; gap: 4px; padding: 16px;

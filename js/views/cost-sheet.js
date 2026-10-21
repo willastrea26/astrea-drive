@@ -106,14 +106,14 @@ AD.views['cost-sheet'] = (function () {
           </div>`
       })}
 
-      ${trend(end)}
-
       <div class="cs-kpis" role="group" aria-label="This week against the average week">
         ${kpi('Total spend', L.fmtAUD(spend), delta(spend, avgSpend, haveBaseline, L.fmtAUD, true), trendTone(spend, avgSpend, haveBaseline, true))}
         ${kpi('Jobs recorded', String(jobs), delta(jobs, avgJobs, haveBaseline, (n) => n.toFixed(1), false))}
         ${kpi('Average per job', L.fmtAUD(perJob), delta(perJob, avgPerJob, haveBaseline, L.fmtAUD, true), trendTone(perJob, avgPerJob, haveBaseline, true))}
         ${kpi('Vehicles with costs', `${vehicleCount}`, `<small class="cs-delta">of ${fleet} in the fleet · ${haveBaseline ? avgVehicleCount.toFixed(1) + ' avg' : 'no prior weeks'}</small>`)}
       </div>
+
+      ${trend(end)}
 
       ${days(now, base)}
 
