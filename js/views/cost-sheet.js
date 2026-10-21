@@ -6,7 +6,8 @@ AD.views['cost-sheet'] = (function () {
   const L = AD.logic, T = AD.time, I = AD.icons, V = AD.viz;
   const AVG_WEEKS = 4; // same trailing window the dashboard uses for its utilisation trend
   const RUN_WEEKS = 52; // running-cost window: a year of weeks, ending with the week on screen
-  const RUN_MAX = 15; // running-cost rows shown; the count of the rest is stated beside it
+  const RUN_PER_GROUP = 8; // running-cost rows per vehicle type; the rest live in the table view
+  const MOVERS_MAX = 8; // vehicles shown in "What moved"; the rest live in the table view
   const TREND_WEEKS = 12; // Spend over time, weekly mode
   const TREND_MONTHS = 12; // Spend over time, monthly mode
   let root = null, start = '', period = 'month';
@@ -74,6 +75,14 @@ AD.views['cost-sheet'] = (function () {
   const TONE_VAR = { worse: 'var(--red)', better: 'var(--green)' };
   const kpi = (label, value, foot, tone) => `<div class="cs-kpi"${tone ? ` style="--cs-tone:${TONE_VAR[tone]}"` : ''}><span>${esc(label)}</span><strong>${value}</strong>${foot}</div>`;
   const fmtChange = (n) => Math.abs(n) < 0.005 ? '—' : (n > 0 ? '+' : '−') + L.fmtAUD(Math.abs(n));
+  // Hourly plant runs to tens of dollars, light vehicles to cents per km; whole
+  // dollars for the first, cents only where they carry the comparison.
+  const fmtRate = (n) => n >= 10 ? '$' + Math.round(n).toLocaleString('en-AU') : '$' + n.toFixed(2);
+  const median = (nums) => {
+    const s = [...nums].sort((a, b) => a - b), m = s.length >> 1;
+    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+  };
+  const vehHref = (id) => `#/vehicle/${encodeURIComponent(id)}`;
   const changeTone = (n) => n > 0.005 ? 'cs-delta-worse' : n < -0.005 ? 'cs-delta-better' : '';
 
   function render(el, params) {
@@ -135,15 +144,13 @@ AD.views['cost-sheet'] = (function () {
 
       ${trend(end)}
 
-      ${months(end)}
+      <div class="cs-pair">
+        ${months(end)}
+        ${movers(now, base)}
+      </div>
 
       <section class="section">
-        ${sectionHead({ title: 'By vehicle', meta: 'Biggest increases first' })}
-        ${sheet(now, base)}
-      </section>
-
-      <section class="section">
-        ${sectionHead({ title: 'Running cost', meta: `${RUN_WEEKS} weeks to ${T.fmtKey(end)} · dearest first` })}
+        ${sectionHead({ title: 'Running cost', meta: `${RUN_WEEKS} weeks to ${T.fmtKey(end)} · grouped by vehicle type · the tick marks each type's median` })}
         ${running(end)}
       </section>
 
@@ -154,7 +161,6 @@ AD.views['cost-sheet'] = (function () {
     el.querySelector('#w-this').onclick = () => go(thisWeek);
     el.querySelector('#w-jump').onchange = (e) => { if (e.target.value) go(mondayOf(e.target.value)); };
     el.querySelectorAll('[data-period]').forEach((b) => (b.onclick = () => setPeriod(b.dataset.period)));
-    el.querySelectorAll('tr[data-veh]').forEach((tr) => tr.addEventListener('click', () => AD.go('vehicle/' + tr.dataset.veh)));
   }
 
   function go(week) {
@@ -334,40 +340,47 @@ AD.views['cost-sheet'] = (function () {
     </figure>`;
   }
 
-  /** The sheet itself: a line per vehicle that cost something this week or in the baseline weeks. */
-  function sheet(now, base) {
+  /**
+   * The few vehicles whose spend moved furthest from their own weekly average —
+   * the ones that explain the headline figure. A vehicle that didn't move says
+   * nothing, so it stays out of the chart and only appears in the table view.
+   */
+  function movers(now, base) {
     const baseIds = base.flatMap((w) => w.rows.map((r) => r.vehicleId));
     const ids = [...new Set(now.map((r) => r.vehicleId).concat(baseIds))];
-    if (!ids.length) return '<p class="empty">Nothing recorded.</p>';
     const lines = ids.map((id) => {
       const mine = now.filter((r) => r.vehicleId === id);
       const a = sum(mine);
       const b = avgOf(base.map((w) => sum(w.rows.filter((r) => r.vehicleId === id))));
       return { id, a, b, change: a - b, jobs: mine.length };
     }).sort((x, y) => y.change - x.change);
-    const totals = lines.reduce((t, r) => ({ a: t.a + r.a, b: t.b + r.b, jobs: t.jobs + r.jobs }), { a: 0, b: 0, jobs: 0 });
-    const maxChange = Math.max(...lines.map((r) => Math.abs(r.change)), 1);
+    const net = lines.reduce((n, r) => n + r.change, 0);
+    const movedAll = lines.filter((r) => Math.abs(r.change) >= 1);
+    const moved = [...movedAll].sort((x, y) => Math.abs(y.change) - Math.abs(x.change))
+      .slice(0, MOVERS_MAX).sort((x, y) => y.change - x.change);
+    const maxChange = Math.max(...moved.map((r) => Math.abs(r.change)), 1);
 
-    /** A diverging bar centred on zero — red growing right (spend up), green growing left (spend down). */
-    const divBar = (n) => {
-      const pct = (Math.min(Math.abs(n), maxChange) / maxChange) * 50;
-      if (pct < 0.5) return '<span class="cs-divbar"></span>';
-      const side = n > 0 ? `left:50%;width:${pct}%;background:var(--red)` : `right:50%;width:${pct}%;background:var(--green)`;
-      return `<span class="cs-divbar"><i class="${n > 0 ? 'cs-up' : 'cs-down'}" style="${side}"></i></span>`;
-    };
+    const rows = moved.map((r, i) => {
+      const up = r.change > 0;
+      const pct = (Math.abs(r.change) / maxChange) * 50;
+      return `<a class="cs-row" href="${vehHref(r.id)}" style="--i:${i}" ${V.tipAttr(r.id, [
+        ['This week', L.fmtAUD(r.a), up ? 'var(--red)' : 'var(--green)'],
+        [`${AVG_WEEKS}-week average`, L.fmtAUD(r.b), 'var(--muted)']
+      ])}>
+        <span class="id">${esc(r.id)}</span>
+        <span class="cs-hbar cs-diverge"><i class="${up ? 'cs-up' : 'cs-down'}" style="${up ? 'left' : 'right'}:50%;width:${pct}%"></i></span>
+        <span class="cs-row-val ${changeTone(r.change)}">${fmtChange(r.change)}</span>
+        <span class="cs-row-meta">${L.fmtAUD(r.a)} this week · ${L.fmtAUD(r.b)} average${r.jobs ? ` · ${r.jobs} job${r.jobs === 1 ? '' : 's'}` : ''}</span>
+      </a>`;
+    }).join('');
 
-    return `<div class="table-wrap"><table class="data cs-table">
-      <thead><tr><th>Vehicle</th><th class="num">Jobs</th><th class="num">This week</th><th class="num">Weekly average</th><th class="num">Change</th></tr></thead>
-      <tbody>${lines.map((r) => `<tr class="row-link" data-veh="${esc(r.id)}" title="Open ${esc(r.id)}">
-        <td><span class="id">${esc(r.id)}</span></td>
-        <td class="num">${r.jobs || '—'}</td>
-        <td class="num">${r.a ? L.fmtAUD(r.a) : '—'}</td>
-        <td class="num">${r.b >= 0.005 ? L.fmtAUD(r.b) : '—'}</td>
-        <td class="num cs-change-cell"><span class="cs-change ${changeTone(r.change)}">${fmtChange(r.change)}</span>${divBar(r.change)}</td>
-      </tr>`).join('')}</tbody>
-      <tfoot><tr><th>Fleet total</th><th class="num">${totals.jobs}</th><th class="num">${L.fmtAUD(totals.a)}</th><th class="num">${L.fmtAUD(totals.b)}</th>
-        <th class="num cs-change ${changeTone(totals.a - totals.b)}">${fmtChange(totals.a - totals.b)}</th></tr></tfoot>
-    </table></div>`;
+    return `<figure class="viz-card">
+      <figcaption><h3>What moved this week</h3><span class="viz-sub">Each vehicle against its own ${AVG_WEEKS}-week average · fleet ${Math.abs(net) < 0.005 ? 'unchanged' : fmtChange(net)} overall</span></figcaption>
+      ${rows ? `<div class="cs-rows">${rows}</div>` : '<p class="empty">No vehicle’s spend moved against its average this week.</p>'}
+      ${movedAll.length > moved.length ? `<p class="cs-more">${movedAll.length - moved.length} more moved by less — open the table to see them.</p>` : ''}
+      ${lines.length ? V.table(['Vehicle', 'Jobs', 'This week', `${AVG_WEEKS}-week average`, 'Change'],
+        lines.map((r) => [r.id, String(r.jobs), L.fmtAUD(r.a), L.fmtAUD(r.b), fmtChange(r.change)])) : ''}
+    </figure>`;
   }
 
   /**
@@ -389,26 +402,52 @@ AD.views['cost-sheet'] = (function () {
       const reads = mine.map((r) => Number(byHours ? r.hours : r.odometer)).filter((n) => Number.isFinite(n) && n > 0);
       const span = reads.length > 1 ? Math.max(...reads) - Math.min(...reads) : 0;
       const total = sum(mine);
-      return { id, total, jobs: mine.length, span, byHours, type: v ? v.type : '', rate: span > 0 ? total / span : null };
-    }).sort((a, b) => b.total - a.total);
+      return { id, total, jobs: mine.length, span, byHours, type: v ? v.type : 'Not in the fleet list', rate: span > 0 ? total / span : null };
+    });
+    const unit = (r) => (r.byHours ? 'hr' : 'km');
+    const covered = (r) => (r.byHours ? L.fmtHours(r.span) : L.fmtKm(r.span));
 
-    const shown = lines.slice(0, RUN_MAX);
-    const maxSpend = Math.max(...shown.map((r) => r.total), 1);
-    const rated = (r) => r.rate == null ? '<span class="muted">—</span>'
-      : `${L.fmtAUD(r.rate)}<span class="cs-rate-unit">/${r.byHours ? 'hr' : 'km'}</span>`;
+    // Rates only compare fairly within a type: an excavator per engine hour and a
+    // ute per kilometre aren't on the same scale, and even two per-km classes
+    // differ by an order of magnitude. Each type gets its own card and its own bar scale.
+    const rated = lines.filter((r) => r.rate != null);
+    const groups = [...new Set(rated.map((r) => r.type))].map((type) => {
+      const mine = rated.filter((r) => r.type === type).sort((a, b) => b.rate - a.rate);
+      return { type, lines: mine, byHours: mine[0].byHours, mid: median(mine.map((r) => r.rate)), spend: mine.reduce((n, r) => n + r.total, 0) };
+    }).sort((a, b) => b.spend - a.spend);
 
-    return `<div class="table-wrap"><table class="data cs-table">
-      <thead><tr><th>Vehicle</th><th class="col-opt">Type</th><th class="num">Jobs</th><th class="num">Spend</th><th class="num">Covered</th><th class="num">Running cost</th></tr></thead>
-      <tbody>${shown.map((r) => `<tr class="row-link" data-veh="${esc(r.id)}" title="Open ${esc(r.id)}">
-        <td><span class="id">${esc(r.id)}</span></td>
-        <td class="col-opt">${esc(r.type) || '<span class="muted">Not in the fleet list</span>'}</td>
-        <td class="num">${r.jobs}</td>
-        <td class="num cs-spend-cell"><span>${L.fmtAUD(r.total)}</span><span class="cs-bar"><i style="width:${(r.total / maxSpend) * 100}%"></i></span></td>
-        <td class="num">${r.span > 0 ? (r.byHours ? L.fmtHours(r.span) : L.fmtKm(r.span)) : '<span class="muted">—</span>'}</td>
-        <td class="num">${rated(r)}</td>
-      </tr>`).join('')}</tbody>
-    </table></div>
-    ${lines.length > RUN_MAX ? `<p class="section-foot muted small">Showing the ${RUN_MAX} dearest of ${lines.length} vehicles with costs in this window.</p>` : ''}`;
+    const card = (g) => {
+      const top = Math.max(...g.lines.map((r) => r.rate));
+      // A median of one or two vehicles is just those vehicles; don't flag against it.
+      const judge = g.lines.length >= 3;
+      const shown = g.lines.slice(0, RUN_PER_GROUP);
+      return `<article class="cs-rc-group">
+        <header><h3>${esc(g.type)}</h3><span class="viz-sub">Per ${g.byHours ? 'engine hour' : 'kilometre'} · median ${fmtRate(g.mid)}/${unit(g)} · ${g.lines.length} vehicle${g.lines.length === 1 ? '' : 's'}</span></header>
+        <div class="cs-rows">${shown.map((r, i) => {
+          const over = g.mid ? (r.rate - g.mid) / g.mid : 0;
+          const high = judge && over > 0.25;
+          return `<a class="cs-row" href="${vehHref(r.id)}" style="--i:${i}">
+            <span class="id">${esc(r.id)}</span>
+            <span class="cs-hbar"><i${high ? ' class="cs-high"' : ''} style="width:${(r.rate / top) * 100}%"></i>${g.lines.length > 1 ? `<b class="cs-median" style="left:${(g.mid / top) * 100}%"></b>` : ''}</span>
+            <span class="cs-row-val">${fmtRate(r.rate)}<small>/${unit(r)}</small></span>
+            <span class="cs-row-meta">${high ? `<span class="cs-flag">${Math.round(over * 100)}% above median</span> · ` : ''}${L.fmtAUD(r.total)} over ${covered(r)} · ${r.jobs} job${r.jobs === 1 ? '' : 's'}</span>
+          </a>`;
+        }).join('')}</div>
+        ${g.lines.length > shown.length ? `<p class="cs-more">${g.lines.length - shown.length} more in the table below.</p>` : ''}
+      </article>`;
+    };
+
+    const unrated = lines.filter((r) => r.rate == null).sort((a, b) => b.total - a.total);
+    const noRate = unrated.length ? `<p class="cs-norate"><b>No rate yet for ${unrated.length} vehicle${unrated.length === 1 ? '' : 's'}.</b>
+      A rate needs at least two services with ${unrated.some((r) => r.byHours) ? 'meter' : 'odometer'} readings in this window:
+      ${unrated.slice(0, 12).map((r) => `<a href="${vehHref(r.id)}">${esc(r.id)}</a>`).join(', ')}${unrated.length > 12 ? ` and ${unrated.length - 12} more` : ''}.</p>` : '';
+
+    const tableRows = [...lines].sort((a, b) => a.type.localeCompare(b.type) || (b.rate || 0) - (a.rate || 0))
+      .map((r) => [r.id, r.type, String(r.jobs), L.fmtAUD(r.total), r.span > 0 ? covered(r) : '—', r.rate != null ? `${fmtRate(r.rate)}/${unit(r)}` : '—']);
+
+    return `${groups.length ? `<div class="cs-rc-grid">${groups.map(card).join('')}</div>` : ''}
+      ${noRate}
+      ${V.table(['Vehicle', 'Type', 'Jobs', 'Spend', 'Covered', 'Running cost'], tableRows)}`;
   }
 
   return { title: 'Cost sheet', render, refresh: () => root && draw() };

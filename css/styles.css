@@ -1339,8 +1339,7 @@ input[type=text], input[type=number], input[type=date], input[type=datetime-loca
 .cs-delta { color: var(--muted); font-size: 12px; }
 .cs-delta-worse { color: var(--red); }
 .cs-delta-better { color: var(--green); }
-.cs-change { font-variant-numeric: tabular-nums; }
-/* Short day labels, and room for a currency figure the shared .hb-val can't hold. */
+/* Short month labels, and room for a currency figure the shared .hb-val can't hold. */
 .cs-months .hb-row { cursor: default; grid-template-columns: 60px minmax(0, 1fr) 116px; }
 /* One bar per month, planned then unplanned, with a 2px surface gap so the two
    segments stay legible where one of them is thin. */
@@ -1350,21 +1349,45 @@ input[type=text], input[type=number], input[type=date], input[type=datetime-loca
 @media (max-width: 900px) { .cs-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 520px) { .cs-kpis { grid-template-columns: 1fr; } }
 
-/* By-vehicle change: a zero-centred bar under the figure, red growing right, green left. */
-/* Middle-align all cells so the mini-bars and stacked text don't push numbers to the top of taller rows. */
-.cs-table td { vertical-align: middle; }
-.cs-change-cell, .cs-spend-cell { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
-/* "per hr / per km" stays on the same line as the rate so rows without a rate (—) have the same height. */
-.cs-rate-unit { color: var(--muted); font-size: 12px; margin-left: 3px; white-space: nowrap; }
-.cs-divbar { position: relative; width: 100%; max-width: 110px; height: 5px; }
-.cs-divbar::before { content: ''; position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--rule-strong); }
-.cs-divbar i { position: absolute; top: 0; height: 100%; border-radius: 3px; }
-/* Each half grows out of the centre line, so the two sides mirror rather than both running left. */
-.cs-divbar i.cs-up { transform-origin: left; }
-.cs-divbar i.cs-down { transform-origin: right; }
-/* Running-cost spend: plain magnitude, one hue, dearest row sets the scale. */
-.cs-bar { position: relative; width: 100%; max-width: 110px; height: 5px; background: var(--rule); border-radius: 3px; overflow: hidden; }
-.cs-bar i { display: block; height: 100%; border-radius: 3px; background: var(--mint); }
+/* Month by month and What moved sit side by side, so a wide screen isn't two
+   thin columns of bars stretched across 1600px of empty card. */
+.cs-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; margin-bottom: 40px; }
+@media (max-width: 1000px) { .cs-pair { grid-template-columns: minmax(0, 1fr); } }
+
+/* Shared bar rows for What moved and Running cost: name, bar, figure, and a
+   muted line of context under the bar. The whole row is the link to the vehicle. */
+.cs-rows { display: grid; gap: 2px; margin-top: 12px; }
+.cs-row {
+  display: grid; grid-template-columns: 76px minmax(0, 1fr) auto; column-gap: 14px; row-gap: 4px; align-items: center;
+  padding: 8px; border-radius: 8px; color: var(--ink); text-decoration: none;
+}
+.cs-row:hover, .cs-row:focus-visible { background: var(--hover); text-decoration: none; }
+.cs-row .id { grid-row: 1 / span 2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cs-row-val { font-size: 15px; font-weight: 700; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.cs-row-val small { margin-left: 2px; font-size: 12px; font-weight: 500; color: var(--muted); }
+.cs-row-meta { grid-column: 2 / -1; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.cs-flag { color: var(--amber); font-weight: 600; }
+.cs-more { margin: 8px 8px 0; font-size: 12.5px; color: var(--muted); }
+
+.cs-hbar { position: relative; height: 10px; border-radius: 5px; background: var(--viz-free); }
+.cs-hbar i { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 5px; background: var(--mint); }
+.cs-hbar i.cs-high { background: var(--amber); }
+/* The type median: a tick through the track, so above/below reads without a number. */
+.cs-median { position: absolute; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; border-radius: 1px; background: var(--ink-2); }
+/* Change is zero-centred: red grows right of the centre line (spend up), green left (down). */
+.cs-diverge::before { content: ''; position: absolute; left: 50%; top: -4px; bottom: -4px; width: 1px; background: var(--rule-strong); }
+.cs-diverge i { left: auto; }
+.cs-diverge i.cs-up { background: var(--red); }
+.cs-diverge i.cs-down { background: var(--green); }
+
+/* Running cost: one card per vehicle type, each on its own scale. */
+.cs-rc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 440px), 1fr)); gap: 16px; align-items: start; }
+.cs-rc-group { padding: 16px 12px 12px; background: var(--paper); border: 1px solid var(--rule); border-radius: var(--r-lg); }
+.cs-rc-group header { display: flex; flex-direction: column; gap: 2px; padding: 0 8px; }
+.cs-rc-group h3 { font-size: 16px; }
+.cs-norate { margin-top: 16px; padding: 12px 16px; border: 1px dashed var(--rule-strong); border-radius: var(--r-lg); font-size: 13.5px; color: var(--muted); }
+.cs-norate b { color: var(--ink); }
+.cs-norate a { color: var(--ink); font-weight: 600; }
 
 /* Spend-over-time line chart */
 .cs-period { margin-bottom: 2px; }
@@ -2434,8 +2457,13 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 .anim-in .cs-band { animation: fade .6s ease .35s backwards; }
 .anim-in .cs-mark { animation: fade .3s ease backwards; animation-delay: calc(.15s + var(--i, 0) * .06s); }
 /* Magnitude bars in the two tables fill from their own baseline. */
-.anim-in .cs-bar i, .anim-in .cs-divbar i { animation: grow-x .55s cubic-bezier(.2,.75,.3,1) .12s backwards; }
-.anim-in .cs-bar i { transform-origin: left; }
+.anim-in .cs-hbar i {
+  transform-origin: left;
+  animation: grow-x .55s cubic-bezier(.2,.75,.3,1) backwards;
+  animation-delay: calc(.12s + var(--i, 0) * .04s);
+}
+/* A decrease grows leftwards out of the centre line, mirroring an increase. */
+.anim-in .cs-hbar i.cs-down { transform-origin: right; }
 
 /* Ranked legends follow their chart in */
 .anim-in .rev-legend li { animation: rise .4s ease backwards; }
