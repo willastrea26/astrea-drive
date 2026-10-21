@@ -162,7 +162,7 @@ AD.views['cost-sheet'] = (function () {
     const perWeek = base.map((w) => byDay(w.rows, w.from));
     const b = Array.from({ length: 7 }, (_, i) => avgOf(perWeek.map((week) => week[i])));
     const top = Math.max(...a, ...b, 1);
-    const COLOR_NOW = 'var(--viz-confirmed)', COLOR_AVG = 'var(--viz-free-key)';
+    const COLOR_NOW = 'var(--mint)', COLOR_AVG = 'var(--viz-free-key)';
     const rows = a.map((v, i) => `
       <div class="hb-row" ${V.tipAttr(T.DOW[i], [['This week', L.fmtAUD(v), COLOR_NOW], [`${AVG_WEEKS}-week average`, L.fmtAUD(b[i]), COLOR_AVG]])}>
         <span class="hb-label">${T.DOW[i]}</span>
