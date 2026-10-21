@@ -275,14 +275,6 @@ AD.views.dashboard = (function () {
     </svg>`;
   }
 
-  function segBar(parts) {
-    const live = parts.filter(p => p.value);
-    const desc = live.map(p => `${p.value} ${p.label}`).join(', ');
-    return `<div class="kpi-seg" role="img" aria-label="${esc(desc)}">${live.map(p =>
-      `<span style="flex:${p.value};background:${p.color}" title="${esc(p.label)}: ${p.value}"></span>`
-    ).join('')}</div>`;
-  }
-
   function trendTag(pct, label) {
     if (pct === 0) return `<span class="kpi-trend kpi-trend-flat"><b>—</b> ${esc(label)}</span>`;
     const arrow = pct > 0 ? '↑' : '↓';
@@ -371,15 +363,6 @@ AD.views.dashboard = (function () {
 
     const V = AD.viz;
 
-    /** Standard KPI card: icon + title row, headline number, chart, optional footer. */
-    const card = ({ go, icon, label, value, viz, foot }) => `
-      <button class="strip-item" data-go='${JSON.stringify(go)}'>
-        <div class="kpi-top">${icon}<span class="kpi-title">${esc(label)}</span><span class="kpi-chev">${I.chevR}</span></div>
-        <span class="v">${value}</span>
-        <div class="kpi-viz">${viz}</div>
-        ${foot ? `<span class="kpi-foot">${foot}</span>` : ''}
-      </button>`;
-
     /** Donut card: icon + title row, ring on the left, breakdown right, trend across the foot. */
     const donutCard = ({ go, icon, label, ring, legend, foot }) => `
       <button class="strip-item kpi-card-ring" data-go='${JSON.stringify(go)}'>
@@ -447,17 +430,14 @@ AD.views.dashboard = (function () {
     fresh = false;
 
     el.innerHTML = `
+      ${insightsBand(facts({ vehicles, vac, svc, rego, defects, today }))}
+
       <div class="strip" role="group" aria-label="Fleet summary">
-        ${card({
-          go: ['fleet', {}], icon: kpiIco(I.truck, 'blue'), label: 'Total fleet', value: vehicles.length,
-          viz: segBar(byStatus) + legendGrid(byStatus),
-          foot: `${vac.length} vac trucks · ${vehicles.length - vac.length} other vehicles`
-        })}
         ${donutCard({
-          go: ['fleet', { status: 'Available' }], icon: kpiIco(I.checkCircle, 'green'), label: 'Availability',
+          go: ['fleet', {}], icon: kpiIco(I.truck, 'blue'), label: 'Fleet availability',
           ring: donutRing(byStatus, `${Math.round((available.length / (vehicles.length || 1)) * 100)}%`, 'available'),
-          legend: legendGrid(byStatus.filter(p => p.value), 'kpi-legend-stack'),
-          foot: trendTag(utilTrend, 'vs last week')
+          legend: legendGrid(byStatus, 'kpi-legend-stack'),
+          foot: `<span class="kpi-footline">${vehicles.length} vehicles · ${vac.length} vac trucks</span>${trendTag(utilTrend, 'vs last week')}`
         })}
         ${donutCard({
           go: ['maintenance', { filter: 'due' }],
@@ -478,8 +458,6 @@ AD.views.dashboard = (function () {
             : regoHealth.soon ? `<span class="flag flag-amber">${regoHealth.soon} within 2 weeks</span>` : 'All current'
         })}
       </div>
-
-      ${insightsBand(facts({ vehicles, vac, svc, rego, defects, today }))}
 
       <section class="section" aria-labelledby="sched-h">
         ${schedule(ownedScheduleVac, today)}
