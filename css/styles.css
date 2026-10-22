@@ -1415,9 +1415,6 @@ input[type=text], input[type=number], input[type=date], input[type=datetime-loca
 
 /* Projected segment — purple with glow */
 .cs-proj-g .cs-line-path { stroke: var(--violet); stroke-dasharray: 6 4; opacity: .9; filter: url(#cs-glow-violet); }
-.cs-proj-g .cs-line-planned { stroke: var(--violet); stroke-dasharray: 4 3; opacity: .6; filter: url(#cs-glow-violet); }
-.cs-proj-g .cs-area { fill: url(#cs-proj-area-grad); opacity: .7; }
-.cs-proj-g .cs-band { fill: url(#cs-proj-area-grad); opacity: .5; }
 .cs-now-line { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; opacity: .4; }
 .cs-now-label { font-size: 9.5px; fill: var(--muted); font-family: var(--font); text-transform: uppercase; letter-spacing: .6px; opacity: .6; }
 .cs-proj-label { opacity: .5; }
@@ -2568,8 +2565,7 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 .anim-in .cs-mark { animation: fade .35s ease backwards; animation-delay: calc(.2s + var(--i, 0) * .05s); }
 /* Projected segment reveals left-to-right after actuals finish — clip-path keeps the dashes intact */
 .anim-in .cs-proj-g { animation: reveal-right .9s cubic-bezier(.22,.61,.36,1) 1.1s backwards; }
-.anim-in .cs-proj-g .cs-line-path,
-.anim-in .cs-proj-g .cs-line-planned { stroke-dasharray: 6 4; animation: none; }
+.anim-in .cs-proj-g .cs-line-path { stroke-dasharray: 6 4; animation: none; }
 /* "Now" marker fades in at the handoff */
 .anim-in .cs-now-line, .anim-in .cs-now-label { animation: fade .35s cubic-bezier(.22,.61,.36,1) 1.05s backwards; }
 /* Projected dots stagger after the line reaches them */

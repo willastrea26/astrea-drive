@@ -367,7 +367,6 @@ AD.views['cost-sheet'] = (function () {
             <path d="${lineD}" class="cs-line-path" pathLength="1"></path>
           </g>
           <g clip-path="url(#cs-proj-clip)" class="cs-proj-g">
-            <path d="${areaD}" class="cs-area"></path>
             <path d="${lineD}" class="cs-line-path" pathLength="1"></path>
           </g>
           ${nowMarker}
