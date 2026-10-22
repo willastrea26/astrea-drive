@@ -35,21 +35,31 @@ AD.fleetReport = (function () {
   const FONT_BODY = 'Calibri';
 
   // Lazy loader for ExcelJS — ~900KB, no point blocking page load.
+  let excelPromise;
   function loadExcelJS() {
-    return new Promise((resolve, reject) => {
+    if (excelPromise) return excelPromise;
+    excelPromise = new Promise((resolve, reject) => {
       if (window.ExcelJS) return resolve(window.ExcelJS);
       const s = document.createElement('script');
+      const fail = () => { clearTimeout(timer); s.remove(); reject(new Error('Could not load the Excel engine. Please try again.')); };
+      const timer = setTimeout(fail, 20000);
       s.src = 'https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js';
-      s.onload = () => resolve(window.ExcelJS);
-      s.onerror = () => reject(new Error('Failed to load ExcelJS'));
+      s.onload = () => {
+        if (!window.ExcelJS) return fail();
+        clearTimeout(timer);
+        resolve(window.ExcelJS);
+      };
+      s.onerror = fail;
       document.head.appendChild(s);
-    });
+    }).catch((err) => { excelPromise = null; throw err; });
+    return excelPromise;
   }
 
   // Fetch the horizontal Astrea mark for the cover sheet.
   async function loadLogo() {
     try {
-      const r = await fetch('assets/logo-horizontal-navy.png');
+      const r = await fetch('assets/logo-horizontal-navy.png', { signal: AbortSignal.timeout(15000) });
+      if (!r.ok) return null;
       return await r.arrayBuffer();
     } catch (e) { return null; }
   }
@@ -57,12 +67,23 @@ AD.fleetReport = (function () {
   /* ------------------------------------------------------------------ data
    * One pass over the stores so every sheet works from the same snapshot.
    */
-  function gather() {
+  function gather(monthKey) {
     const today = T.todayKey();
-    const p = T.parts(Date.now());
-    const vehicles = AD.store.all('vehicles');
-    const services = AD.store.all('services');
+    const current = T.parts(Date.now());
+    const selected = monthKey || today.slice(0, 7);
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(selected) || selected > today.slice(0, 7)) {
+      throw new Error('Choose a valid reporting month that is not in the future.');
+    }
+    const [year, month] = selected.split('-').map(Number);
+    const monthEnd = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
+    const reportEnd = monthEnd < today ? monthEnd : today;
+    const p = { ...current, year, month, day: Number(reportEnd.slice(8)) };
+    const isPartial = reportEnd < monthEnd;
+    const vehicles = AD.store.all('vehicles').map((v) => ({ ...v, nextServiceDate: v.nextServiceDate || '', regoExpiry: v.regoExpiry || '' }));
+    const services = AD.store.all('services').filter((s) => s.date && s.date <= reportEnd);
     const defects  = AD.store.all('defects');
+    const resolved = defects.filter((d) => d.status === 'Resolved' && d.resolvedDate && d.resolvedDate <= reportEnd);
+    const cost = (value) => Number.isFinite(Number(value)) ? Number(value) : 0;
 
     // Twelve calendar months ending with the current one.
     const months = Array.from({ length: 12 }, (_, i) => {
@@ -73,9 +94,9 @@ AD.fleetReport = (function () {
 
     months.forEach((mo) => {
       const svc = services.filter((s) => (s.date || '').slice(0, 7) === mo.key);
-      const def = defects.filter((d) => d.status === 'Resolved' && (d.resolvedDate || '').slice(0, 7) === mo.key);
-      mo.planned   = svc.reduce((t, s) => t + Number(s.cost || 0), 0);
-      mo.unplanned = def.reduce((t, d) => t + Number(d.cost || 0), 0);
+      const def = resolved.filter((d) => d.resolvedDate.slice(0, 7) === mo.key);
+      mo.planned   = svc.reduce((t, s) => t + cost(s.cost), 0);
+      mo.unplanned = def.reduce((t, d) => t + cost(d.cost), 0);
       mo.total     = mo.planned + mo.unplanned;
       mo.svcCount  = svc.length;
       mo.defCount  = def.length;
@@ -112,11 +133,15 @@ AD.fleetReport = (function () {
     const regoState = vehicles.map((v) => ({ v, r: L.regoState(v) }));
     const SOON = 14;
     const svcOverdue = svcState.filter((x) => x.s.state === 'overdue');
-    const svcSoon    = svcState.filter((x) => x.s.state !== 'overdue' && (x.s.daysLeft <= SOON || x.s.kmLeft <= 500));
+    const svcSoon    = svcState.filter((x) => x.s.state !== 'overdue' && (
+      (x.s.triggers.date && x.s.daysLeft <= SOON) ||
+      (x.s.triggers.km && x.s.kmLeft <= 500) ||
+      (x.s.triggers.hours && x.s.hoursLeft <= 25)));
     const svcOk      = svcState.filter((x) => !svcOverdue.includes(x) && !svcSoon.includes(x));
     const regoExp    = regoState.filter((x) => x.r.state === 'overdue');
     const regoSoon   = regoState.filter((x) => x.r.state !== 'overdue' && x.r.days <= SOON);
-    const regoOk     = regoState.filter((x) => !regoExp.includes(x) && !regoSoon.includes(x));
+    const regoUnknown = regoState.filter((x) => !Number.isFinite(x.r.days));
+    const regoOk     = regoState.filter((x) => !regoExp.includes(x) && !regoSoon.includes(x) && !regoUnknown.includes(x));
 
     const openDefects = defects.filter((d) => d.status !== 'Resolved');
     const defByPri = (p) => openDefects.filter((d) => d.priority === p).length;
@@ -129,24 +154,176 @@ AD.fleetReport = (function () {
       'Out of service': vehicles.filter((v) => v.status === 'Out of service').length
     };
     const availabilityPct = vehicles.length ? statusCounts['Available'] / vehicles.length : 0;
+    const unknownStatus = vehicles.length - Object.values(statusCounts).reduce((a, b) => a + b, 0);
 
-    return {
-      today, now: p,
+    /* ---- month-on-month, for the statistics pages ---- */
+    const prevMonth = months[10];
+    const momPct = prevMonth && prevMonth.total > 0
+      ? (curMonth.total - prevMonth.total) / prevMonth.total : null;
+    const vsAvgPct = mtdExpected > 0 ? (curMonth.total - mtdExpected) / mtdExpected : null;
+    const unplannedShare = curMonth.total > 0 ? curMonth.unplanned / curMonth.total : 0;
+    const unplannedShare12 = annualTotal > 0
+      ? months.reduce((t, m) => t + m.unplanned, 0) / annualTotal : 0;
+
+    // Defects raised and resolved inside the current month.
+    const curKey = curMonth.key;
+    const defRaisedMonth = defects.filter((d) => (d.reportedDate || '').slice(0, 7) === curKey && d.reportedDate <= reportEnd);
+    const defResolvedMonth = resolved.filter((d) => d.resolvedDate.slice(0, 7) === curKey);
+    // Mean days to resolve, for those resolved this month that record both dates.
+    const resolveDays = defResolvedMonth
+      .map((d) => (d.reportedDate && d.resolvedDate) ? T.daysBetween(d.reportedDate, d.resolvedDate) : null)
+      .filter((n) => Number.isFinite(n) && n >= 0);
+    const avgResolveDays = resolveDays.length
+      ? resolveDays.reduce((t, n) => t + n, 0) / resolveDays.length : null;
+
+    // Spend per vehicle this month, highest first.
+    const perVehicleMonth = new Map();
+    const tallyMonth = (id, n) => { if (id) perVehicleMonth.set(id, (perVehicleMonth.get(id) || 0) + n); };
+    services.filter((s) => (s.date || '').slice(0, 7) === curKey)
+      .forEach((s) => tallyMonth(s.vehicleId, cost(s.cost)));
+    defResolvedMonth.forEach((d) => tallyMonth(d.vehicleId, cost(d.cost)));
+    const topSpenders = [...perVehicleMonth.entries()]
+      .map(([id, cost]) => ({ id, cost, v: vehicles.find((v) => v.id === id) || null }))
+      .sort((a, b) => b.cost - a.cost).slice(0, 6);
+    const vehiclesCharged = perVehicleMonth.size;
+    // Share of the month carried by the single dearest vehicle.
+    const topShare = curMonth.total > 0 && topSpenders.length
+      ? topSpenders[0].cost / curMonth.total : 0;
+
+    // Fleet split by type, for the composition chart.
+    const typeList = [...new Set(vehicles.map((v) => v.type || 'Unspecified'))];
+    const byType = typeList
+      .map((t) => ({ type: t, count: vehicles.filter((v) => (v.type || 'Unspecified') === t).length }))
+      .filter((x) => x.count).sort((a, b) => b.count - a.count);
+
+    // Plant that has not been booked for a while.
+    const IDLE_MIN = 10;
+    let idle = [];
+    try {
+      idle = vehicles.map((v) => {
+        const bs = (L.bookingsFor ? L.bookingsFor(v.id) : []).filter((x) => x.status !== 'cancelled');
+        if (!bs.length) return null;
+        const last = Math.max(...bs.map((x) => Date.parse(x.end)));
+        if (!Number.isFinite(last) || last > Date.now()) return null;
+        return { v, days: T.daysBetween(T.dateKey(last), today) };
+      }).filter((x) => x && x.days >= IDLE_MIN).sort((a, b) => b.days - a.days);
+    } catch (e) { idle = []; }
+
+    const data = {
+      today, now: p, reportEnd, isPartial,
       vehicles,
-      months, curMonth,
+      months, curMonth, prevMonth,
       monthlyTarget, annualTotal, annualTarget: monthlyTarget * 12,
       mtdActual, mtdExpected, mtdVariance, daysInMonth, dayOfMonth,
       ytdActual, ytdExpected, ytdVariance, monthsElapsedFull,
-      projectedYearEnd, projectedRemaining,
+      projectedYearEnd, projectedRemaining, runRateMonthly,
       svcOverdue, svcSoon, svcOk,
-      regoExp, regoSoon, regoOk,
+      regoExp, regoSoon, regoOk, regoUnknown,
       openDefects,
       defCounts: {
         Critical: defByPri('Critical'), High: defByPri('High'),
         Medium: defByPri('Medium'),     Low: defByPri('Low')
       },
-      statusCounts, availabilityPct
+      statusCounts, availabilityPct, unknownStatus,
+      momPct, vsAvgPct, unplannedShare, unplannedShare12,
+      defRaisedMonth, defResolvedMonth, avgResolveDays,
+      topSpenders, vehiclesCharged, topShare, byType, idle
     };
+    data.recommendations = recommend(data);
+    return data;
+  }
+
+  /* ---------------------------------------------------------- recommendations
+   * Derived from the figures above by rule, not by a language model — each one
+   * states what the data shows and what to do about it. Ordered by weight so
+   * the most consequential leads. Every generator stays silent when it has
+   * nothing to say, and the closing entries make sure the list is never empty.
+   */
+  function recommend(d) {
+    const out = [];
+    const add = (weight, priority, title, finding, action) =>
+      out.push({ weight, priority, title, finding, action });
+    const s = (n) => (n === 1 ? '' : 's');
+    const pct = (x) => Math.round(Math.abs(x) * 100) + '%';
+    const names = (list, n = 3) => list.slice(0, n).map((x) => x.v ? x.v.id : x.id).join(', ')
+      + (list.length > n ? ` and ${list.length - n} more` : '');
+
+    if (!d.vehicles.length && !d.annualTotal && !d.openDefects.length) {
+      add(100, 'Low', 'Build a reporting baseline',
+        'No fleet, cost or open-defect records are available in this snapshot.',
+        'Add vehicles and check that service and defect records are up to date before using this report for decisions.');
+      return out;
+    }
+
+    if (d.regoExp.length) add(100, 'High', 'Return expired registrations to compliance',
+      `${d.regoExp.length} vehicle${s(d.regoExp.length)} ${d.regoExp.length === 1 ? 'is' : 'are'} on an expired registration — ${names(d.regoExp)}.`,
+      'Confirm the expiry records and renewal status with the fleet manager before allocating these vehicles to road work.');
+
+    if (d.defCounts.Critical) add(96, 'High', 'Clear the open critical defects',
+      `${d.defCounts.Critical} critical defect${s(d.defCounts.Critical)} ${d.defCounts.Critical === 1 ? 'is' : 'are'} still open.`,
+      'Critical defects are raised as unsafe to operate. Book these into the workshop ahead of scheduled work.');
+
+    if (d.svcOverdue.length) add(92, 'High', 'Catch up the overdue servicing',
+      `${d.svcOverdue.length} vehicle${s(d.svcOverdue.length)} ${d.svcOverdue.length === 1 ? 'has' : 'have'} passed a service limit — ${names(d.svcOverdue)}.`,
+      'Confirm the recorded service limits and schedule overdue work with the workshop, starting with operationally critical vehicles.');
+
+    if (d.regoUnknown.length) add(85, 'Medium', 'Complete missing registration dates',
+      `${d.regoUnknown.length} vehicle${s(d.regoUnknown.length)} have no usable registration expiry date in the report.`,
+      'Check the source records and enter the expiry dates so renewal alerts can be assessed.');
+
+    if (d.unplannedShare >= 0.4 && d.curMonth.total > 0) add(80, 'High', 'Bring the planned/unplanned balance back',
+      `Unplanned repairs were ${pct(d.unplannedShare)} of this month's spend (${aud(d.curMonth.unplanned)} of ${aud(d.curMonth.total)}), against a 12-month norm of ${pct(d.unplannedShare12)}.`,
+      'Review the repair invoices and repeat defects behind this share. Check whether the costs are one-off repairs or a recurring maintenance issue.');
+
+    if (d.vsAvgPct !== null && d.vsAvgPct > 0.15) add(76, 'Medium', 'Spend is running ahead of the baseline',
+      `${T.MONTHS[d.now.month - 1]} spend is ${pct(d.vsAvgPct)} above the ${d.isPartial ? 'day-adjusted' : 'monthly'} baseline (${aud(d.curMonth.total)} against ${aud(d.mtdExpected)}).`,
+      `At the current run rate the year closes near ${aud(d.projectedYearEnd)}, about ${aud(Math.abs(d.projectedYearEnd - d.annualTarget))} ${d.projectedYearEnd > d.annualTarget ? 'over' : 'under'} the rolling baseline. Confirm whether this is timing or a genuine step up.`);
+
+    if (d.topShare >= 0.3 && d.topSpenders.length) add(72, 'Medium', 'Spend is concentrated in one vehicle',
+      `${d.topSpenders[0].id} accounted for ${pct(d.topShare)} of the month's cost (${aud(d.topSpenders[0].cost)}).`,
+      'Where one asset carries this much of the month, it is worth comparing its running cost against replacement or hire for the same duty.');
+
+    if (d.idle.length) add(68, 'Medium', 'Check gaps in recorded bookings',
+      `${d.idle.length} vehicle${s(d.idle.length)} last completed a recorded booking at least 10 days ago. ${d.idle[0].v.id} has the longest gap at ${d.idle[0].days} days as of issue.`,
+      'Confirm whether the booking records are complete, then review upcoming demand and opportunities to redeploy spare vehicles.');
+
+    if (d.regoSoon.length) add(60, 'Medium', 'Registrations falling due shortly',
+      `${d.regoSoon.length} registration${s(d.regoSoon.length)} expire${d.regoSoon.length === 1 ? 's' : ''} within a fortnight.`,
+      'Start renewals now so none slip into the expired column before the next report.');
+
+    if (d.svcSoon.length) add(56, 'Medium', 'Plan the next services',
+      `${d.svcSoon.length} vehicle${s(d.svcSoon.length)} are due within 14 days, 500 km or 25 engine hours on an active service trigger.`,
+      'Book these against quiet days in the schedule rather than letting them fall due mid-job.');
+
+    if (d.statusCounts['Out of service']) add(52, 'Medium', 'Vehicles sitting out of service',
+      `${d.statusCounts['Out of service']} vehicle${s(d.statusCounts['Out of service'])} ${d.statusCounts['Out of service'] === 1 ? 'is' : 'are'} marked out of service.`,
+      'Each one is unavailable capacity. Confirm the return-to-service date or decide whether to replace or dispose.');
+
+    if (d.availabilityPct < 0.6 && d.vehicles.length) add(48, 'Medium', 'Review available fleet capacity',
+      `Only ${pct(d.availabilityPct)} of the fleet is showing as available.`,
+      'Check whether this reflects genuine demand or stale status records — vehicles left marked In use after a job overstate utilisation.');
+
+    if (d.avgResolveDays !== null && d.avgResolveDays > 14) add(44, 'Low', 'Defects are taking a while to close',
+      `Defects resolved this month took ${Math.round(d.avgResolveDays)} days on average.`,
+      'Longer resolution means vehicles spend more of the month degraded. Look at where the time goes — parts, workshop capacity, or approval.');
+
+    if (d.vsAvgPct !== null && d.vsAvgPct < -0.15) add(40, 'Low', 'Spend is running below the baseline',
+      `${T.MONTHS[d.now.month - 1]} spend is ${pct(d.vsAvgPct)} below the ${d.isPartial ? 'day-adjusted' : 'monthly'} baseline.`,
+      'Worth confirming this is genuine saving rather than work recorded late or deferred into next month.');
+
+    // Closing entries so the section always carries something.
+    if (!d.regoExp.length && !d.regoSoon.length && !d.regoUnknown.length && d.vehicles.length) add(20, 'Low', 'Keep registration records complete',
+      'No recorded registration is flagged as expired or due within a fortnight.',
+      'Check that every vehicle has an expiry date recorded and keep renewal reminders up to date.');
+    if (!d.svcOverdue.length) add(19, 'Low', 'Servicing is on schedule',
+      'No vehicle has passed a service limit.',
+      'Verify that service dates and meter readings are complete, then maintain the planned servicing schedule.');
+    if (!d.defCounts.Critical) add(18, 'Low', 'No critical defects outstanding',
+      `${d.openDefects.length} defect${s(d.openDefects.length)} open, none at critical.`,
+      'Continue clearing by priority so none escalate between reports.');
+
+    // Keep the final page focused on the four highest-priority actions.
+    return out.sort((a, b) => b.weight - a.weight).slice(0, 4);
   }
 
   /* ------------------------------------------------------------------ style helpers */
@@ -412,7 +589,7 @@ AD.fleetReport = (function () {
       ['Out of service',                 data.statusCounts['Out of service'], null, 'int'],
       ['Availability',                   data.availabilityPct,              null, 'pct'],
       ['Overdue services',               data.svcOverdue.length,            data.svcOverdue.length ? 'bad' : 'good', 'int'],
-      ['Services due in 2 weeks',        data.svcSoon.length,               data.svcSoon.length ? 'warn' : 'good', 'int'],
+      ['Services due soon (date / km / hours)', data.svcSoon.length,          data.svcSoon.length ? 'warn' : 'good', 'int'],
       ['Expired registrations',          data.regoExp.length,               data.regoExp.length ? 'bad' : 'good', 'int'],
       ['Registrations due in 2 weeks',   data.regoSoon.length,              data.regoSoon.length ? 'warn' : 'good', 'int'],
       ['Open critical defects',          data.defCounts.Critical,           data.defCounts.Critical ? 'bad' : 'good', 'int'],
@@ -598,7 +775,7 @@ AD.fleetReport = (function () {
 
     // Servicing section
     row += 3;
-    sectionBar(ws, row, 'B', 'F', `Servicing (${data.svcOverdue.length} overdue, ${data.svcSoon.length} within 2 weeks)`);
+    sectionBar(ws, row, 'B', 'F', `Servicing (${data.svcOverdue.length} overdue, ${data.svcSoon.length} due soon)`);
     row += 2;
     ['Vehicle', 'Type', 'Status', 'Next service', 'Days / km'].forEach((t, i) => {
       const cell = ws.getCell(row, 2 + i);
@@ -619,11 +796,11 @@ AD.fleetReport = (function () {
         ws.getCell(row, 2).value = x.v.id;    applyStyle(ws.getCell(row, 2), styles.cell);
         ws.getCell(row, 3).value = x.v.type || ''; applyStyle(ws.getCell(row, 3), styles.cell);
         const kind = x.s.state === 'overdue' ? 'bad' : 'warn';
-        ws.getCell(row, 4).value = x.s.state === 'overdue' ? 'Overdue' : 'Within 2 weeks';
+        ws.getCell(row, 4).value = x.s.state === 'overdue' ? 'Overdue' : 'Due soon';
         applyStyle(ws.getCell(row, 4), styles.cell, tone(kind));
         ws.getCell(row, 5).value = x.v.nextServiceDate || ''; applyStyle(ws.getCell(row, 5), styles.cellDate);
         ws.getCell(row, 5).alignment = { ...styles.cellDate.alignment, horizontal: 'right' };
-        const daysKm = x.s.daysLeft >= 0 ? `${x.s.daysLeft} days` : `${-x.s.daysLeft} days over`;
+        const daysKm = x.s.why;
         ws.getCell(row, 6).value = daysKm; applyStyle(ws.getCell(row, 6), styles.cell);
         ws.getCell(row, 6).alignment = { ...styles.cell.alignment, horizontal: 'right', indent: 0 };
         if (i % 2 === 1) [2, 3, 4, 5, 6].forEach((c) => applyStyle(ws.getCell(row, c), styles.zebra));
@@ -730,12 +907,12 @@ AD.fleetReport = (function () {
 
   /* ------------------------------------------------------------------ public */
 
-  async function generate(onProgress) {
+  async function generate(onProgress, options = {}) {
     const notify = (text) => onProgress && onProgress(text);
     notify('Loading Excel engine…');
     const ExcelJS = await loadExcelJS();
     notify('Gathering fleet data…');
-    const data = gather();
+    const data = gather(options.month);
     const logoBuf = await loadLogo();
     notify('Building workbook…');
     const wb = new ExcelJS.Workbook();
@@ -768,5 +945,5 @@ AD.fleetReport = (function () {
     return filename;
   }
 
-  return { generate };
+  return { generate, gather, loadLogo, aud };
 })();

@@ -325,7 +325,7 @@ AD.views.dashboard = (function () {
           </div>
           <div class="hero-wx" id="hero-wx">${wxStrip(AD.weather.cached())}</div>
           <div class="hero-actions">
-            <button type="button" class="btn btn-secondary" id="hero-report-btn" title="Download Fleet Performance Report (Excel)">${I.download} Monthly report</button>
+            <button type="button" class="btn btn-secondary" id="hero-report-btn" title="Download a monthly PDF report or Excel workbook">${I.download} Monthly report</button>
             <a class="btn btn-secondary" href="#/defects?new=1">Report defect</a>
             <a class="btn btn-primary" href="#/calendar?new=1">${I.plus} New booking</a>
           </div>
@@ -339,24 +339,75 @@ AD.views.dashboard = (function () {
     if (reportBtn) reportBtn.addEventListener('click', onReportClick);
   }
 
-  async function onReportClick(e) {
-    const btn = e.currentTarget;
-    if (btn.dataset.busy === '1') return;
-    const originalHtml = btn.innerHTML;
-    btn.dataset.busy = '1';
-    btn.disabled = true;
-    btn.innerHTML = 'Preparing…';
+  /** Format picker, then hand off to whichever builder was chosen. */
+  let reportBusy = false;
+  function onReportClick(e) {
+    if (reportBusy) { AD.ui.toast('Your report is still being prepared.'); return; }
+    const now = T.parts(Date.now());
+    const monthOptions = Array.from({ length: 12 }, (_, i) => {
+      const d = new Date(Date.UTC(now.year, now.month - 1 - i, 1));
+      const key = d.toISOString().slice(0, 7);
+      return `<option value="${key}">${T.MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}${i === 0 ? ' (month to date)' : ''}</option>`;
+    }).join('');
+    AD.ui.modal({
+      title: 'Download monthly report',
+      body: `
+        <p class="rep-lede">An Astrea-branded review of spend, fleet health and practical next steps.</p>
+        <label class="rep-month" for="rep-month">Reporting month<select id="rep-month">${monthOptions}</select></label>
+        <p class="rep-lede rep-context">Costs cover the selected month. Fleet status and compliance are a snapshot as of today.</p>
+        <div class="rep-picker">
+          <button type="button" class="rep-opt" data-fmt="pdf">
+            <span class="rep-opt-ico rep-opt-pdf">${I.file}</span>
+            <span class="rep-opt-copy">
+              <b>PDF report</b>
+              <span>A4 pages with charts, monthly statistics and data-based recommendations. Ready to share or print.</span>
+            </span>
+            <span class="rep-opt-go">${I.chevR}</span>
+          </button>
+          <button type="button" class="rep-opt" data-fmt="xlsx">
+            <span class="rep-opt-ico rep-opt-xls">${I.dashboard}</span>
+            <span class="rep-opt-copy">
+              <b>Excel workbook</b>
+              <span>Five sheets with the underlying figures. For working the numbers yourself.</span>
+            </span>
+            <span class="rep-opt-go">${I.chevR}</span>
+          </button>
+        </div>
+        <p class="rep-note" id="rep-status" role="status" aria-live="polite"></p>`,
+      onMount(el, close) {
+        el.querySelectorAll('.rep-opt').forEach((opt) => {
+          opt.addEventListener('click', () => runReport(opt.dataset.fmt, el, close));
+        });
+      }
+    });
+  }
+
+  async function runReport(fmt, modalEl, close) {
+    if (reportBusy) return;
+    reportBusy = true;
+    const picker = modalEl.querySelector('.rep-picker');
+    const status = modalEl.querySelector('#rep-status');
+    const month = modalEl.querySelector('#rep-month');
+    month.disabled = true;
+    picker.setAttribute('aria-busy', 'true');
+    picker.querySelectorAll('.rep-opt').forEach((b) => { b.disabled = true; });
+    picker.querySelector(`[data-fmt="${fmt}"]`).classList.add('is-running');
+    const say = (t) => { if (status) status.textContent = t; };
     try {
-      const filename = await AD.fleetReport.generate((text) => { btn.innerHTML = esc(text); });
-      btn.innerHTML = originalHtml;
-      if (AD.ui.toast) AD.ui.toast(`Downloaded ${filename}`);
+      const builder = fmt === 'pdf' ? AD.fleetReportPdf : AD.fleetReport;
+      const filename = await builder.generate(say, { month: month.value });
+      close();
+      AD.ui.toast(`Downloaded ${filename}`);
     } catch (err) {
       console.error('Fleet report failed:', err);
-      btn.innerHTML = originalHtml;
-      if (AD.ui.toast) AD.ui.toast('Report failed — check the console');
+      say('Could not download the report. Check your connection and try again.');
+      if (!modalEl.isConnected) AD.ui.toast('Report download failed. Please try again.');
+      picker.querySelectorAll('.rep-opt').forEach((b) => { b.disabled = false; });
+      picker.querySelector(`[data-fmt="${fmt}"]`).classList.remove('is-running');
     } finally {
-      btn.disabled = false;
-      delete btn.dataset.busy;
+      reportBusy = false;
+      month.disabled = false;
+      picker.setAttribute('aria-busy', 'false');
     }
   }
 

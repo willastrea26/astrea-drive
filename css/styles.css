@@ -2589,3 +2589,43 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 }
 .auth-submit { width: 100%; height: 40px; margin-top: 4px; justify-content: center; }
 .auth-submit[disabled] { opacity: .6; cursor: default; }
+
+/* ---- Report format picker (dashboard → Monthly report) ---- */
+.rep-lede { font-size: 14px; color: var(--muted); margin: 0 0 18px; line-height: 1.5; }
+.rep-lede b { color: var(--ink); font-weight: 600; }
+.rep-month { display: grid; gap: 7px; font-size: 13px; font-weight: 600; color: var(--ink); margin-bottom: 10px; }
+.rep-month select { width: 100%; }
+.rep-context { font-size: 12px; }
+
+.rep-picker { display: grid; gap: 10px; }
+.rep-opt {
+  display: grid; grid-template-columns: 44px minmax(0, 1fr) auto;
+  align-items: center; gap: 14px; width: 100%; text-align: left;
+  padding: 16px 16px; cursor: pointer;
+  background: var(--paper-2); border: 1px solid var(--rule); border-radius: var(--r-lg);
+  transition: border-color .15s, background .15s, transform .15s;
+}
+.rep-opt:hover:not([disabled]) { border-color: var(--mint); background: var(--hover); transform: translateY(-1px); }
+.rep-opt[disabled] { opacity: .5; cursor: default; }
+.rep-opt.is-running { border-color: var(--mint); opacity: 1; }
+
+.rep-opt-ico { width: 44px; height: 44px; border-radius: 10px; display: grid; place-items: center; }
+.rep-opt-ico .ico { width: 21px; height: 21px; }
+.rep-opt-pdf { background: var(--mint-tint); color: var(--mint); }
+.rep-opt-xls { background: rgba(95, 224, 180, .16); color: var(--mint); }
+
+.rep-opt-copy { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.rep-opt-copy b { font-size: 15px; font-weight: 600; color: var(--ink); }
+.rep-opt-copy span { font-size: 12.5px; color: var(--muted); line-height: 1.45; }
+
+.rep-opt-go { color: var(--faint); display: flex; }
+.rep-opt-go .ico { width: 18px; height: 18px; }
+.rep-opt:hover:not([disabled]) .rep-opt-go { color: var(--mint); }
+
+.rep-note { min-height: 18px; margin: 14px 0 0; font-size: 12.5px; color: var(--mint); }
+
+@media (max-width: 520px) {
+  .rep-opt { grid-template-columns: 36px minmax(0, 1fr); gap: 12px; padding: 14px; }
+  .rep-opt-ico { width: 36px; height: 36px; }
+  .rep-opt-go { display: none; }
+}
