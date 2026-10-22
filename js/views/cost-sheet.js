@@ -144,7 +144,6 @@ AD.views['cost-sheet'] = (function () {
       </div>
 
       ${trend(end)}
-      ${projection(end)}
 
       <div class="cs-pair">
         ${months(end)}
@@ -155,6 +154,8 @@ AD.views['cost-sheet'] = (function () {
         ${sectionHead({ title: 'Running cost', meta: `${RUN_WEEKS} weeks to ${T.fmtKey(end)} · grouped by vehicle type · the tick marks each type's median` })}
         ${running(end)}
       </section>
+
+      ${projection(end)}
 
       <p class="section-foot muted small">Spend is recorded services plus resolved defects, counted on the day the service was recorded or the defect was resolved. Planned is scheduled servicing; unplanned is a defect repair. The average is the ${AVG_WEEKS} weeks before this one. Running cost divides a vehicle's spend by the distance or hours covered between its first and last service in the window, so it needs at least two services to show a rate.</p>`;
 
@@ -380,7 +381,7 @@ AD.views['cost-sheet'] = (function () {
       { label: 'Planned servicing', color: COLOR_PLANNED },
       { label: 'Unplanned repairs', color: COLOR_UNPLANNED }
     ];
-    if (hasProj) legendItems.push({ label: 'Projected', color: 'var(--rule)' });
+    if (hasProj) legendItems.push({ label: 'Projected', color: 'var(--violet)' });
 
     return `<figure class="viz-card">
       <figcaption><h3>Spend over time</h3><span class="viz-sub">${isMonthly ? TREND_MONTHS + ' months' : TREND_WEEKS + ' weeks'} to ${T.fmtKey(end)}${hasProj ? ' + ' + PROJ_MONTHS + '-month projection' : ''}</span></figcaption>
