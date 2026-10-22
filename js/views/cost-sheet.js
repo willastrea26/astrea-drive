@@ -10,6 +10,7 @@ AD.views['cost-sheet'] = (function () {
   const MOVERS_MAX = 8; // vehicles shown in "What moved"; the rest live in the table view
   const TREND_WEEKS = 12; // Spend over time, weekly mode
   const TREND_MONTHS = 12; // Spend over time, monthly mode
+  const PROJ_MONTHS = 6;  // months to project forward from current
   let root = null, start = '', period = 'month';
   // Replays the draw-in whenever the figures on screen actually change — opening
   // the page, stepping a week, switching period — but not on a background refresh,
@@ -143,6 +144,7 @@ AD.views['cost-sheet'] = (function () {
       </div>
 
       ${trend(end)}
+      ${projection(end)}
 
       <div class="cs-pair">
         ${months(end)}
@@ -248,11 +250,39 @@ AD.views['cost-sheet'] = (function () {
     });
   }
 
-  /** Weekly or monthly spend leading up to the week on screen — the trend a single week-to-week comparison can't show. */
+  /** Projected future months based on the trailing 3-month average of planned and unplanned spend. */
+  function projectedMonths(end) {
+    const { y, m } = T.parseKey(end);
+    const recent = Array.from({ length: 3 }, (_, i) => {
+      const dt = new Date(Date.UTC(y, m - 1 - i, 1));
+      const key = dt.toISOString().slice(0, 7);
+      const rows = rowsForMonth(key);
+      return { planned: sumKind(rows, PLANNED), unplanned: sumKind(rows, UNPLANNED) };
+    });
+    const avgP = avgOf(recent.map((r) => r.planned));
+    const avgU = avgOf(recent.map((r) => r.unplanned));
+    return Array.from({ length: PROJ_MONTHS }, (_, i) => {
+      const dt = new Date(Date.UTC(y, m + i, 1));
+      return {
+        total: avgP + avgU, planned: avgP, unplanned: avgU,
+        label: T.MONTHS[dt.getUTCMonth()].slice(0, 3),
+        short: T.MONTHS[dt.getUTCMonth()].slice(0, 3) + ' ' + String(dt.getUTCFullYear()).slice(2),
+        full: T.MONTHS[dt.getUTCMonth()] + ' ' + dt.getUTCFullYear() + ' (projected)',
+        projected: true
+      };
+    });
+  }
+
+  /** Weekly or monthly spend leading up to the week on screen — the trend a single week-to-week comparison can't show.
+   *  In monthly mode the chart extends with a dashed projection line. */
   function trend(end) {
-    const points = period === 'month' ? monthlyPoints(end) : weeklyPoints(end);
-    // Headroom above the tallest point: without it the peak sits on the frame and
-    // every chart fills its full height, which reads as zoomed in however flat the data.
+    const isMonthly = period === 'month';
+    const actuals = isMonthly ? monthlyPoints(end) : weeklyPoints(end);
+    const proj = isMonthly ? projectedMonths(end) : [];
+    const points = actuals.concat(proj);
+    const splitIdx = actuals.length - 1;
+    const hasProj = proj.length > 0;
+
     const top = niceTop(Math.max(...points.map((p) => p.total), 1) * 1.15);
     const W = 880, H = 184, padL = 56, padR = 12, padT = 16, padB = 26;
     const plotW = W - padL - padR, plotH = H - padT - padB, n = points.length;
@@ -260,8 +290,6 @@ AD.views['cost-sheet'] = (function () {
     const y = (v) => padT + plotH - (Math.min(v, top) / top) * plotH;
     const coords = points.map((p, i) => ({ x: x(i), y: y(p.total) }));
     const plannedCoords = points.map((p, i) => ({ x: x(i), y: y(p.planned) }));
-    // Catmull–Rom points converted to cubic Béziers. The control points are
-    // clamped to the plot so a steep change never bows beyond the chart frame.
     const clampY = (v) => Math.max(padT, Math.min(padT + plotH, v));
     const spline = (pts) => pts.length < 2 ? `M${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}` : pts.reduce((d, p1, i) => {
       if (i === pts.length - 1) return d;
@@ -277,27 +305,41 @@ AD.views['cost-sheet'] = (function () {
     const lineD = spline(coords);
     const plannedD = spline(plannedCoords);
     const floorY = (padT + plotH).toFixed(1);
-    // Planned fills from the baseline to its own curve; unplanned is the band
-    // between that curve and the total. Catmull–Rom is symmetric, so walking the
-    // planned points backwards retraces the same curve and the seam closes exactly.
     const areaD = `${plannedD} L${x(n - 1).toFixed(1)},${floorY} L${x(0).toFixed(1)},${floorY} Z`;
     const bandD = `${lineD} ${spline([...plannedCoords].reverse()).replace(/^M/, 'L')} Z`;
     const gridY = [0, 0.5, 1].map((f) => padT + plotH * (1 - f));
     const hline = (gy, cls) => `<line x1="${padL}" y1="${gy.toFixed(1)}" x2="${W - padR}" y2="${gy.toFixed(1)}" class="${cls}"></line>`;
-    // Quarter lines carry no label — they give the plot enough grid to read as a
-    // measured scale rather than a single line floating in an empty box.
     const grid = gridY.map((gy) => hline(gy, 'cs-grid')).join('')
       + [0.25, 0.75].map((f) => hline(padT + plotH * (1 - f), 'cs-grid cs-grid-minor')).join('')
       + coords.map((p) => `<line x1="${p.x.toFixed(1)}" y1="${padT}" x2="${p.x.toFixed(1)}" y2="${padT + plotH}" class="cs-grid cs-grid-x"></line>`).join('');
     const yTicks = [0, top / 2, top].map((v, i) => `<text class="cs-axis-y" x="${padL - 8}" y="${(gridY[i] + 4).toFixed(1)}" text-anchor="end">${fmtAxis(v)}</text>`).join('');
-    const xTicks = points.map((p, i) => `<text class="cs-axis-x" x="${x(i).toFixed(1)}" y="${H - 6}" text-anchor="middle">${esc(p.label)}</text>`).join('');
-    // One group per point: the hit circle sits on top so the pointer never has to
-    // find the 4px dot, and hovering the group is what grows it. --i staggers the
-    // marks so they land behind the line as it draws.
+
+    // X-axis labels — show the year suffix only at transitions so months don't repeat ambiguously
+    let lastYr = '';
+    const xTicks = points.map((p, i) => {
+      let txt = p.label;
+      if (hasProj && p.short) {
+        const yr = p.short.split(' ')[1] || '';
+        if (yr !== lastYr) { txt += " '" + yr; lastYr = yr; }
+      }
+      return `<text class="cs-axis-x${p.projected ? ' cs-proj-label' : ''}" x="${x(i).toFixed(1)}" y="${H - 6}" text-anchor="middle">${esc(txt)}</text>`;
+    }).join('');
+
+    // "Now" vertical marker and clip paths for the historical/projected split
+    const nowX = hasProj ? x(splitIdx).toFixed(1) : null;
+    const nowMarker = nowX
+      ? `<line x1="${nowX}" y1="${padT}" x2="${nowX}" y2="${padT + plotH}" class="cs-now-line"></line>
+         <text class="cs-now-label" x="${nowX}" y="${padT - 4}" text-anchor="middle">Now</text>` : '';
+    const clipDefs = hasProj
+      ? `<clipPath id="cs-hist-clip"><rect x="0" y="0" width="${nowX}" height="${H}"/></clipPath>
+         <clipPath id="cs-proj-clip"><rect x="${nowX}" y="0" width="${W}" height="${H}"/></clipPath>` : '';
+
     const marks = points.map((p, i) => {
-      const cx = x(i).toFixed(1), cy = y(p.total).toFixed(1), last = i === n - 1;
-      return `<g class="cs-mark${last ? ' cs-current' : ''}" style="--i:${i}">
-        ${last ? `<circle cx="${cx}" cy="${cy}" r="9" class="cs-halo"></circle>` : ''}
+      const cx = x(i).toFixed(1), cy = y(p.total).toFixed(1);
+      const isLast = i === splitIdx;
+      const isProj = !!p.projected;
+      return `<g class="cs-mark${isLast ? ' cs-current' : ''}${isProj ? ' cs-proj-mark' : ''}" style="--i:${i}">
+        ${isLast ? `<circle cx="${cx}" cy="${cy}" r="9" class="cs-halo"></circle>` : ''}
         <circle cx="${cx}" cy="${cy}" r="4" class="cs-dot"></circle>
         <circle cx="${cx}" cy="${cy}" r="16" class="cs-hit" ${V.tipAttr(p.full, [
           ['Planned', L.fmtAUD(p.planned), COLOR_PLANNED],
@@ -308,13 +350,45 @@ AD.views['cost-sheet'] = (function () {
     }).join('');
     const ariaDesc = points.map((p) => `${p.full}: ${L.fmtAUD(p.total)} total, ${L.fmtAUD(p.unplanned)} unplanned`).join(', ');
 
+    let svgBody;
+    if (hasProj) {
+      svgBody = `${grid}
+          <g clip-path="url(#cs-hist-clip)">
+            <path d="${areaD}" class="cs-area"></path>
+            <path d="${bandD}" class="cs-band"></path>
+            <path d="${plannedD}" class="cs-line-planned" pathLength="1"></path>
+            <path d="${lineD}" class="cs-line-path" pathLength="1"></path>
+          </g>
+          <g clip-path="url(#cs-proj-clip)" class="cs-proj-g">
+            <path d="${areaD}" class="cs-area"></path>
+            <path d="${bandD}" class="cs-band"></path>
+            <path d="${plannedD}" class="cs-line-planned"></path>
+            <path d="${lineD}" class="cs-line-path"></path>
+          </g>
+          ${nowMarker}
+          ${yTicks}${xTicks}${marks}`;
+    } else {
+      svgBody = `${grid}
+          <path d="${areaD}" class="cs-area"></path>
+          <path d="${bandD}" class="cs-band"></path>
+          <path d="${plannedD}" class="cs-line-planned" pathLength="1"></path>
+          <path d="${lineD}" class="cs-line-path" pathLength="1"></path>
+          ${yTicks}${xTicks}${marks}`;
+    }
+
+    const legendItems = [
+      { label: 'Planned servicing', color: COLOR_PLANNED },
+      { label: 'Unplanned repairs', color: COLOR_UNPLANNED }
+    ];
+    if (hasProj) legendItems.push({ label: 'Projected', color: 'var(--rule)' });
+
     return `<figure class="viz-card">
-      <figcaption><h3>Spend over time</h3><span class="viz-sub">${period === 'month' ? TREND_MONTHS + ' months' : TREND_WEEKS + ' weeks'} to ${T.fmtKey(end)}</span></figcaption>
+      <figcaption><h3>Spend over time</h3><span class="viz-sub">${isMonthly ? TREND_MONTHS + ' months' : TREND_WEEKS + ' weeks'} to ${T.fmtKey(end)}${hasProj ? ' + ' + PROJ_MONTHS + '-month projection' : ''}</span></figcaption>
       <div class="seg cs-period" role="group" aria-label="Chart period">
         <button type="button" data-period="week" class="${period === 'week' ? 'on' : ''}">Weekly</button>
         <button type="button" data-period="month" class="${period === 'month' ? 'on' : ''}">Monthly</button>
       </div>
-      ${V.legend([{ label: 'Planned servicing', color: COLOR_PLANNED }, { label: 'Unplanned repairs', color: COLOR_UNPLANNED }], { counts: false })}
+      ${V.legend(legendItems, { counts: false })}
       <div class="cs-line-wrap">
         <svg viewBox="0 0 ${W} ${H}" class="cs-line-svg" role="img" aria-label="${esc('Spend per ' + period + ': ' + ariaDesc)}">
           <defs>
@@ -326,17 +400,38 @@ AD.views['cost-sheet'] = (function () {
               <stop offset="0%" style="stop-color:var(--amber);stop-opacity:.46"></stop>
               <stop offset="100%" style="stop-color:var(--amber);stop-opacity:.16"></stop>
             </linearGradient>
+            ${clipDefs}
           </defs>
-          ${grid}
-          <path d="${areaD}" class="cs-area"></path>
-          <path d="${bandD}" class="cs-band"></path>
-          <path d="${plannedD}" class="cs-line-planned" pathLength="1"></path>
-          <path d="${lineD}" class="cs-line-path" pathLength="1"></path>
-          ${yTicks}${xTicks}${marks}
+          ${svgBody}
         </svg>
       </div>
-      ${V.table([period === 'month' ? 'Month' : 'Week starting', 'Planned', 'Unplanned', 'Total'],
+      ${V.table([isMonthly ? 'Month' : 'Week starting', 'Planned', 'Unplanned', 'Total'],
         points.map((p) => [p.full, L.fmtAUD(p.planned), L.fmtAUD(p.unplanned), L.fmtAUD(p.total)]))}
+    </figure>`;
+  }
+
+  function projection(end) {
+    if (period !== 'month') return '';
+    const proj = projectedMonths(end);
+    if (!proj.length) return '';
+    let running = 0;
+    const rows = proj.map((p) => {
+      running += p.total;
+      return `<tr>
+        <td>${esc(p.full.replace(' (projected)', ''))}</td>
+        <td>${L.fmtAUD(p.planned)}</td>
+        <td>${L.fmtAUD(p.unplanned)}</td>
+        <td class="cs-proj-total">${L.fmtAUD(p.total)}</td>
+        <td>${L.fmtAUD(running)}</td>
+      </tr>`;
+    }).join('');
+    return `<figure class="viz-card cs-proj-card">
+      <figcaption><h3>Projected costs</h3><span class="viz-sub">${PROJ_MONTHS}-month forecast based on trailing 3-month average</span></figcaption>
+      <table class="cs-proj-table">
+        <thead><tr><th>Month</th><th>Planned</th><th>Unplanned</th><th>Total</th><th>Running total</th></tr></thead>
+        <tbody>${rows}</tbody>
+        <tfoot><tr><td>${PROJ_MONTHS}-month total</td><td></td><td></td><td></td><td class="cs-proj-total">${L.fmtAUD(running)}</td></tr></tfoot>
+      </table>
     </figure>`;
   }
 

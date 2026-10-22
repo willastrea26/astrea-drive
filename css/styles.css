@@ -1411,6 +1411,27 @@ input[type=text], input[type=number], input[type=date], input[type=datetime-loca
 .cs-hit { fill: transparent; cursor: pointer; }
 .cs-axis-x, .cs-axis-y { font-size: 11px; fill: var(--muted); font-family: var(--font); }
 
+/* Projected segment — dashed lines, reduced opacity */
+.cs-proj-g .cs-line-path { stroke-dasharray: 6 4; opacity: .55; }
+.cs-proj-g .cs-line-planned { stroke-dasharray: 4 3; opacity: .45; }
+.cs-proj-g .cs-area { opacity: .35; }
+.cs-proj-g .cs-band { opacity: .30; }
+.cs-now-line { stroke: var(--ink); stroke-width: 1.25; stroke-dasharray: 4 3; opacity: .5; }
+.cs-now-label { font-size: 10px; fill: var(--muted); font-family: var(--font); text-transform: uppercase; letter-spacing: .5px; }
+.cs-proj-label { opacity: .55; }
+.cs-proj-mark .cs-dot { fill: transparent; stroke-dasharray: 3 2; }
+.cs-proj-mark .cs-hit { cursor: default; }
+
+/* Projection table */
+.cs-proj-card { background: var(--paper); border: 1px solid var(--rule); border-radius: 10px; padding: 16px 20px; }
+.cs-proj-card h3 { font-size: 15px; margin: 0 0 12px; }
+.cs-proj-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.cs-proj-table th { text-align: left; font-weight: 600; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; padding: 6px 10px; border-bottom: 1px solid var(--rule); }
+.cs-proj-table td { padding: 8px 10px; border-bottom: 1px solid color-mix(in srgb, var(--rule) 50%, transparent); }
+.cs-proj-table tr:last-child td { border-bottom: none; }
+.cs-proj-table .cs-proj-total { font-weight: 600; color: var(--ink); }
+.cs-proj-table tfoot td { border-top: 2px solid var(--rule); font-weight: 700; padding-top: 10px; }
+
 /* Table view twin */
 .viz-table { font-size: 13.5px; }
 .viz-table summary { cursor: pointer; color: var(--blue); font-weight: 600; width: max-content; }
