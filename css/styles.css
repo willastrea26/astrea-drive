@@ -1432,6 +1432,14 @@ input[type=text], input[type=number], input[type=date], input[type=datetime-loca
 .cs-proj-table tr:last-child td { border-bottom: none; }
 .cs-proj-table .cs-proj-total { font-weight: 600; color: var(--violet); }
 .cs-proj-table tfoot td { border-top: 2px solid var(--violet-tint); font-weight: 700; padding-top: 10px; }
+.cs-proj-input { width: 100px; background: var(--navy-2); border: 1px solid var(--rule); border-radius: 6px; padding: 5px 8px; color: var(--ink); font-size: 13.5px; font-family: var(--font); text-align: right; -moz-appearance: textfield; }
+.cs-proj-input::-webkit-inner-spin-button,
+.cs-proj-input::-webkit-outer-spin-button { opacity: 1; }
+.cs-proj-input:focus { outline: none; border-color: var(--violet); box-shadow: 0 0 0 2px var(--violet-tint); }
+.cs-proj-edited td { background: var(--violet-tint); }
+.cs-proj-edited .cs-proj-input { border-color: var(--violet); }
+.cs-proj-reset { font-size: 12px; color: var(--violet); }
+.cs-proj-section { margin-top: 24px; }
 
 /* Table view twin */
 .viz-table { font-size: 13.5px; }

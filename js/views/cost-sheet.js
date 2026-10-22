@@ -12,6 +12,7 @@ AD.views['cost-sheet'] = (function () {
   const TREND_MONTHS = 12; // Spend over time, monthly mode
   const PROJ_MONTHS = 6;  // months to project forward from current
   let root = null, start = '', period = 'month';
+  let projOverrides = {}; // keyed by month label, e.g. { "Nov 2026": { planned: 1200, unplanned: 400 } }
   // Replays the draw-in whenever the figures on screen actually change — opening
   // the page, stepping a week, switching period — but not on a background refresh,
   // which would make the page twitch while someone is reading it.
@@ -155,15 +156,16 @@ AD.views['cost-sheet'] = (function () {
         ${running(end)}
       </section>
 
-      ${projection(end)}
+      <p class="section-foot muted small">Spend is recorded services plus resolved defects, counted on the day the service was recorded or the defect was resolved. Planned is scheduled servicing; unplanned is a defect repair. The average is the ${AVG_WEEKS} weeks before this one. Running cost divides a vehicle's spend by the distance or hours covered between its first and last service in the window, so it needs at least two services to show a rate.</p>
 
-      <p class="section-foot muted small">Spend is recorded services plus resolved defects, counted on the day the service was recorded or the defect was resolved. Planned is scheduled servicing; unplanned is a defect repair. The average is the ${AVG_WEEKS} weeks before this one. Running cost divides a vehicle's spend by the distance or hours covered between its first and last service in the window, so it needs at least two services to show a rate.</p>`;
+      ${projection(end)}`;
 
     el.querySelector('#w-prev').onclick = () => go(T.addDays(start, -7));
     el.querySelector('#w-next').onclick = () => go(T.addDays(start, 7));
     el.querySelector('#w-this').onclick = () => go(thisWeek);
     el.querySelector('#w-jump').onchange = (e) => { if (e.target.value) go(mondayOf(e.target.value)); };
     el.querySelectorAll('[data-period]').forEach((b) => (b.onclick = () => setPeriod(b.dataset.period)));
+    bindProjectionInputs();
   }
 
   function go(week) {
@@ -264,11 +266,16 @@ AD.views['cost-sheet'] = (function () {
     const avgU = avgOf(recent.map((r) => r.unplanned));
     return Array.from({ length: PROJ_MONTHS }, (_, i) => {
       const dt = new Date(Date.UTC(y, m + i, 1));
+      const key = T.MONTHS[dt.getUTCMonth()] + ' ' + dt.getUTCFullYear();
+      const ov = projOverrides[key];
+      const p = ov ? ov.planned : avgP;
+      const u = ov ? ov.unplanned : avgU;
       return {
-        total: avgP + avgU, planned: avgP, unplanned: avgU,
+        total: p + u, planned: p, unplanned: u,
         label: T.MONTHS[dt.getUTCMonth()].slice(0, 3),
         short: T.MONTHS[dt.getUTCMonth()].slice(0, 3) + ' ' + String(dt.getUTCFullYear()).slice(2),
-        full: T.MONTHS[dt.getUTCMonth()] + ' ' + dt.getUTCFullYear() + ' (projected)',
+        full: key + ' (projected)',
+        key, defaultPlanned: avgP, defaultUnplanned: avgU,
         projected: true
       };
     });
@@ -415,25 +422,58 @@ AD.views['cost-sheet'] = (function () {
     if (period !== 'month') return '';
     const proj = projectedMonths(end);
     if (!proj.length) return '';
+    const hasOverrides = Object.keys(projOverrides).length > 0;
     let running = 0;
-    const rows = proj.map((p) => {
+    const rows = proj.map((p, i) => {
       running += p.total;
-      return `<tr>
-        <td>${esc(p.full.replace(' (projected)', ''))}</td>
-        <td>${L.fmtAUD(p.planned)}</td>
-        <td>${L.fmtAUD(p.unplanned)}</td>
+      const edited = !!projOverrides[p.key];
+      return `<tr${edited ? ' class="cs-proj-edited"' : ''}>
+        <td>${esc(p.key)}</td>
+        <td><input type="number" class="cs-proj-input" data-idx="${i}" data-field="planned" value="${Math.round(p.planned)}" step="100" min="0"></td>
+        <td><input type="number" class="cs-proj-input" data-idx="${i}" data-field="unplanned" value="${Math.round(p.unplanned)}" step="100" min="0"></td>
         <td class="cs-proj-total">${L.fmtAUD(p.total)}</td>
         <td>${L.fmtAUD(running)}</td>
       </tr>`;
     }).join('');
-    return `<figure class="viz-card cs-proj-card">
-      <figcaption><h3>Projected costs</h3><span class="viz-sub">${PROJ_MONTHS}-month forecast based on trailing 3-month average</span></figcaption>
-      <table class="cs-proj-table">
-        <thead><tr><th>Month</th><th>Planned</th><th>Unplanned</th><th>Total</th><th>Running total</th></tr></thead>
-        <tbody>${rows}</tbody>
-        <tfoot><tr><td>${PROJ_MONTHS}-month total</td><td></td><td></td><td></td><td class="cs-proj-total">${L.fmtAUD(running)}</td></tr></tfoot>
-      </table>
-    </figure>`;
+    return `<section class="cs-proj-section" id="cs-proj-section">
+      <figure class="viz-card cs-proj-card">
+        <figcaption>
+          <h3>Projected costs</h3>
+          <span class="viz-sub">${PROJ_MONTHS}-month forecast · edit planned and unplanned to adjust the chart${hasOverrides ? ' · <button type="button" class="link-btn cs-proj-reset" id="cs-proj-reset">reset to averages</button>' : ''}</span>
+        </figcaption>
+        <table class="cs-proj-table">
+          <thead><tr><th>Month</th><th>Planned</th><th>Unplanned</th><th>Total</th><th>Running total</th></tr></thead>
+          <tbody>${rows}</tbody>
+          <tfoot><tr><td>${PROJ_MONTHS}-month total</td><td></td><td></td><td></td><td class="cs-proj-total">${L.fmtAUD(running)}</td></tr></tfoot>
+        </table>
+      </figure>
+    </section>`;
+  }
+
+  function bindProjectionInputs() {
+    const section = root.querySelector('#cs-proj-section');
+    if (!section) return;
+    const end = T.addDays(start, 6);
+    const proj = projectedMonths(end);
+    section.querySelectorAll('.cs-proj-input').forEach((inp) => {
+      inp.addEventListener('change', () => {
+        const idx = +inp.dataset.idx;
+        const field = inp.dataset.field;
+        const val = Math.max(0, parseFloat(inp.value) || 0);
+        const p = proj[idx];
+        if (!p) return;
+        const ov = projOverrides[p.key] || { planned: p.defaultPlanned, unplanned: p.defaultUnplanned };
+        ov[field] = val;
+        if (Math.abs(ov.planned - p.defaultPlanned) < 0.5 && Math.abs(ov.unplanned - p.defaultUnplanned) < 0.5) {
+          delete projOverrides[p.key];
+        } else {
+          projOverrides[p.key] = ov;
+        }
+        draw();
+      });
+    });
+    const resetBtn = section.querySelector('#cs-proj-reset');
+    if (resetBtn) resetBtn.onclick = () => { projOverrides = {}; draw(); };
   }
 
   /**
