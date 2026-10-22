@@ -12,7 +12,9 @@ AD.views['cost-sheet'] = (function () {
   const TREND_MONTHS = 12; // Spend over time, monthly mode
   const PROJ_MONTHS = 6;  // months to project forward from current
   let root = null, start = '', period = 'month';
-  let projOverrides = {}; // keyed by month label, e.g. { "Nov 2026": { planned: 1200, unplanned: 400 } }
+  const PROJ_STORE_KEY = 'ad-cost-proj-overrides';
+  let projOverrides = (() => { try { return JSON.parse(localStorage.getItem(PROJ_STORE_KEY)) || {}; } catch { return {}; } })();
+  function saveOverrides() { try { localStorage.setItem(PROJ_STORE_KEY, JSON.stringify(projOverrides)); } catch {} }
   // Replays the draw-in whenever the figures on screen actually change — opening
   // the page, stepping a week, switching period — but not on a background refresh,
   // which would make the page twitch while someone is reading it.
@@ -469,11 +471,12 @@ AD.views['cost-sheet'] = (function () {
         } else {
           projOverrides[p.key] = ov;
         }
+        saveOverrides();
         draw();
       });
     });
     const resetBtn = section.querySelector('#cs-proj-reset');
-    if (resetBtn) resetBtn.onclick = () => { projOverrides = {}; draw(); };
+    if (resetBtn) resetBtn.onclick = () => { projOverrides = {}; saveOverrides(); draw(); };
   }
 
   /**
