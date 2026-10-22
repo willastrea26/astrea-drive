@@ -478,10 +478,11 @@ AD.fleetReport = (function () {
     applyStyle(ws.getCell('B25'), styles.h2);
 
     const contents = [
-      ['1', 'Executive summary',     'Key metrics with variance against target'],
-      ['2', 'Monthly spend',          'Twelve-month table with planned, unplanned and total'],
+      ['1', 'Executive summary',     'Key metrics, composition and trends'],
+      ['2', 'Monthly spend',          'Twelve-month table with in-cell visual bars'],
       ['3', 'Compliance and risk',    'Rego, servicing and open defects'],
-      ['4', 'Vehicle register',       'All vehicles in the fleet']
+      ['4', 'Vehicle register',       'Full fleet with odometer bars'],
+      ['5', 'Recommendations',        'Data-driven actions ordered by priority']
     ];
     contents.forEach((row, i) => {
       const r = 27 + i;
@@ -614,6 +615,112 @@ AD.fleetReport = (function () {
       if (kind) applyStyle(valCell, tone(kind));
       if (i % 2 === 1) [2, 3].forEach((c) => applyStyle(ws.getCell(r, c), styles.zebra));
     });
+
+    // ---- Fleet composition by type ----
+    let compRow = fh + 1 + fleetRows.length + 2;
+    sectionBar(ws, compRow, 'B', 'F', 'Fleet composition by type');
+    compRow += 2;
+    ['Type', 'Count', '', '', 'Share'].forEach((t, i) => {
+      if (!t) return;
+      const cell = ws.getCell(compRow, 2 + i);
+      cell.value = t;
+      applyStyle(cell, i === 0 ? styles.th : styles.thRight);
+    });
+    ws.getRow(compRow).height = 24;
+    const compFirst = compRow + 1;
+    data.byType.forEach(({ type, count }, i) => {
+      const r = compRow + 1 + i;
+      ws.getRow(r).height = 22;
+      ws.getCell(r, 2).value = type;  applyStyle(ws.getCell(r, 2), styles.cell);
+      ws.getCell(r, 3).value = count; applyStyle(ws.getCell(r, 3), styles.cellInt);
+      ws.getCell(r, 6).value = data.vehicles.length ? count / data.vehicles.length : 0;
+      applyStyle(ws.getCell(r, 6), styles.cellPct);
+      if (i % 2 === 1) [2, 3, 6].forEach((c) => applyStyle(ws.getCell(r, c), styles.zebra));
+    });
+    const compLast = compRow + data.byType.length;
+    if (data.byType.length) {
+      ws.addConditionalFormatting({
+        ref: 'C' + compFirst + ':C' + compLast,
+        rules: [{ type: 'dataBar', priority: 1, showValue: true, gradient: true, cfvo: [{ type: 'min' }, { type: 'max' }], color: { argb: COLOR.mint } }]
+      });
+    }
+
+    // ---- Top spenders this month ----
+    let spRow = compLast + 3;
+    sectionBar(ws, spRow, 'B', 'F', 'Top spenders · ' + T.MONTHS[data.now.month - 1]);
+    spRow += 2;
+    ['Vehicle', 'Type', '', 'Spend'].forEach((t, i) => {
+      if (!t) return;
+      const cell = ws.getCell(spRow, 2 + i);
+      cell.value = t;
+      applyStyle(cell, i === 0 ? styles.th : styles.thRight);
+    });
+    ws.getRow(spRow).height = 24;
+    const spFirst = spRow + 1;
+    data.topSpenders.forEach(({ id, cost, v }, i) => {
+      const r = spRow + 1 + i;
+      ws.getRow(r).height = 22;
+      ws.getCell(r, 2).value = id;              applyStyle(ws.getCell(r, 2), styles.cell);
+      ws.getCell(r, 3).value = v ? v.type : ''; applyStyle(ws.getCell(r, 3), styles.cell);
+      ws.getCell(r, 5).value = cost;            applyStyle(ws.getCell(r, 5), styles.cellNum);
+      if (i % 2 === 1) [2, 3, 5].forEach((c) => applyStyle(ws.getCell(r, c), styles.zebra));
+    });
+    const spLast = spRow + data.topSpenders.length;
+    if (data.topSpenders.length) {
+      ws.addConditionalFormatting({
+        ref: 'E' + spFirst + ':E' + spLast,
+        rules: [{ type: 'dataBar', priority: 1, showValue: true, gradient: true, cfvo: [{ type: 'min' }, { type: 'max' }], color: { argb: 'FFFBBF24' } }]
+      });
+    }
+
+    // ---- Month-on-month comparison ----
+    let moRow = spLast + 3;
+    sectionBar(ws, moRow, 'B', 'F', 'Month-on-month comparison');
+    moRow += 2;
+    const prevName = data.prevMonth ? data.prevMonth.label.split(' ')[0] : '-';
+    [' ', T.MONTHS[data.now.month - 1], prevName, '12-mo avg', 'Trend'].forEach((t, i) => {
+      const cell = ws.getCell(moRow, 2 + i);
+      cell.value = t;
+      applyStyle(cell, i === 0 ? styles.th : styles.thRight);
+    });
+    ws.getRow(moRow).height = 24;
+    const avg12P = data.months.reduce((t, m) => t + m.planned, 0) / 12;
+    const avg12U = data.months.reduce((t, m) => t + m.unplanned, 0) / 12;
+    const avg12S = data.months.reduce((t, m) => t + m.svcCount, 0) / 12;
+    const avg12D = data.months.reduce((t, m) => t + m.defCount, 0) / 12;
+    const moStats = [
+      ['Total spend',     data.curMonth.total,     data.prevMonth ? data.prevMonth.total : null,     data.monthlyTarget, data.momPct],
+      ['Planned spend',   data.curMonth.planned,   data.prevMonth ? data.prevMonth.planned : null,   avg12P, null],
+      ['Unplanned spend', data.curMonth.unplanned, data.prevMonth ? data.prevMonth.unplanned : null, avg12U, null],
+      ['Service events',  data.curMonth.svcCount,  data.prevMonth ? data.prevMonth.svcCount : null,  Math.round(avg12S), null],
+      ['Defects resolved', data.curMonth.defCount, data.prevMonth ? data.prevMonth.defCount : null,  Math.round(avg12D), null]
+    ];
+    moStats.forEach(([label, cur, prev, avg, trend], i) => {
+      const r = moRow + 1 + i;
+      ws.getRow(r).height = 22;
+      ws.getCell(r, 2).value = label; applyStyle(ws.getCell(r, 2), styles.cell);
+      const isMoney = i < 3;
+      const fmt = isMoney ? styles.cellNum : styles.cellInt;
+      ws.getCell(r, 3).value = cur;  applyStyle(ws.getCell(r, 3), fmt);
+      ws.getCell(r, 4).value = prev; applyStyle(ws.getCell(r, 4), fmt);
+      ws.getCell(r, 5).value = avg != null ? (isMoney ? Math.round(avg) : avg) : null;
+      applyStyle(ws.getCell(r, 5), fmt);
+      if (trend != null) {
+        const up = trend > 0;
+        ws.getCell(r, 6).value = (up ? '+' : '') + Math.round(trend * 100) + '%';
+        applyStyle(ws.getCell(r, 6), styles.cell, tone(up ? 'bad' : 'good'));
+        ws.getCell(r, 6).alignment = { vertical: 'middle', horizontal: 'center' };
+      } else {
+        ws.getCell(r, 6).value = ''; applyStyle(ws.getCell(r, 6), styles.cell);
+      }
+      if (i % 2 === 1) [2, 3, 4, 5, 6].forEach((c) => applyStyle(ws.getCell(r, c), styles.zebra));
+    });
+    // Data bars on the current-month column
+    const moFirst = moRow + 1, moLast = moRow + moStats.length;
+    ws.addConditionalFormatting({
+      ref: 'C' + moFirst + ':C' + moLast,
+      rules: [{ type: 'dataBar', priority: 1, showValue: true, gradient: true, cfvo: [{ type: 'min' }, { type: 'max' }], color: { argb: COLOR.navy2 } }]
+    });
   }
 
   function buildSpend(wb, data) {
@@ -694,6 +801,19 @@ AD.fleetReport = (function () {
       applyStyle(ws.getCell(totRow, c), money ? styles.cellNum : c === 8 ? styles.cellPct : c === 2 ? styles.cell : styles.cellInt);
       applyStyle(ws.getCell(totRow, c), styles.total);
     }
+
+    // Data bars — in-cell bar charts for a visual spend profile
+    const barFirst = hdrRow + 1, barLast = hdrRow + data.months.length;
+    [['C', COLOR.mint], ['D', 'FFFBBF24'], ['E', COLOR.navy2]].forEach(([col, argb]) => {
+      ws.addConditionalFormatting({
+        ref: col + barFirst + ':' + col + barLast,
+        rules: [{
+          type: 'dataBar', priority: 1, showValue: true, gradient: true,
+          cfvo: [{ type: 'min' }, { type: 'max' }],
+          color: { argb }
+        }]
+      });
+    });
 
     // Projection block
     const projRow = totRow + 3;
@@ -890,6 +1010,14 @@ AD.fleetReport = (function () {
     });
 
     ws.autoFilter = { from: { row: hdrRow, column: 2 }, to: { row: hdrRow, column: 10 } };
+
+    // Data bars on odometer column
+    if (sorted.length) {
+      ws.addConditionalFormatting({
+        ref: 'G' + (hdrRow + 1) + ':G' + (hdrRow + sorted.length),
+        rules: [{ type: 'dataBar', priority: 1, showValue: true, gradient: true, cfvo: [{ type: 'min' }, { type: 'max' }], color: { argb: COLOR.paper } }]
+      });
+    }
   }
 
   // Section bar — navy row spanning columns, used to break up a sheet.
@@ -903,6 +1031,92 @@ AD.fleetReport = (function () {
 
   function aud(n) {
     return Number(n || 0).toLocaleString('en-AU', { style: 'currency', currency: 'AUD', maximumFractionDigits: 0 });
+  }
+
+  function buildRecommendations(wb, data) {
+    const ws = wb.addWorksheet('Recommendations', { views: [{ showGridLines: false }] });
+    ws.getColumn(1).width = 3;
+    [5, 36, 16, 36].forEach((w, i) => { ws.getColumn(i + 2).width = w; });
+
+    ws.getRow(1).height = 36;
+    ws.mergeCells('B1:E1');
+    const h = ws.getCell('B1');
+    h.value = 'Recommendations · ' + T.MONTHS[data.now.month - 1] + ' ' + data.now.year;
+    h.font = { name: FONT_HEAD, size: 18, bold: true, color: { argb: COLOR.navy } };
+    h.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+    for (let c = 2; c <= 5; c++) ws.getCell(2, c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR.mint } };
+    ws.getRow(2).height = 3;
+
+    ws.mergeCells('B4:E4');
+    ws.getCell('B4').value = 'Ordered by priority and urgency. Derived from the fleet data in this report.';
+    ws.getCell('B4').font = { name: FONT_BODY, size: 10, italic: true, color: { argb: COLOR.muted } };
+    ws.getCell('B4').alignment = { wrapText: true, vertical: 'top', horizontal: 'left', indent: 1 };
+
+    let row = 6;
+    data.recommendations.forEach((rec, i) => {
+      const priColor = rec.priority === 'High' ? COLOR.red : rec.priority === 'Medium' ? COLOR.amber : COLOR.green;
+      const priBg    = rec.priority === 'High' ? COLOR.redSoft : rec.priority === 'Medium' ? COLOR.amberSoft : COLOR.greenSoft;
+
+      // Number badge
+      ws.getCell(row, 2).value = i + 1;
+      ws.getCell(row, 2).font = { name: FONT_HEAD, size: 14, bold: true, color: { argb: COLOR.white } };
+      ws.getCell(row, 2).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: priColor } };
+      ws.getCell(row, 2).alignment = { vertical: 'middle', horizontal: 'center' };
+      ws.getCell(row, 2).border = borderAll(priColor);
+
+      // Title
+      ws.mergeCells('C' + row + ':D' + row);
+      ws.getCell(row, 3).value = rec.title;
+      ws.getCell(row, 3).font = { name: FONT_HEAD, size: 12, bold: true, color: { argb: COLOR.navy } };
+      ws.getCell(row, 3).alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+
+      // Priority chip
+      ws.getCell(row, 5).value = rec.priority;
+      ws.getCell(row, 5).font = { name: FONT_HEAD, size: 10, bold: true, color: { argb: priColor } };
+      ws.getCell(row, 5).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: priBg } };
+      ws.getCell(row, 5).alignment = { vertical: 'middle', horizontal: 'center' };
+      ws.getCell(row, 5).border = borderAll(priColor);
+      ws.getRow(row).height = 26;
+      row++;
+
+      // Finding
+      ws.mergeCells('C' + row + ':E' + row);
+      ws.getCell(row, 3).value = rec.finding;
+      ws.getCell(row, 3).font = { name: FONT_BODY, size: 11, color: { argb: COLOR.ink } };
+      ws.getCell(row, 3).alignment = { wrapText: true, vertical: 'top', horizontal: 'left', indent: 1 };
+      ws.getRow(row).height = 36;
+      row++;
+
+      // Action
+      ws.getCell(row, 2).value = 'ACTION';
+      ws.getCell(row, 2).font = { name: FONT_HEAD, size: 9, bold: true, color: { argb: COLOR.mint } };
+      ws.getCell(row, 2).alignment = { vertical: 'top', horizontal: 'left' };
+      ws.mergeCells('C' + row + ':E' + row);
+      ws.getCell(row, 3).value = rec.action;
+      ws.getCell(row, 3).font = { name: FONT_BODY, size: 11, color: { argb: COLOR.ink } };
+      ws.getCell(row, 3).alignment = { wrapText: true, vertical: 'top', horizontal: 'left', indent: 1 };
+      ws.getRow(row).height = 42;
+      row++;
+
+      // Divider
+      for (let c = 2; c <= 5; c++) ws.getCell(row, c).border = { top: border(COLOR.ruleSoft) };
+      ws.getRow(row).height = 10;
+      row++;
+    });
+
+    // Method note
+    row++;
+    ws.mergeCells('B' + row + ':E' + row);
+    ws.getCell('B' + row).value = 'Methodology';
+    applyStyle(ws.getCell('B' + row), styles.h2);
+    row += 2;
+    ws.mergeCells('B' + row + ':E' + (row + 2));
+    ws.getCell('B' + row).value =
+      'These recommendations are generated by a rule-based engine that analyses the fleet data recorded in Astrea Drive. ' +
+      'Each rule has a threshold and weight; the top 5 by weight are shown above. They are not predictions — they describe ' +
+      'what the data shows and suggest a concrete action. Replace or adjust them as operational context warrants.';
+    ws.getCell('B' + row).font = { name: FONT_BODY, size: 10, color: { argb: COLOR.muted } };
+    ws.getCell('B' + row).alignment = { wrapText: true, vertical: 'top', horizontal: 'left', indent: 1 };
   }
 
   /* ------------------------------------------------------------------ public */
@@ -927,6 +1141,7 @@ AD.fleetReport = (function () {
     buildSpend(wb, data);
     buildCompliance(wb, data);
     buildRegister(wb, data);
+    buildRecommendations(wb, data);
 
     notify('Writing file…');
     const buf = await wb.xlsx.writeBuffer();
