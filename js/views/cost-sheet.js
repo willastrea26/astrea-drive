@@ -13,7 +13,7 @@ AD.views['cost-sheet'] = (function () {
   const PROJ_MONTHS = 6;  // months to project forward from current
   let root = null, start = '', period = 'month';
   const PROJ_STORE_KEY = 'ad-cost-proj-overrides';
-  let projOverrides = (() => { try { return JSON.parse(localStorage.getItem(PROJ_STORE_KEY)) || {}; } catch { return {}; } })();
+  let projOverrides = (() => { try { const v = JSON.parse(localStorage.getItem(PROJ_STORE_KEY)) || {}; /* migrate old {planned,unplanned} format */ for (const k of Object.keys(v)) { if (typeof v[k] === 'object') v[k] = (v[k].planned || 0) + (v[k].unplanned || 0); } return v; } catch { return {}; } })();
   function saveOverrides() { try { localStorage.setItem(PROJ_STORE_KEY, JSON.stringify(projOverrides)); } catch {} }
   // Replays the draw-in whenever the figures on screen actually change — opening
   // the page, stepping a week, switching period — but not on a background refresh,
@@ -255,29 +255,25 @@ AD.views['cost-sheet'] = (function () {
     });
   }
 
-  /** Projected future months based on the trailing 3-month average of planned and unplanned spend. */
+  /** Projected future months — one flat forecast value per month. */
   function projectedMonths(end) {
     const { y, m } = T.parseKey(end);
     const recent = Array.from({ length: 3 }, (_, i) => {
       const dt = new Date(Date.UTC(y, m - 1 - i, 1));
       const key = dt.toISOString().slice(0, 7);
-      const rows = rowsForMonth(key);
-      return { planned: sumKind(rows, PLANNED), unplanned: sumKind(rows, UNPLANNED) };
+      return sum(rowsForMonth(key));
     });
-    const avgP = avgOf(recent.map((r) => r.planned));
-    const avgU = avgOf(recent.map((r) => r.unplanned));
+    const avgTotal = avgOf(recent);
     return Array.from({ length: PROJ_MONTHS }, (_, i) => {
       const dt = new Date(Date.UTC(y, m + i, 1));
       const key = T.MONTHS[dt.getUTCMonth()] + ' ' + dt.getUTCFullYear();
-      const ov = projOverrides[key];
-      const p = ov ? ov.planned : avgP;
-      const u = ov ? ov.unplanned : avgU;
+      const total = projOverrides[key] != null ? projOverrides[key] : avgTotal;
       return {
-        total: p + u, planned: p, unplanned: u,
+        total, planned: total, unplanned: 0,
         label: T.MONTHS[dt.getUTCMonth()].slice(0, 3),
         short: T.MONTHS[dt.getUTCMonth()].slice(0, 3) + ' ' + String(dt.getUTCFullYear()).slice(2),
-        full: key + ' (projected)',
-        key, defaultPlanned: avgP, defaultUnplanned: avgU,
+        full: key + ' (forecast)',
+        key, defaultTotal: avgTotal,
         projected: true
       };
     });
@@ -351,11 +347,12 @@ AD.views['cost-sheet'] = (function () {
       return `<g class="cs-mark${isLast ? ' cs-current' : ''}${isProj ? ' cs-proj-mark' : ''}" style="--i:${i}">
         ${isLast ? `<circle cx="${cx}" cy="${cy}" r="9" class="cs-halo"></circle>` : ''}
         <circle cx="${cx}" cy="${cy}" r="4" class="cs-dot"></circle>
-        <circle cx="${cx}" cy="${cy}" r="16" class="cs-hit" ${V.tipAttr(p.full, [
-          ['Planned', L.fmtAUD(p.planned), COLOR_PLANNED],
-          ['Unplanned', L.fmtAUD(p.unplanned), COLOR_UNPLANNED],
-          ['Total', L.fmtAUD(p.total), 'var(--ink)']
-        ])}></circle>
+        <circle cx="${cx}" cy="${cy}" r="16" class="cs-hit" ${V.tipAttr(p.full, isProj
+          ? [['Forecast', L.fmtAUD(p.total), 'var(--violet)']]
+          : [['Planned', L.fmtAUD(p.planned), COLOR_PLANNED],
+             ['Unplanned', L.fmtAUD(p.unplanned), COLOR_UNPLANNED],
+             ['Total', L.fmtAUD(p.total), 'var(--ink)']]
+        )}></circle>
       </g>`;
     }).join('');
     const ariaDesc = points.map((p) => `${p.full}: ${L.fmtAUD(p.total)} total, ${L.fmtAUD(p.unplanned)} unplanned`).join(', ');
@@ -371,8 +368,6 @@ AD.views['cost-sheet'] = (function () {
           </g>
           <g clip-path="url(#cs-proj-clip)" class="cs-proj-g">
             <path d="${areaD}" class="cs-area"></path>
-            <path d="${bandD}" class="cs-band"></path>
-            <path d="${plannedD}" class="cs-line-planned" pathLength="1"></path>
             <path d="${lineD}" class="cs-line-path" pathLength="1"></path>
           </g>
           ${nowMarker}
@@ -390,10 +385,10 @@ AD.views['cost-sheet'] = (function () {
       { label: 'Planned servicing', color: COLOR_PLANNED },
       { label: 'Unplanned repairs', color: COLOR_UNPLANNED }
     ];
-    if (hasProj) legendItems.push({ label: 'Projected', color: 'var(--violet)' });
+    if (hasProj) legendItems.push({ label: 'Forecast', color: 'var(--violet)' });
 
     return `<figure class="viz-card">
-      <figcaption><h3>Spend over time</h3><span class="viz-sub">${isMonthly ? TREND_MONTHS + ' months' : TREND_WEEKS + ' weeks'} to ${T.fmtKey(end)}${hasProj ? ' + ' + PROJ_MONTHS + '-month projection' : ''}</span></figcaption>
+      <figcaption><h3>Spend over time</h3><span class="viz-sub">${isMonthly ? TREND_MONTHS + ' months' : TREND_WEEKS + ' weeks'} to ${T.fmtKey(end)}${hasProj ? ' + ' + PROJ_MONTHS + '-month forecast' : ''}</span></figcaption>
       <div class="seg cs-period" role="group" aria-label="Chart period">
         <button type="button" data-period="week" class="${period === 'week' ? 'on' : ''}">Weekly</button>
         <button type="button" data-period="month" class="${period === 'month' ? 'on' : ''}">Monthly</button>
@@ -453,25 +448,23 @@ AD.views['cost-sheet'] = (function () {
     let running = 0;
     const rows = proj.map((p, i) => {
       running += p.total;
-      const edited = !!projOverrides[p.key];
+      const edited = projOverrides[p.key] != null;
       return `<tr${edited ? ' class="cs-proj-edited"' : ''}>
         <td>${esc(p.key)}</td>
-        <td><input type="number" class="cs-proj-input" data-idx="${i}" data-field="planned" value="${Math.round(p.planned)}" step="100" min="0"></td>
-        <td><input type="number" class="cs-proj-input" data-idx="${i}" data-field="unplanned" value="${Math.round(p.unplanned)}" step="100" min="0"></td>
-        <td class="cs-proj-total">${L.fmtAUD(p.total)}</td>
+        <td><input type="number" class="cs-proj-input" data-idx="${i}" value="${Math.round(p.total)}" step="100" min="0"></td>
         <td>${L.fmtAUD(running)}</td>
       </tr>`;
     }).join('');
     return `<section class="cs-proj-section" id="cs-proj-section">
       <figure class="viz-card cs-proj-card">
         <figcaption>
-          <h3>Projected costs</h3>
-          <span class="viz-sub">${PROJ_MONTHS}-month forecast · edit planned and unplanned to adjust the chart${hasOverrides ? ' · <button type="button" class="link-btn cs-proj-reset" id="cs-proj-reset">reset to averages</button>' : ''}</span>
+          <h3>Forecast</h3>
+          <span class="viz-sub">${PROJ_MONTHS}-month forecast · edit to adjust the chart${hasOverrides ? ' · <button type="button" class="link-btn cs-proj-reset" id="cs-proj-reset">reset to average</button>' : ''}</span>
         </figcaption>
         <table class="cs-proj-table">
-          <thead><tr><th>Month</th><th>Planned</th><th>Unplanned</th><th>Total</th><th>Running total</th></tr></thead>
+          <thead><tr><th>Month</th><th>Forecast spend</th><th>Running total</th></tr></thead>
           <tbody>${rows}</tbody>
-          <tfoot><tr><td>${PROJ_MONTHS}-month total</td><td></td><td></td><td></td><td class="cs-proj-total">${L.fmtAUD(running)}</td></tr></tfoot>
+          <tfoot><tr><td>${PROJ_MONTHS}-month total</td><td></td><td class="cs-proj-total">${L.fmtAUD(running)}</td></tr></tfoot>
         </table>
       </figure>
     </section>`;
@@ -485,17 +478,11 @@ AD.views['cost-sheet'] = (function () {
     section.querySelectorAll('.cs-proj-input').forEach((inp) => {
       inp.addEventListener('change', () => {
         const idx = +inp.dataset.idx;
-        const field = inp.dataset.field;
         const val = Math.max(0, parseFloat(inp.value) || 0);
         const p = proj[idx];
         if (!p) return;
-        const ov = projOverrides[p.key] || { planned: p.defaultPlanned, unplanned: p.defaultUnplanned };
-        ov[field] = val;
-        if (Math.abs(ov.planned - p.defaultPlanned) < 0.5 && Math.abs(ov.unplanned - p.defaultUnplanned) < 0.5) {
-          delete projOverrides[p.key];
-        } else {
-          projOverrides[p.key] = ov;
-        }
+        if (Math.abs(val - p.defaultTotal) < 0.5) { delete projOverrides[p.key]; }
+        else { projOverrides[p.key] = val; }
         saveOverrides();
         draw();
       });
