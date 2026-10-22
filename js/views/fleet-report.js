@@ -363,11 +363,10 @@ AD.fleetReport = (function () {
     // Zebra fill for alternating rows.
     zebra:    { fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR.ruleSoft } } },
 
-    // Totals row — bold with top double rule.
+    // Totals row — bold with top rule.
     total:    {
       font: { name: FONT_HEAD, size: 11, bold: true, color: { argb: COLOR.navy } },
-      fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR.mintSoft } },
-      border: { ...borderAll(), top: { style: 'double', color: { argb: COLOR.navy } } }
+      border: { ...borderAll(), top: { style: 'medium', color: { argb: COLOR.navy } } }
     },
 
     // Metric tile for the summary sheet.
@@ -388,10 +387,17 @@ AD.fleetReport = (function () {
 
   // Tone colour for variance / status cells.
   function tone(kind) {
-    if (kind === 'good')  return { font: { color: { argb: COLOR.green } }, fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR.greenSoft } } };
-    if (kind === 'warn')  return { font: { color: { argb: COLOR.amber } }, fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR.amberSoft } } };
-    if (kind === 'bad')   return { font: { color: { argb: COLOR.red }   }, fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR.redSoft   } } };
+    if (kind === 'good')  return { font: { bold: true, color: { argb: COLOR.green } } };
+    if (kind === 'warn')  return { font: { bold: true, color: { argb: COLOR.amber } } };
+    if (kind === 'bad')   return { font: { bold: true, color: { argb: COLOR.red   } } };
     return {};
+  }
+
+  function statusDot(kind) {
+    if (kind === 'good') return '● ';
+    if (kind === 'warn') return '● ';
+    if (kind === 'bad')  return '● ';
+    return '';
   }
 
   function applyStyle(cell, ...parts) {
@@ -439,53 +445,55 @@ AD.fleetReport = (function () {
     // Title block, further down the band.
     ws.mergeCells('B9:J10');
     const title = ws.getCell('B9');
-    title.value = 'Fleet Performance Report';
+    title.value = 'Monthly Fleet Report';
     title.font = { name: FONT_HEAD, size: 32, bold: true, color: { argb: COLOR.navy } };
     title.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
 
     ws.mergeCells('B11:J11');
     const sub = ws.getCell('B11');
-    sub.value = `${T.MONTHS[data.now.month - 1]} ${data.now.year} · issued ${T.fmtKey(data.today)}`;
-    sub.font = { name: FONT_HEAD, size: 14, color: { argb: COLOR.muted } };
+    sub.value = `${T.MONTHS[data.now.month - 1]} ${data.now.year}`;
+    sub.font = { name: FONT_HEAD, size: 16, color: { argb: COLOR.muted } };
     sub.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+
+    ws.mergeCells('B12:J12');
+    ws.getCell('B12').value = `Issued ${T.fmtKey(data.today)}`;
+    ws.getCell('B12').font = { name: FONT_BODY, size: 10, color: { argb: COLOR.muted } };
+    ws.getCell('B12').alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
 
     // Mint accent rule under the title.
     for (let c = 2; c <= 10; c++) {
-      ws.getCell(13, c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR.mint } };
+      ws.getCell(14, c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR.mint } };
     }
-    ws.getRow(13).height = 4;
+    ws.getRow(14).height = 3;
 
-    // Overview block — plain prose, kept short.
-    ws.mergeCells('B16:J16');
-    ws.getCell('B16').value = 'Overview';
-    applyStyle(ws.getCell('B16'), styles.h2);
+    // Notes block — concise, no fluff.
+    ws.mergeCells('B17:J17');
+    ws.getCell('B17').value = 'Notes';
+    applyStyle(ws.getCell('B17'), styles.h2);
 
-    ws.mergeCells('B18:J22');
-    const overview = ws.getCell('B18');
-    overview.value =
-      `This report summarises fleet performance for ${T.MONTHS[data.now.month - 1]} ${data.now.year} against the ` +
-      `12-month rolling baseline. It covers monthly and year-to-date spend against ` +
-      `target, a snapshot of compliance and defects, and the full vehicle register.\n\n` +
-      `The spend target is derived from the trailing twelve months of recorded ` +
-      `services and resolved defects. Replace it with a formally set budget once ` +
-      `one is in place.`;
-    overview.font = { name: FONT_BODY, size: 11, color: { argb: COLOR.ink } };
-    overview.alignment = { wrapText: true, vertical: 'top', horizontal: 'left', indent: 1 };
+    ws.mergeCells('B19:J21');
+    const notes = ws.getCell('B19');
+    notes.value =
+      `•  Covers spend, compliance, defects and the full vehicle register for ${T.MONTHS[data.now.month - 1]} ${data.now.year}.\n` +
+      `•  Spend target is the trailing 12-month average. Replace with a set budget when available.\n` +
+      `•  Recommendations are flagged from variance, compliance and defect thresholds.`;
+    notes.font = { name: FONT_BODY, size: 11, color: { argb: COLOR.ink } };
+    notes.alignment = { wrapText: true, vertical: 'top', horizontal: 'left', indent: 1 };
 
     // Contents block.
-    ws.mergeCells('B25:J25');
-    ws.getCell('B25').value = 'Contents';
-    applyStyle(ws.getCell('B25'), styles.h2);
+    ws.mergeCells('B24:J24');
+    ws.getCell('B24').value = 'Contents';
+    applyStyle(ws.getCell('B24'), styles.h2);
 
     const contents = [
-      ['1', 'Executive summary',     'Key metrics, composition and trends'],
-      ['2', 'Monthly spend',          'Twelve-month table with in-cell visual bars'],
+      ['1', 'Executive summary',     'Key metrics, fleet composition and trends'],
+      ['2', 'Monthly spend',          'Twelve-month table with variance analysis'],
       ['3', 'Compliance and risk',    'Rego, servicing and open defects'],
-      ['4', 'Vehicle register',       'Full fleet with odometer bars'],
-      ['5', 'Recommendations',        'Data-driven actions ordered by priority']
+      ['4', 'Vehicle register',       'Full fleet with status and odometer'],
+      ['5', 'Recommendations',        'Actions flagged by this month\'s figures']
     ];
     contents.forEach((row, i) => {
-      const r = 27 + i;
+      const r = 26 + i;
       ws.getCell(`B${r}`).value = row[0];
       ws.getCell(`B${r}`).font = { name: FONT_HEAD, size: 11, bold: true, color: { argb: COLOR.mint } };
       ws.getCell(`B${r}`).alignment = { vertical: 'middle', horizontal: 'left' };
@@ -504,7 +512,7 @@ AD.fleetReport = (function () {
     ws.getRow(46).height = 22;
     ws.mergeCells('B46:J46');
     const foot = ws.getCell('B46');
-    foot.value = 'Astrea Group Pty Ltd · Fleet Operations · Confidential';
+    foot.value = 'Astrea Group Pty Ltd · Fleet Operations · Internal use';
     foot.font = { name: FONT_BODY, size: 10, color: { argb: COLOR.white } };
     foot.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
   }
@@ -572,7 +580,7 @@ AD.fleetReport = (function () {
       ws.getCell(r, 4).value = tgt;    applyStyle(ws.getCell(r, 4), styles.cellNum);
       ws.getCell(r, 5).value = varc;   applyStyle(ws.getCell(r, 5), styles.cellNum);
       const statusText = kind === 'good' ? 'Under target' : kind === 'bad' ? 'Over target' : kind === 'warn' ? 'On track' : '';
-      ws.getCell(r, 6).value = statusText;
+      ws.getCell(r, 6).value = statusText ? statusDot(kind) + statusText : '';
       applyStyle(ws.getCell(r, 6), styles.cell, tone(kind));
       ws.getCell(r, 6).alignment = { ...styles.cell.alignment, horizontal: 'center', indent: 0 };
       if (kind) applyStyle(ws.getCell(r, 5), tone(kind));
@@ -608,7 +616,9 @@ AD.fleetReport = (function () {
     fleetRows.forEach(([label, val, kind, fmt], i) => {
       const r = fh + 1 + i;
       ws.getRow(r).height = 20;
-      ws.getCell(r, 2).value = label; applyStyle(ws.getCell(r, 2), styles.cell);
+      ws.getCell(r, 2).value = kind ? statusDot(kind) + label : label;
+      applyStyle(ws.getCell(r, 2), styles.cell);
+      if (kind) applyStyle(ws.getCell(r, 2), tone(kind));
       const valCell = ws.getCell(r, 3);
       valCell.value = val;
       applyStyle(valCell, fmt === 'pct' ? styles.cellPct : styles.cellInt);
@@ -638,12 +648,6 @@ AD.fleetReport = (function () {
       if (i % 2 === 1) [2, 3, 6].forEach((c) => applyStyle(ws.getCell(r, c), styles.zebra));
     });
     const compLast = compRow + data.byType.length;
-    if (data.byType.length) {
-      ws.addConditionalFormatting({
-        ref: 'C' + compFirst + ':C' + compLast,
-        rules: [{ type: 'dataBar', priority: 1, showValue: true, gradient: true, cfvo: [{ type: 'min' }, { type: 'max' }], color: { argb: COLOR.mint } }]
-      });
-    }
 
     // ---- Top spenders this month ----
     let spRow = compLast + 3;
@@ -666,12 +670,6 @@ AD.fleetReport = (function () {
       if (i % 2 === 1) [2, 3, 5].forEach((c) => applyStyle(ws.getCell(r, c), styles.zebra));
     });
     const spLast = spRow + data.topSpenders.length;
-    if (data.topSpenders.length) {
-      ws.addConditionalFormatting({
-        ref: 'E' + spFirst + ':E' + spLast,
-        rules: [{ type: 'dataBar', priority: 1, showValue: true, gradient: true, cfvo: [{ type: 'min' }, { type: 'max' }], color: { argb: 'FFFBBF24' } }]
-      });
-    }
 
     // ---- Month-on-month comparison ----
     let moRow = spLast + 3;
@@ -707,20 +705,18 @@ AD.fleetReport = (function () {
       applyStyle(ws.getCell(r, 5), fmt);
       if (trend != null) {
         const up = trend > 0;
-        ws.getCell(r, 6).value = (up ? '+' : '') + Math.round(trend * 100) + '%';
+        const arrow = up ? '▲' : '▼';
+        ws.getCell(r, 6).value = arrow + ' ' + (up ? '+' : '') + Math.round(trend * 100) + '%';
         applyStyle(ws.getCell(r, 6), styles.cell, tone(up ? 'bad' : 'good'));
         ws.getCell(r, 6).alignment = { vertical: 'middle', horizontal: 'center' };
       } else {
-        ws.getCell(r, 6).value = ''; applyStyle(ws.getCell(r, 6), styles.cell);
+        ws.getCell(r, 6).value = '—'; applyStyle(ws.getCell(r, 6), styles.cell);
+        ws.getCell(r, 6).alignment = { vertical: 'middle', horizontal: 'center' };
+        ws.getCell(r, 6).font = { ...styles.cell.font, color: { argb: COLOR.muted } };
       }
       if (i % 2 === 1) [2, 3, 4, 5, 6].forEach((c) => applyStyle(ws.getCell(r, c), styles.zebra));
     });
-    // Data bars on the current-month column
     const moFirst = moRow + 1, moLast = moRow + moStats.length;
-    ws.addConditionalFormatting({
-      ref: 'C' + moFirst + ':C' + moLast,
-      rules: [{ type: 'dataBar', priority: 1, showValue: true, gradient: true, cfvo: [{ type: 'min' }, { type: 'max' }], color: { argb: COLOR.navy2 } }]
-    });
   }
 
   function buildSpend(wb, data) {
@@ -775,9 +771,8 @@ AD.fleetReport = (function () {
       ws.getCell(r, 9).value = mo.svcCount + mo.defCount; applyStyle(ws.getCell(r, 9), styles.cellInt);
 
       if (isCurrent) {
-        for (let c = 2; c <= 9; c++) {
-          applyStyle(ws.getCell(r, c), { font: { bold: true }, fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR.mintSoft } } });
-        }
+        for (let c = 2; c <= 9; c++) applyStyle(ws.getCell(r, c), { font: { bold: true } });
+        ws.getCell(r, 2).border = { ...ws.getCell(r, 2).border, left: { style: 'thick', color: { argb: COLOR.mint } } };
       } else if (i % 2 === 1) {
         for (let c = 2; c <= 9; c++) applyStyle(ws.getCell(r, c), styles.zebra);
       }
@@ -802,18 +797,7 @@ AD.fleetReport = (function () {
       applyStyle(ws.getCell(totRow, c), styles.total);
     }
 
-    // Data bars — in-cell bar charts for a visual spend profile
     const barFirst = hdrRow + 1, barLast = hdrRow + data.months.length;
-    [['C', COLOR.mint], ['D', 'FFFBBF24'], ['E', COLOR.navy2]].forEach(([col, argb]) => {
-      ws.addConditionalFormatting({
-        ref: col + barFirst + ':' + col + barLast,
-        rules: [{
-          type: 'dataBar', priority: 1, showValue: true, gradient: true,
-          cfvo: [{ type: 'min' }, { type: 'max' }],
-          color: { argb }
-        }]
-      });
-    });
 
     // Projection block
     const projRow = totRow + 3;
@@ -884,7 +868,7 @@ AD.fleetReport = (function () {
         ws.getCell(row, 2).value = x.v.id;    applyStyle(ws.getCell(row, 2), styles.cell);
         ws.getCell(row, 3).value = x.v.rego || ''; applyStyle(ws.getCell(row, 3), styles.cell);
         const kind = x.r.state === 'overdue' ? 'bad' : 'warn';
-        ws.getCell(row, 4).value = x.r.state === 'overdue' ? 'Expired' : 'Within 2 weeks';
+        ws.getCell(row, 4).value = statusDot(kind) + (x.r.state === 'overdue' ? 'Expired' : 'Within 2 weeks');
         applyStyle(ws.getCell(row, 4), styles.cell, tone(kind));
         ws.getCell(row, 5).value = x.v.regoExpiry || ''; applyStyle(ws.getCell(row, 5), styles.cellDate);
         ws.getCell(row, 5).alignment = { ...styles.cellDate.alignment, horizontal: 'right' };
@@ -916,7 +900,7 @@ AD.fleetReport = (function () {
         ws.getCell(row, 2).value = x.v.id;    applyStyle(ws.getCell(row, 2), styles.cell);
         ws.getCell(row, 3).value = x.v.type || ''; applyStyle(ws.getCell(row, 3), styles.cell);
         const kind = x.s.state === 'overdue' ? 'bad' : 'warn';
-        ws.getCell(row, 4).value = x.s.state === 'overdue' ? 'Overdue' : 'Due soon';
+        ws.getCell(row, 4).value = statusDot(kind) + (x.s.state === 'overdue' ? 'Overdue' : 'Due soon');
         applyStyle(ws.getCell(row, 4), styles.cell, tone(kind));
         ws.getCell(row, 5).value = x.v.nextServiceDate || ''; applyStyle(ws.getCell(row, 5), styles.cellDate);
         ws.getCell(row, 5).alignment = { ...styles.cellDate.alignment, horizontal: 'right' };
@@ -946,7 +930,9 @@ AD.fleetReport = (function () {
     priList.forEach(([label, val, kind], i) => {
       row += 1;
       ws.getRow(row).height = 20;
-      ws.getCell(row, 2).value = label; applyStyle(ws.getCell(row, 2), styles.cell);
+      ws.getCell(row, 2).value = kind ? statusDot(kind) + label : label;
+      applyStyle(ws.getCell(row, 2), styles.cell);
+      if (kind) applyStyle(ws.getCell(row, 2), tone(kind));
       ws.getCell(row, 3).value = val;   applyStyle(ws.getCell(row, 3), styles.cellInt);
       if (kind) applyStyle(ws.getCell(row, 3), tone(kind));
       if (i % 2 === 1) [2, 3].forEach((c) => applyStyle(ws.getCell(row, c), styles.zebra));
@@ -1001,23 +987,24 @@ AD.fleetReport = (function () {
       applyStyle(ws.getCell(r, 10), styles.cell);
       ws.getCell(r, 10).alignment = { ...styles.cell.alignment, horizontal: 'right', indent: 0 };
 
-      // Status cell tone
+      // Status cell with dot indicator
       const st = v.status;
-      if (st === 'Out of service') applyStyle(ws.getCell(r, 6), tone('bad'));
-      else if (st === 'In workshop') applyStyle(ws.getCell(r, 6), tone('warn'));
+      if (st === 'Out of service') {
+        ws.getCell(r, 6).value = statusDot('bad') + st;
+        applyStyle(ws.getCell(r, 6), tone('bad'));
+      } else if (st === 'In workshop') {
+        ws.getCell(r, 6).value = statusDot('warn') + st;
+        applyStyle(ws.getCell(r, 6), tone('warn'));
+      } else if (st === 'Available') {
+        ws.getCell(r, 6).value = statusDot('good') + st;
+        applyStyle(ws.getCell(r, 6), tone('good'));
+      }
 
       if (i % 2 === 1) [2, 3, 4, 5, 6, 7, 8, 9, 10].forEach((c) => applyStyle(ws.getCell(r, c), styles.zebra));
     });
 
     ws.autoFilter = { from: { row: hdrRow, column: 2 }, to: { row: hdrRow, column: 10 } };
 
-    // Data bars on odometer column
-    if (sorted.length) {
-      ws.addConditionalFormatting({
-        ref: 'G' + (hdrRow + 1) + ':G' + (hdrRow + sorted.length),
-        rules: [{ type: 'dataBar', priority: 1, showValue: true, gradient: true, cfvo: [{ type: 'min' }, { type: 'max' }], color: { argb: COLOR.paper } }]
-      });
-    }
   }
 
   // Section bar — navy row spanning columns, used to break up a sheet.
@@ -1026,7 +1013,14 @@ AD.fleetReport = (function () {
     const cell = ws.getCell(`${startCol}${row}`);
     cell.value = text;
     applyStyle(cell, styles.sectionBar);
-    ws.getRow(row).height = 22;
+    ws.getRow(row).height = 26;
+    // Thin mint accent below
+    const r2 = row + 1;
+    const startC = startCol.charCodeAt(0) - 64;
+    const endC = endCol.charCodeAt(0) - 64;
+    for (let c = startC; c <= endC; c++) {
+      ws.getCell(r2, c).border = { top: { style: 'medium', color: { argb: COLOR.mint } } };
+    }
   }
 
   function aud(n) {
@@ -1048,7 +1042,7 @@ AD.fleetReport = (function () {
     ws.getRow(2).height = 3;
 
     ws.mergeCells('B4:E4');
-    ws.getCell('B4').value = 'Ordered by priority and urgency. Derived from the fleet data in this report.';
+    ws.getCell('B4').value = 'Actions flagged by this month\'s figures, ordered by priority.';
     ws.getCell('B4').font = { name: FONT_BODY, size: 10, italic: true, color: { argb: COLOR.muted } };
     ws.getCell('B4').alignment = { wrapText: true, vertical: 'top', horizontal: 'left', indent: 1 };
 
@@ -1107,15 +1101,8 @@ AD.fleetReport = (function () {
     // Method note
     row++;
     ws.mergeCells('B' + row + ':E' + row);
-    ws.getCell('B' + row).value = 'Methodology';
-    applyStyle(ws.getCell('B' + row), styles.h2);
-    row += 2;
-    ws.mergeCells('B' + row + ':E' + (row + 2));
-    ws.getCell('B' + row).value =
-      'These recommendations are generated by a rule-based engine that analyses the fleet data recorded in Astrea Drive. ' +
-      'Each rule has a threshold and weight; the top 5 by weight are shown above. They are not predictions — they describe ' +
-      'what the data shows and suggest a concrete action. Replace or adjust them as operational context warrants.';
-    ws.getCell('B' + row).font = { name: FONT_BODY, size: 10, color: { argb: COLOR.muted } };
+    ws.getCell('B' + row).value = 'Flagged automatically from spend variance, compliance state and defect ageing thresholds. Review with the fleet manager before acting.';
+    ws.getCell('B' + row).font = { name: FONT_BODY, size: 9, italic: true, color: { argb: COLOR.muted } };
     ws.getCell('B' + row).alignment = { wrapText: true, vertical: 'top', horizontal: 'left', indent: 1 };
   }
 

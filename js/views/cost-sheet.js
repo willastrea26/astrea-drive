@@ -123,6 +123,13 @@ AD.views['cost-sheet'] = (function () {
     const shareFoot = !spend ? '<small class="cs-delta">Nothing recorded</small>'
       : `<small class="cs-delta${shareTone ? ' cs-delta-' + shareTone : ''}">${L.fmtAUD(unplanned)} of ${L.fmtAUD(spend)}${haveBaseline && avgSpend ? ` · ${Math.round(avgShare)}% avg` : ''}</small>`;
 
+    // Projected rest-of-year spend for the KPI
+    const projForKpi = projectedMonths(end);
+    const curYear = T.parseKey(end).y;
+    const restOfYearMonths = projForKpi.filter(p => { const yr = parseInt(p.key.split(' ')[1]); return yr === curYear; });
+    const projRestTotal = restOfYearMonths.reduce((n, p) => n + p.total, 0);
+    const projMonthAvg = restOfYearMonths.length ? projRestTotal / restOfYearMonths.length : 0;
+
     el.classList.toggle('anim-in', fresh);
     fresh = false;
 
@@ -144,6 +151,7 @@ AD.views['cost-sheet'] = (function () {
         ${kpi('Average per job', L.fmtAUD(perJob), delta(perJob, avgPerJob, haveBaseline, L.fmtAUD, true), trendTone(perJob, avgPerJob, haveBaseline, true))}
         ${kpi('Unplanned share', `${Math.round(share)}%`, shareFoot, shareTone)}
         ${kpi('Vehicles charged this week', `${vehicleCount}`, `<small class="cs-delta">of ${fleet} in the fleet · ${haveBaseline ? avgVehicleCount.toFixed(1) + ' avg' : 'no prior weeks'}</small>`)}
+        ${restOfYearMonths.length ? kpi('Projected to year-end', L.fmtAUD(projRestTotal), `<small class="cs-delta">${restOfYearMonths.length} month${restOfYearMonths.length === 1 ? '' : 's'} remaining · ${L.fmtAUD(projMonthAvg)}/mo avg</small>`) : ''}
       </div>
 
       ${trend(end)}
@@ -308,11 +316,19 @@ AD.views['cost-sheet'] = (function () {
       const c2y = clampY(p2.y - (p3.y - p1.y) / 6);
       return `${d} C${c1x.toFixed(1)},${c1y.toFixed(1)} ${c2x.toFixed(1)},${c2y.toFixed(1)} ${p2.x.toFixed(1)},${p2.y.toFixed(1)}`;
     }, `M${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}`);
-    const lineD = spline(coords);
-    const plannedD = spline(plannedCoords);
     const floorY = (padT + plotH).toFixed(1);
-    const areaD = `${plannedD} L${x(n - 1).toFixed(1)},${floorY} L${x(0).toFixed(1)},${floorY} Z`;
-    const bandD = `${lineD} ${spline([...plannedCoords].reverse()).replace(/^M/, 'L')} Z`;
+
+    // Separate paths for historical vs forecast so fills and glow can't bleed
+    const histCoords = hasProj ? coords.slice(0, splitIdx + 1) : coords;
+    const histPlanned = hasProj ? plannedCoords.slice(0, splitIdx + 1) : plannedCoords;
+    const histLineD = spline(histCoords);
+    const histPlannedD = spline(histPlanned);
+    const areaD = `${histPlannedD} L${histCoords[histCoords.length - 1].x.toFixed(1)},${floorY} L${histCoords[0].x.toFixed(1)},${floorY} Z`;
+    const bandD = `${histLineD} ${spline([...histPlanned].reverse()).replace(/^M/, 'L')} Z`;
+    // Forecast: standalone zone after NOW — NOT connected to the actuals
+    const projCoords = hasProj ? coords.slice(splitIdx + 1) : [];
+    const projLineD = projCoords.length >= 2 ? spline(projCoords) : (projCoords.length === 1 ? `M${projCoords[0].x.toFixed(1)},${projCoords[0].y.toFixed(1)}` : '');
+    const projAreaD = projCoords.length ? `${projLineD.replace(/^M/, 'M')} L${projCoords[projCoords.length - 1].x.toFixed(1)},${floorY} L${projCoords[0].x.toFixed(1)},${floorY} Z` : '';
     const gridY = [0, 0.5, 1].map((f) => padT + plotH * (1 - f));
     const hline = (gy, cls) => `<line x1="${padL}" y1="${gy.toFixed(1)}" x2="${W - padR}" y2="${gy.toFixed(1)}" class="${cls}"></line>`;
     const grid = gridY.map((gy) => hline(gy, 'cs-grid')).join('')
@@ -331,14 +347,11 @@ AD.views['cost-sheet'] = (function () {
       return `<text class="cs-axis-x${p.projected ? ' cs-proj-label' : ''}" x="${x(i).toFixed(1)}" y="${H - 6}" text-anchor="middle">${esc(txt)}</text>`;
     }).join('');
 
-    // "Now" vertical marker and clip paths for the historical/projected split
+    // "Now" vertical marker
     const nowX = hasProj ? x(splitIdx).toFixed(1) : null;
     const nowMarker = nowX
       ? `<line x1="${nowX}" y1="${padT}" x2="${nowX}" y2="${padT + plotH}" class="cs-now-line"></line>
          <text class="cs-now-label" x="${nowX}" y="${padT - 4}" text-anchor="middle">Now</text>` : '';
-    const clipDefs = hasProj
-      ? `<clipPath id="cs-hist-clip"><rect x="0" y="0" width="${nowX}" height="${H}"/></clipPath>
-         <clipPath id="cs-proj-clip"><rect x="${nowX}" y="0" width="${W}" height="${H}"/></clipPath>` : '';
 
     const marks = points.map((p, i) => {
       const cx = x(i).toFixed(1), cy = y(p.total).toFixed(1);
@@ -360,14 +373,13 @@ AD.views['cost-sheet'] = (function () {
     let svgBody;
     if (hasProj) {
       svgBody = `${grid}
-          <g clip-path="url(#cs-hist-clip)">
-            <path d="${areaD}" class="cs-area"></path>
-            <path d="${bandD}" class="cs-band"></path>
-            <path d="${plannedD}" class="cs-line-planned" pathLength="1"></path>
-            <path d="${lineD}" class="cs-line-path" pathLength="1"></path>
-          </g>
-          <g clip-path="url(#cs-proj-clip)" class="cs-proj-g">
-            <path d="${lineD}" class="cs-line-path" pathLength="1"></path>
+          <path d="${areaD}" class="cs-area"></path>
+          <path d="${bandD}" class="cs-band"></path>
+          <path d="${histPlannedD}" class="cs-line-planned" pathLength="1"></path>
+          <path d="${histLineD}" class="cs-line-path" pathLength="1"></path>
+          <g class="cs-proj-g">
+            ${projAreaD ? `<path d="${projAreaD}" class="cs-proj-area"></path>` : ''}
+            ${projLineD ? `<path d="${projLineD}" class="cs-line-path" pathLength="1"></path>` : ''}
           </g>
           ${nowMarker}
           ${yTicks}${xTicks}${marks}`;
@@ -375,8 +387,8 @@ AD.views['cost-sheet'] = (function () {
       svgBody = `${grid}
           <path d="${areaD}" class="cs-area"></path>
           <path d="${bandD}" class="cs-band"></path>
-          <path d="${plannedD}" class="cs-line-planned" pathLength="1"></path>
-          <path d="${lineD}" class="cs-line-path" pathLength="1"></path>
+          <path d="${histPlannedD}" class="cs-line-planned" pathLength="1"></path>
+          <path d="${histLineD}" class="cs-line-path" pathLength="1"></path>
           ${yTicks}${xTicks}${marks}`;
     }
 
@@ -429,7 +441,6 @@ AD.views['cost-sheet'] = (function () {
               <feComposite in2="blur" operator="in"/>
               <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
             </filter>
-            ${clipDefs}
           </defs>
           ${svgBody}
         </svg>

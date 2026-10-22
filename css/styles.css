@@ -1414,6 +1414,7 @@ input[type=text], input[type=number], input[type=date], input[type=datetime-loca
 .cs-axis-x, .cs-axis-y { font-size: 10.5px; fill: var(--muted); font-family: var(--font); opacity: .7; }
 
 /* Projected segment — purple with glow */
+.cs-proj-area { fill: url(#cs-proj-area-grad); }
 .cs-proj-g .cs-line-path { stroke: var(--violet); stroke-dasharray: 6 4; opacity: .9; filter: url(#cs-glow-violet); }
 .cs-now-line { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; opacity: .4; }
 .cs-now-label { font-size: 9.5px; fill: var(--muted); font-family: var(--font); text-transform: uppercase; letter-spacing: .6px; opacity: .6; }

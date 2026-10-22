@@ -197,7 +197,7 @@ AD.fleetReportPdf = (function () {
 
   /* ------------------------------------------------------------------ chrome */
 
-  function coverPage(g, data, logoWhite) {
+  function coverPage(g, data) {
     const { doc } = g;
     // Navy field across the top two-fifths.
     g.rect(0, 0, PAGE.w, 118, C.navy);
@@ -209,14 +209,7 @@ AD.fleetReportPdf = (function () {
     for (let i = -60; i < 240; i += 14) doc.line(i, 0, i + 70, 118);
     doc.restoreGraphicsState();
 
-    if (logoWhite) {
-      try { doc.addImage(logoWhite, 'PNG', M.l, 20, 52, 14, undefined, 'FAST'); }
-      catch (e) { g.text('ASTREA', M.l, 31, { size: 20, bold: true, color: C.white }); }
-    } else {
-      g.text('ASTREA', M.l, 31, { size: 20, bold: true, color: C.white });
-    }
-
-    g.text('FLEET OPERATIONS', PAGE.w - M.r, 30, { size: 8, bold: true, color: C.mint, align: 'right' });
+    g.text('ASTREA', M.l, 31, { size: 22, bold: true, color: C.white });
 
     g.text('Monthly', M.l, 58, { size: 14, color: [160, 180, 198] });
     g.text('Fleet Report', M.l, 75, { size: 30, bold: true, color: C.white });
@@ -229,12 +222,12 @@ AD.fleetReportPdf = (function () {
 
     /* Three headline figures sitting over the fold. */
     const figs = [
-      { label: 'SPEND THIS MONTH', value: AD.fleetReport.aud(data.mtdActual),
-        sub: data.momPct === null ? 'No prior month' :
-          `${data.momPct >= 0 ? '+' : '-'}${Math.round(Math.abs(data.momPct) * 100)}% vs previous full month` },
-      { label: 'FLEET AVAILABLE', value: data.vehicles.length ? Math.round(data.availabilityPct * 100) + '%' : 'N/A',
-        sub: `${data.statusCounts['Available']} of ${data.vehicles.length} vehicles` },
-      { label: 'NEEDS ATTENTION', value: String(data.regoExp.length + data.svcOverdue.length + data.defCounts.Critical),
+      { label: 'MONTH SPEND', value: AD.fleetReport.aud(data.mtdActual),
+        sub: data.momPct === null ? '' :
+          `${data.momPct >= 0 ? '+' : ''}${Math.round(data.momPct * 100)}% on last month` },
+      { label: 'AVAILABILITY', value: data.vehicles.length ? Math.round(data.availabilityPct * 100) + '%' : 'N/A',
+        sub: `${data.statusCounts['Available']} of ${data.vehicles.length}` },
+      { label: 'ACTION NEEDED', value: String(data.regoExp.length + data.svcOverdue.length + data.defCounts.Critical),
         sub: 'Expired, overdue or critical' }
     ];
     const cardW = (CONTENT_W - 12) / 3;
@@ -269,11 +262,11 @@ AD.fleetReportPdf = (function () {
     g.line(M.l, y, M.l + CONTENT_W, y, C.rule, 0.3);
     y += 7;
     const toc = [
-      ['02', 'Executive summary', 'Spend vs target, fleet health'],
-      ['03', 'Spend analysis', '12-month trend, planned vs unplanned'],
+      ['02', 'Executive summary', 'KPIs, spend vs target, compliance'],
+      ['03', 'Spend analysis', '12-month chart and table'],
       ['04', 'Fleet and compliance', 'Availability, rego, servicing, defects'],
-      ['05', 'The month in numbers', 'Stats, top spenders, spend mix'],
-      ['06', 'Recommendations', 'What to act on']
+      ['05', monthName + ' in numbers', 'Comparison, top spenders, spend mix'],
+      ['06', 'Recommendations', 'Flagged actions']
     ];
     toc.forEach(([n, title, sub]) => {
       g.text(String(data.sectionPages[title] || n).padStart(2, '0'), M.l, y, { size: 9.5, bold: true, color: C.mintInk });
@@ -289,16 +282,21 @@ AD.fleetReportPdf = (function () {
   }
 
   /** Running header + footer on every page after the cover. */
-  function chrome(g, data, title, pageNo) {
+  function chrome(g, data, title, pageNo, logoImg) {
     g.rect(0, 0, PAGE.w, 15, C.navy);
-    g.text('ASTREA', M.l, 9.5, { size: 9, bold: true, color: C.white });
-    g.rect(M.l + 19, 5.5, 0.4, 5, C.mint);
-    g.text(title, M.l + 23, 9.5, { size: 9, color: [185, 203, 218] });
+    if (logoImg) {
+      try { g.doc.addImage(logoImg, 'PNG', M.l, 3.2, 36, 9.6, undefined, 'FAST'); }
+      catch (e) { g.text('ASTREA', M.l, 9.5, { size: 9, bold: true, color: C.white }); }
+    } else {
+      g.text('ASTREA', M.l, 9.5, { size: 9, bold: true, color: C.white });
+    }
+    g.rect(M.l + (logoImg ? 40 : 19), 5.5, 0.4, 5, C.mint);
+    g.text(title, M.l + (logoImg ? 44 : 23), 9.5, { size: 9, color: [185, 203, 218] });
     g.text(`${T.MONTHS[data.now.month - 1]} ${data.now.year}`, PAGE.w - M.r, 9.5,
       { size: 8.5, color: C.mint, align: 'right' });
 
     g.line(M.l, PAGE.h - 13, PAGE.w - M.r, PAGE.h - 13, C.rule, 0.3);
-    g.text('Fleet Performance Report', M.l, PAGE.h - 8.5, { size: 7.5, color: C.muted });
+    g.text('Astrea Fleet Report', M.l, PAGE.h - 8.5, { size: 7.5, color: C.muted });
     g.text(String(pageNo).padStart(2, '0'), PAGE.w - M.r, PAGE.h - 8.5,
       { size: 7.5, bold: true, color: C.navy, align: 'right' });
   }
@@ -316,7 +314,7 @@ AD.fleetReportPdf = (function () {
   function summaryPage(g, data) {
     let y = 28;
     y = heading(g, M.l, y, 'Executive summary',
-      `${T.MONTHS[data.now.month - 1]} ${data.now.year} against the 12-month baseline`);
+      `${T.MONTHS[data.now.month - 1]} ${data.now.year}`);
 
     /* Spend against target — three comparison rows. */
     const rows = [
@@ -329,7 +327,7 @@ AD.fleetReportPdf = (function () {
     ];
 
     g.roundRect(M.l, y, CONTENT_W, 62, 2.5, C.ruleSoft);
-    g.text('SPEND AGAINST TARGET', M.l + 7, y + 9, { size: 7.5, bold: true, color: C.muted });
+    g.text('SPEND VS TARGET', M.l + 7, y + 9, { size: 7.5, bold: true, color: C.muted });
 
     let ry = y + 17;
     rows.forEach((r) => {
@@ -366,19 +364,19 @@ AD.fleetReportPdf = (function () {
     /* Four metric tiles. */
     const share = data.unplannedShare;
     const tiles = [
-      { label: 'UNPLANNED SHARE', value: data.curMonth.total > 0 ? Math.round(share * 100) + '%' : 'N/A',
+      { label: 'UNPLANNED', value: data.curMonth.total > 0 ? Math.round(share * 100) + '%' : 'N/A',
         sub: `${AD.fleetReport.aud(data.curMonth.unplanned)} of ${AD.fleetReport.aud(data.curMonth.total)}`,
         tone: share >= 0.4 ? C.red : share >= 0.25 ? C.amber : C.green,
         frac: share },
-      { label: 'FLEET AVAILABLE', value: data.vehicles.length ? Math.round(data.availabilityPct * 100) + '%' : 'N/A',
-        sub: `${data.statusCounts['Available']} of ${data.vehicles.length} vehicles`,
+      { label: 'AVAILABLE', value: data.vehicles.length ? Math.round(data.availabilityPct * 100) + '%' : 'N/A',
+        sub: `${data.statusCounts['Available']} of ${data.vehicles.length}`,
         tone: !data.vehicles.length ? C.muted : data.availabilityPct >= 0.7 ? C.green : data.availabilityPct >= 0.5 ? C.amber : C.red,
         frac: data.availabilityPct },
-      { label: 'VEHICLES CHARGED', value: String(data.vehiclesCharged),
-        sub: `of ${data.vehicles.length} in the fleet this month`,
+      { label: 'CHARGED', value: String(data.vehiclesCharged),
+        sub: `of ${data.vehicles.length} vehicles`,
         tone: C.mintInk, frac: data.vehicles.length ? data.vehiclesCharged / data.vehicles.length : 0 },
-      { label: 'OPEN DEFECTS', value: String(data.openDefects.length),
-        sub: `${data.defCounts.Critical} critical · ${data.defCounts.High} high`,
+      { label: 'DEFECTS', value: String(data.openDefects.length),
+        sub: `${data.defCounts.Critical} critical, ${data.defCounts.High} high`,
         tone: data.defCounts.Critical ? C.red : data.defCounts.High ? C.amber : C.green,
         frac: null }
     ];
@@ -398,7 +396,7 @@ AD.fleetReportPdf = (function () {
     y += 44;
 
     /* Compliance summary table. */
-    y = heading(g, M.l, y, 'Compliance at a glance');
+    y = heading(g, M.l, y, 'Compliance');
     const comp = [
       ['Registration', data.regoExp.length, data.regoSoon.length, data.regoOk.length, 'expired', 'due in 14d', 'current', data.regoUnknown.length],
       ['Servicing',    data.svcOverdue.length, data.svcSoon.length, data.svcOk.length, 'overdue', 'due soon*', 'no alert']
@@ -437,7 +435,7 @@ AD.fleetReportPdf = (function () {
       ['Low',      data.defCounts.Low,      C.muted]
     ];
     const maxPri = Math.max(...pri.map((p) => p[1]), 1);
-    g.text('OPEN DEFECTS BY PRIORITY', M.l, y, { size: 7.5, bold: true, color: C.muted });
+    g.text('OPEN DEFECTS', M.l, y, { size: 7.5, bold: true, color: C.muted });
     y += 5;
     pri.forEach(([label, n, col]) => {
       g.text(label, M.l, y + 3, { size: 9, color: C.body });
@@ -452,7 +450,7 @@ AD.fleetReportPdf = (function () {
   function spendPage(g, data) {
     let y = 28;
     y = heading(g, M.l, y, 'Spend analysis',
-      'Planned vs unplanned, 12 months to date');
+      'Last 12 months');
 
     /* Stacked column chart. */
     const chartH = 74;
@@ -603,7 +601,7 @@ AD.fleetReportPdf = (function () {
   function fleetPage(g, data) {
     let y = 28;
     y = heading(g, M.l, y, 'Fleet and compliance',
-      `Live snapshot as of ${T.fmtKey(data.today)}`);
+      `As at ${T.fmtKey(data.today)}`);
 
     /* Three donuts across. */
     const availParts = [
@@ -662,7 +660,7 @@ AD.fleetReportPdf = (function () {
     y += dh + 12;
 
     /* Fleet by type. */
-    y = heading(g, M.l, y, 'Fleet composition', `${data.vehicles.length} vehicles by type`);
+    y = heading(g, M.l, y, 'Fleet by type');
     const typeRows = data.byType.slice(0, 6);
     if (data.byType.length > 6) typeRows.push({ type: 'Other types', count: data.byType.slice(6).reduce((n, t) => n + t.count, 0) });
     const maxType = Math.max(...typeRows.map((t) => t.count), 1);
@@ -685,7 +683,7 @@ AD.fleetReportPdf = (function () {
 
     if (attention.length) {
       y += 4;
-      y = heading(g, M.l, y, 'Needs attention', 'Vehicles requiring action');
+      y = heading(g, M.l, y, 'Needs attention');
       g.rect(M.l, y, CONTENT_W, 6.8, C.navy);
       [['Vehicle', 0, 'left'], ['Type', 32, 'left'], ['Issue', 72, 'left'], ['', CONTENT_W, 'right']]
         .forEach(([t, dx, a]) => {
@@ -710,8 +708,8 @@ AD.fleetReportPdf = (function () {
   function statsPage(g, data) {
     let y = 28;
     const monthName = T.MONTHS[data.now.month - 1];
-    y = heading(g, M.l, y, 'The month in numbers',
-      `${monthName} ${data.now.year}${data.isPartial ? ' to date' : ''}  ·  previous = full month  ·  average = rolling 12 months`);
+    y = heading(g, M.l, y, monthName + ' ' + data.now.year,
+      data.isPartial ? 'Month to date' : '');
 
     /* Comparison table: this month / last month / 12-mo avg. */
     const prev = data.prevMonth || { total: 0, planned: 0, unplanned: 0, svcCount: 0, defCount: 0 };
@@ -773,7 +771,7 @@ AD.fleetReportPdf = (function () {
     y += 12;
 
     /* Where the money went — top vehicles this month. */
-    y = heading(g, M.l, y, 'Top spenders', `Highest cost vehicles in ${monthName}`);
+    y = heading(g, M.l, y, 'Top spenders');
     if (!data.topSpenders.length) {
       g.text('No cost recorded against any vehicle this month.', M.l, y + 2,
         { size: 9, italic: true, color: C.muted });
@@ -794,7 +792,7 @@ AD.fleetReportPdf = (function () {
 
     /* Spend mix — the month's planned/unplanned split beside the twelve-month
        norm, so a shift in the balance is visible rather than inferred. */
-    y = heading(g, M.l, y, 'Spend mix', 'Planned vs unplanned split');
+    y = heading(g, M.l, y, 'Spend mix');
     const mixes = [
       { title: 'THIS MONTH', planned: data.curMonth.planned, unplanned: data.curMonth.unplanned },
       { title: 'TWELVE-MONTH AVERAGE', planned: avgPlanned, unplanned: avgUnplan }
@@ -833,18 +831,19 @@ AD.fleetReportPdf = (function () {
     /* Narrative strip. */
     const bits = [];
     if (data.momPct !== null) {
-      bits.push(`Spend ${data.momPct >= 0 ? 'up' : 'down'} ${Math.round(Math.abs(data.momPct) * 100)}% on last month${data.isPartial ? ' (month still in progress)' : ''}.`);
+      const dir = data.momPct >= 0 ? 'up' : 'down';
+      bits.push(`${dir.charAt(0).toUpperCase() + dir.slice(1)} ${Math.round(Math.abs(data.momPct) * 100)}% on last month${data.isPartial ? ' (month still running)' : ''}.`);
     }
     if (data.curMonth.total > 0) {
-      bits.push(`Unplanned share: ${Math.round(data.unplannedShare * 100)}% vs ${Math.round(data.unplannedShare12 * 100)}% 12-month norm.`);
+      bits.push(`${Math.round(data.unplannedShare * 100)}% unplanned (12-mo norm ${Math.round(data.unplannedShare12 * 100)}%).`);
     } else {
-      bits.push('No spend recorded — check records.');
+      bits.push('Nothing recorded yet — check the source data.');
     }
     if (data.avgResolveDays !== null) {
-      bits.push(`Average defect resolution: ${Math.round(data.avgResolveDays)} days.`);
+      bits.push(`Defects took ${Math.round(data.avgResolveDays)} days to close on average.`);
     }
     if (data.topShare >= 0.2 && data.topSpenders.length) {
-      bits.push(`${data.topSpenders[0].id} carried ${Math.round(data.topShare * 100)}% of spend alone.`);
+      bits.push(`${data.topSpenders[0].id} alone was ${Math.round(data.topShare * 100)}% of spend.`);
     }
 
     const narrative = bits.join(' ');
@@ -853,7 +852,7 @@ AD.fleetReportPdf = (function () {
     if (y + nh > PAGE.h - 18) {
       g.doc.addPage();
       g.setPage(g.getPage() + 1);
-      chrome(g, data, 'The month in numbers (continued)', g.getPage());
+      chrome(g, data, T.MONTHS[data.now.month - 1] + ' (continued)', g.getPage(), data._logo);
       y = 28;
     }
     g.roundRect(M.l, y, CONTENT_W, nh, 2.5, C.mintPale);
@@ -886,7 +885,7 @@ AD.fleetReportPdf = (function () {
       // Keep a card whole — push to the next page rather than splitting it.
       if (y + h > PAGE.h - 22) {
         g.doc.addPage();
-        chrome(g, data, 'Recommendations', g.getPage() + 1);
+        chrome(g, data, 'Recommendations', g.getPage() + 1, data._logo);
         g.setPage(g.getPage() + 1);
         y = 28;
       }
@@ -923,7 +922,7 @@ AD.fleetReportPdf = (function () {
       if (y > PAGE.h - 48) {
         g.doc.addPage();
         g.setPage(g.getPage() + 1);
-        chrome(g, data, 'Recommendations (continued)', g.getPage());
+        chrome(g, data, 'Recommendations (continued)', g.getPage(), data._logo);
         y = 28;
       }
       y = Math.max(y + 4, PAGE.h - 42);
@@ -1006,23 +1005,24 @@ AD.fleetReportPdf = (function () {
 
     g.setPage(1);
     data.sectionPages = {};
+    data._logo = logoWhite;
 
     const pages = [
       ['Executive summary',    summaryPage],
       ['Spend analysis',       spendPage],
       ['Fleet and compliance', fleetPage],
-      ['The month in numbers', statsPage],
+      [T.MONTHS[data.now.month - 1] + ' in numbers', statsPage],
       ['Recommendations',      recsPage]
     ];
     pages.forEach(([title, draw]) => {
       doc.addPage();
       g.setPage(g.getPage() + 1);
       data.sectionPages[title] = g.getPage();
-      chrome(g, data, title, g.getPage());
+      chrome(g, data, title, g.getPage(), logoWhite);
       draw(g, data);
     });
     doc.setPage(1);
-    coverPage(g, data, logoWhite);
+    coverPage(g, data);
 
     notify('Writing file…');
     const filename = `Astrea Fleet Report — ${monthName} ${data.now.year}.pdf`;
