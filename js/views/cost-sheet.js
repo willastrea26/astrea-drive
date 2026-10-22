@@ -403,13 +403,38 @@ AD.views['cost-sheet'] = (function () {
         <svg viewBox="0 0 ${W} ${H}" class="cs-line-svg" role="img" aria-label="${esc('Spend per ' + period + ': ' + ariaDesc)}">
           <defs>
             <linearGradient id="cs-area-grad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" style="stop-color:var(--mint);stop-opacity:.34"></stop>
+              <stop offset="0%" style="stop-color:var(--mint);stop-opacity:.38"></stop>
+              <stop offset="40%" style="stop-color:var(--mint);stop-opacity:.18"></stop>
               <stop offset="100%" style="stop-color:var(--mint);stop-opacity:0"></stop>
             </linearGradient>
             <linearGradient id="cs-band-grad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" style="stop-color:var(--amber);stop-opacity:.46"></stop>
-              <stop offset="100%" style="stop-color:var(--amber);stop-opacity:.16"></stop>
+              <stop offset="0%" style="stop-color:var(--amber);stop-opacity:.42"></stop>
+              <stop offset="50%" style="stop-color:var(--amber);stop-opacity:.20"></stop>
+              <stop offset="100%" style="stop-color:var(--amber);stop-opacity:.06"></stop>
             </linearGradient>
+            <linearGradient id="cs-proj-area-grad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" style="stop-color:var(--violet);stop-opacity:.30"></stop>
+              <stop offset="50%" style="stop-color:var(--violet);stop-opacity:.12"></stop>
+              <stop offset="100%" style="stop-color:var(--violet);stop-opacity:0"></stop>
+            </linearGradient>
+            <filter id="cs-glow-mint" x="-12%" y="-12%" width="124%" height="124%">
+              <feGaussianBlur in="SourceGraphic" stdDeviation="2.5" result="blur"/>
+              <feFlood flood-color="var(--mint)" flood-opacity=".45"/>
+              <feComposite in2="blur" operator="in"/>
+              <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
+            <filter id="cs-glow-amber" x="-12%" y="-12%" width="124%" height="124%">
+              <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="blur"/>
+              <feFlood flood-color="var(--amber)" flood-opacity=".4"/>
+              <feComposite in2="blur" operator="in"/>
+              <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
+            <filter id="cs-glow-violet" x="-12%" y="-12%" width="124%" height="124%">
+              <feGaussianBlur in="SourceGraphic" stdDeviation="2.5" result="blur"/>
+              <feFlood flood-color="var(--violet)" flood-opacity=".5"/>
+              <feComposite in2="blur" operator="in"/>
+              <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
             ${clipDefs}
           </defs>
           ${svgBody}

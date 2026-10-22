@@ -1392,34 +1392,37 @@ input[type=text], input[type=number], input[type=date], input[type=datetime-loca
 /* Spend-over-time line chart */
 .cs-period { margin-bottom: 2px; }
 .cs-line-wrap { width: 100%; }
+.cs-line-wrap { position: relative; }
 .cs-line-svg { width: 100%; height: auto; display: block; overflow: visible; }
-.cs-grid { stroke: var(--viz-grid); stroke-width: 1; }
-.cs-grid-x { stroke-opacity: .48; }
-.cs-grid-minor { stroke-opacity: .42; }
-/* Stacked: planned fades out downwards so it reads as depth, while the unplanned
-   band above it stays denser — its thickness is the point of the whole chart. */
+.cs-grid { stroke: var(--viz-grid); stroke-width: .5; opacity: .35; }
+.cs-grid-x { stroke-opacity: .22; }
+.cs-grid-minor { stroke-opacity: .18; }
 .cs-line-svg { --cs-line: var(--amber); }
 .cs-area { fill: url(#cs-area-grad); stroke: none; }
 .cs-band { fill: url(#cs-band-grad); stroke: none; }
-.cs-line-planned { fill: none; stroke: var(--mint); stroke-width: 1.75; stroke-linejoin: round; stroke-linecap: round; opacity: .9; }
-.cs-line-path { fill: none; stroke: var(--cs-line); stroke-width: 2.25; stroke-linejoin: round; stroke-linecap: round; }
-.cs-dot { fill: var(--paper); stroke: var(--cs-line); stroke-width: 2; transition: r .15s cubic-bezier(.2,.8,.3,1); }
-.cs-mark:hover .cs-dot { r: 6.5; }
-/* The point you are looking at — the week or month on screen — wears a soft ring. */
-.cs-halo { fill: var(--cs-line); fill-opacity: .25; }
-.cs-current .cs-dot { fill: var(--cs-line); stroke: var(--paper); filter: drop-shadow(0 0 3px var(--cs-line)); }
+/* Lines — smooth, glowing, futuristic */
+.cs-line-planned { fill: none; stroke: var(--mint); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; filter: url(#cs-glow-mint); }
+.cs-line-path { fill: none; stroke: var(--cs-line); stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; filter: url(#cs-glow-amber); }
+/* Dots — glass feel with glow */
+.cs-dot { fill: var(--paper); stroke: var(--cs-line); stroke-width: 2; r: 3.5; transition: r .2s cubic-bezier(.2,.8,.3,1), filter .2s; }
+.cs-mark:hover .cs-dot { r: 6; filter: drop-shadow(0 0 4px var(--cs-line)); }
+.cs-halo { fill: var(--cs-line); fill-opacity: .18; }
+@keyframes pulse-glow { 0%, 100% { fill-opacity: .18; r: 9; } 50% { fill-opacity: .32; r: 11; } }
+.cs-current .cs-halo { animation: pulse-glow 2.4s ease-in-out infinite; }
+.cs-current .cs-dot { fill: var(--cs-line); stroke: var(--paper); stroke-width: 2.5; filter: drop-shadow(0 0 6px var(--cs-line)); }
 .cs-hit { fill: transparent; cursor: pointer; }
-.cs-axis-x, .cs-axis-y { font-size: 11px; fill: var(--muted); font-family: var(--font); }
+.cs-axis-x, .cs-axis-y { font-size: 10.5px; fill: var(--muted); font-family: var(--font); opacity: .7; }
 
-/* Projected segment — purple dashed lines */
-.cs-proj-g .cs-line-path { stroke: var(--violet); stroke-dasharray: 6 4; opacity: .85; }
-.cs-proj-g .cs-line-planned { stroke: var(--violet); stroke-dasharray: 4 3; opacity: .55; }
-.cs-proj-g .cs-area { fill: var(--violet-tint); opacity: .6; }
-.cs-proj-g .cs-band { fill: var(--violet-tint); opacity: .45; }
-.cs-now-line { stroke: var(--ink); stroke-width: 1.25; stroke-dasharray: 4 3; opacity: .5; }
-.cs-now-label { font-size: 10px; fill: var(--muted); font-family: var(--font); text-transform: uppercase; letter-spacing: .5px; }
-.cs-proj-label { opacity: .55; }
-.cs-proj-mark .cs-dot { fill: transparent; stroke: var(--violet); stroke-dasharray: 3 2; }
+/* Projected segment — purple with glow */
+.cs-proj-g .cs-line-path { stroke: var(--violet); stroke-dasharray: 6 4; opacity: .9; filter: url(#cs-glow-violet); }
+.cs-proj-g .cs-line-planned { stroke: var(--violet); stroke-dasharray: 4 3; opacity: .6; filter: url(#cs-glow-violet); }
+.cs-proj-g .cs-area { fill: url(#cs-proj-area-grad); opacity: .7; }
+.cs-proj-g .cs-band { fill: url(#cs-proj-area-grad); opacity: .5; }
+.cs-now-line { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; opacity: .4; }
+.cs-now-label { font-size: 9.5px; fill: var(--muted); font-family: var(--font); text-transform: uppercase; letter-spacing: .6px; opacity: .6; }
+.cs-proj-label { opacity: .5; }
+.cs-proj-mark .cs-dot { fill: transparent; stroke: var(--violet); stroke-width: 1.5; stroke-dasharray: 3 2; }
+.cs-proj-mark:hover .cs-dot { filter: drop-shadow(0 0 4px var(--violet)); }
 .cs-proj-mark .cs-hit { cursor: default; }
 
 /* Projection table — purple accent */
