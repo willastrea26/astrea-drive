@@ -2557,10 +2557,20 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 }
 /* pathLength="1" on the path makes the dash a plain 0→1, no measuring in JS. */
 @keyframes draw-line { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+/* Historical lines draw in first */
 .anim-in .cs-line-path, .anim-in .cs-line-planned { stroke-dasharray: 1; animation: draw-line .9s cubic-bezier(.3,.7,.4,1) backwards; }
 .anim-in .cs-area { animation: fade .6s ease .25s backwards; }
 .anim-in .cs-band { animation: fade .6s ease .35s backwards; }
 .anim-in .cs-mark { animation: fade .3s ease backwards; animation-delay: calc(.15s + var(--i, 0) * .06s); }
+/* Projected segment draws in after actuals — the line continues seamlessly */
+.anim-in .cs-proj-g .cs-line-path,
+.anim-in .cs-proj-g .cs-line-planned { animation-delay: .85s; animation-duration: .7s; }
+.anim-in .cs-proj-g .cs-area { animation: fade .5s ease .95s backwards; }
+.anim-in .cs-proj-g .cs-band { animation: fade .5s ease 1.05s backwards; }
+/* "Now" marker appears at the handoff moment */
+.anim-in .cs-now-line, .anim-in .cs-now-label { animation: fade .25s ease .8s backwards; }
+/* Projected dots stagger after the line reaches them */
+.anim-in .cs-proj-mark { animation-delay: calc(.9s + var(--i, 0) * .06s); }
 /* Magnitude bars in the two tables fill from their own baseline. */
 .anim-in .cs-hbar i {
   transform-origin: left;
