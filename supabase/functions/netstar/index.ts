@@ -158,7 +158,10 @@ async function mapLimit<T, R>(
  */
 async function syncOdometers() {
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
-  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  // Prefer an explicit secret key (new sb_secret_ API-key system); fall back
+  // to the auto-injected service-role key on projects that still provide it.
+  const serviceKey = Deno.env.get("SB_SERVICE_KEY") ??
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
   if (!supabaseUrl || !serviceKey) {
     return json({ error: "Supabase service credentials unavailable" }, 500);
   }
