@@ -615,15 +615,42 @@ AD.views.vehicle = (function () {
     return `${bits.join(' · ')} <span class="t2" style="font-weight:400">Notify by ${triggerLabels.join(' + ')}</span>`;
   }
 
+  /**
+   * C: estimate when the km-based service will fall due, from how far the
+   * vehicle has actually been driven since its last service. Needs a km
+   * trigger, a positive distance-to-go, and at least a week of history for a
+   * stable average — otherwise returns '' so no noisy guess is shown.
+   */
+  function projServiceByDistance(v, s, services) {
+    if (!(s.triggers.km && s.hasKm) || !Number.isFinite(s.kmLeft) || s.kmLeft <= 0) return '';
+    const last = services[0];
+    const lastKm = last && last.odometer != null ? Number(last.odometer)
+      : (v.lastServiceKm != null && v.lastServiceKm !== '' ? Number(v.lastServiceKm) : null);
+    const lastDate = last ? last.date : (v.lastServiceDate || null);
+    if (lastKm == null || !lastDate) return '';
+    const elapsed = T.daysBetween(lastDate, T.todayKey()); // days since last service
+    const driven = Number(v.odometer || 0) - lastKm;
+    if (!(elapsed >= 7) || !(driven > 0)) return '';
+    const rate = driven / elapsed; // km per day
+    if (!(rate > 0) || !Number.isFinite(rate)) return '';
+    const daysTo = Math.round(s.kmLeft / rate);
+    const perDay = rate >= 10 ? Math.round(rate).toLocaleString('en-AU') : rate.toFixed(1);
+    return `About ${daysTo.toLocaleString('en-AU')} day${daysTo === 1 ? '' : 's'} at current use (~${perDay} km/day)`;
+  }
+
   function overview(v, services, defects) {
     const s = L.serviceState(v), r = L.regoState(v);
     const flagTone = (tone) => (tone ? 'flag-' + tone : 'muted');
     const faint = (txt) => `<span class="muted" style="font-weight:400">${txt}</span>`;
     const isHours = (L.HOURS_TYPES && L.HOURS_TYPES.has(v.type)) || (v.engineHours != null && v.engineHours !== '');
+    // A: show where the odometer reading came from when it was synced from GPS.
+    const odoProvenance = v.odometerSource === 'telematics'
+      ? `<span class="sub sub-gps">From GPS${v.odometerSyncedAt ? ' · synced ' + new Date(v.odometerSyncedAt).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''}</span>`
+      : '';
     // Lead the reading fact with engine hours for hours-tracked plant, else odometer.
     const readingFact = isHours
-      ? `<div><dt>Engine hours</dt><dd>${v.engineHours != null && v.engineHours !== '' ? L.fmtHours(v.engineHours) : faint('Not recorded')}${v.odometer != null ? `<span class="sub">${L.fmtKm(v.odometer)} on the clock</span>` : ''}</dd></div>`
-      : `<div><dt>Odometer</dt><dd>${L.fmtKm(v.odometer)}</dd></div>`;
+      ? `<div><dt>Engine hours</dt><dd>${v.engineHours != null && v.engineHours !== '' ? L.fmtHours(v.engineHours) : faint('Not recorded')}${v.odometer != null ? `<span class="sub">${L.fmtKm(v.odometer)} on the clock${v.odometerSource === 'telematics' ? ' · from GPS' : ''}</span>` : ''}</dd></div>`
+      : `<div><dt>Odometer</dt><dd>${L.fmtKm(v.odometer)}${odoProvenance}</dd></div>`;
     // Last service: the most recent recorded service, else the stored last-service fields.
     const last = services[0];
     const lastBits = [];
@@ -637,6 +664,7 @@ AD.views.vehicle = (function () {
       else if (v.lastServiceKm != null && v.lastServiceKm !== '') lastBits.push(L.fmtKm(v.lastServiceKm));
     }
     const lastServiceCell = lastBits.length ? lastBits.join(' · ') : faint('Not recorded');
+    const projService = projServiceByDistance(v, s, services);
     const openDefs = defects.filter((d) => d.status !== 'Resolved');
     return `
       <div class="cols-main-aside">
@@ -647,7 +675,7 @@ AD.views.vehicle = (function () {
             ${readingFact}
             <div><dt>Registration expiry</dt><dd>${T.fmtKey(v.regoExpiry)}<span class="sub ${flagTone(L.attentionTone(r.state, r.days))}">${esc(r.state === 'ok' ? 'Current — ' + r.why : r.why)}</span></dd></div>
             <div><dt>Last service</dt><dd>${lastServiceCell}</dd></div>
-            <div><dt>Next service</dt><dd>${nextServiceLabel(v, s)}<span class="sub ${flagTone(L.attentionTone(s.state, s.daysLeft, s.kmLeft, s.hoursLeft))}">${esc(s.why.charAt(0).toUpperCase() + s.why.slice(1))}</span></dd></div>
+            <div><dt>Next service</dt><dd>${nextServiceLabel(v, s)}<span class="sub ${flagTone(L.attentionTone(s.state, s.daysLeft, s.kmLeft, s.hoursLeft))}">${esc(s.why.charAt(0).toUpperCase() + s.why.slice(1))}</span>${projService ? `<span class="sub">${esc(projService)}</span>` : ''}</dd></div>
             ${v.status === 'In workshop' && v.workshopId ? `<div class="facts-span"><dt>Currently at</dt><dd>${esc((AD.store.get('workshops', v.workshopId) || {}).name || 'Unknown workshop')}</dd></div>` : ''}
           </dl>
           ${detailsFacts(v)}
