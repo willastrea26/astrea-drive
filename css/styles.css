@@ -1210,6 +1210,9 @@ input[type=text], input[type=number], input[type=date], input[type=datetime-loca
 .fp-live-parked { color: var(--blue-strong, var(--blue)); } .fp-live-parked i { background: var(--blue); }
 .fp-live-offline { color: var(--muted); } .fp-live-offline i { background: var(--muted); }
 
+/* Odometer "from GPS" provenance chip in the fleet register */
+.odo-src { display: inline-block; margin-left: 6px; font-size: 10px; font-weight: 700; letter-spacing: .3px; color: var(--mint); background: rgba(95,224,180,.14); border-radius: 999px; padding: 1px 6px; vertical-align: middle; cursor: default; }
+
 /* Clusters */
 .tcluster { background: none; border: 0; }
 .tc {

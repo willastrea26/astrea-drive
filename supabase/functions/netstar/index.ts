@@ -14,11 +14,16 @@
 // only signed-in users can reach it.
 //
 // Actions (POST body { action }):
-//   'live'      (default) vehicle list + latest position, joined by imei,
-//               one row per device keyed by rego — what the map needs
-//   'vehicles'  the flat device list only (imei / rego / name / branch)
-//   'positions' { imeis: [...] } latest status for specific imeis
+//   'live'            (default) vehicle list + latest position, joined by
+//                     imei, one row per device keyed by rego — map data
+//   'vehicles'        the flat device list only (imei / rego / name / branch)
+//   'positions'       { imeis: [...] } latest status for specific imeis
+//   'sync-odometers'  write each matched vehicle's latest odometer into the
+//                     vehicles table (only ever increasing it). Used by the
+//                     "Sync from GPS" button and the nightly cron job.
 // =====================================================================
+
+import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const NETSTAR_BASE = "https://fleetai-api.netstaraus.com.au";
 const API_KEY = Deno.env.get("NETSTAR_API_KEY") ?? "";
@@ -143,6 +148,80 @@ async function mapLimit<T, R>(
   return results;
 }
 
+/**
+ * Write each matched vehicle's latest telematics odometer into the vehicles
+ * table. Odometers only ever go up, so a reading is applied only when it is
+ * higher than what's stored — this never clobbers a manual reading and
+ * ignores stale/offline devices. Uses the service-role key (auto-injected
+ * into the function, never exposed to the browser) so it can write under the
+ * nightly cron job that has no user session.
+ */
+async function syncOdometers() {
+  const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  if (!supabaseUrl || !serviceKey) {
+    return json({ error: "Supabase service credentials unavailable" }, 500);
+  }
+  const admin = createClient(supabaseUrl, serviceKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+
+  // Latest odometer per device, matched to fleet by rego.
+  const devices = (await fetchVehicles()).filter((v) => v.imei);
+  const statuses = await mapLimit(devices, CONCURRENCY, (v) => fetchStatus(v.imei));
+  const odoByRego = new Map<string, number>();
+  devices.forEach((v, i) => {
+    const s = statuses[i];
+    const km = s?.odometerYesterday;
+    if (km != null && km > 0) {
+      odoByRego.set(v.rego.toUpperCase(), Math.round(km));
+    }
+  });
+
+  const { data: fleet, error } = await admin
+    .from("vehicles")
+    .select("id, rego, odometer");
+  if (error) throw error;
+
+  const nowIso = new Date().toISOString();
+  const changes: Array<{ id: string; rego: string; from: number; to: number }> = [];
+  for (const veh of fleet ?? []) {
+    const km = odoByRego.get(String(veh.rego ?? "").toUpperCase());
+    if (km == null) continue;
+    const current = Number(veh.odometer ?? 0);
+    if (km <= current) continue; // only ever increase
+    changes.push({ id: veh.id, rego: veh.rego, from: current, to: km });
+  }
+
+  for (const c of changes) {
+    const { error: upErr } = await admin
+      .from("vehicles")
+      .update({ odometer: c.to, odometerSource: "telematics", odometerSyncedAt: nowIso })
+      .eq("id", c.id);
+    if (upErr) throw upErr;
+  }
+
+  if (changes.length) {
+    const added = changes.reduce((n, c) => n + (c.to - c.from), 0);
+    await admin.from("activity").insert({
+      id: "act-odo-" + Date.now().toString(36),
+      ts: nowIso,
+      vehicleId: "",
+      text: `Odometers synced from telematics — ${changes.length} vehicle${
+        changes.length === 1 ? "" : "s"
+      } updated (+${added.toLocaleString("en-AU")} km)`,
+    });
+  }
+
+  return json({
+    updated: changes.length,
+    checked: (fleet ?? []).length,
+    matched: odoByRego.size,
+    changes,
+    syncedAt: nowIso,
+  });
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (!API_KEY) return json({ error: "NETSTAR_API_KEY secret not set" }, 500);
@@ -163,6 +242,8 @@ Deno.serve(async (req: Request) => {
         .filter(Boolean);
       return json({ positions });
     }
+
+    if (action === "sync-odometers") return await syncOdometers();
 
     // default: live — list + status joined, one row per device, keyed by rego
     const vehicles = await fetchVehicles();

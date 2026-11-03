@@ -204,7 +204,7 @@ AD.views.fleet = (function () {
 
     const actions = isHired
       ? `<button class="btn btn-secondary" id="import-docs">${I.file} Import documents from folder</button><button class="btn btn-primary" id="add-veh">${I.plus} Add hired vehicle</button>`
-      : `<button class="btn btn-primary" id="add-veh">${I.plus} Add vehicle</button>`;
+      : `<button class="btn btn-secondary" id="sync-odo">${I.gauge} Sync odometers from GPS</button><button class="btn btn-primary" id="add-veh">${I.plus} Add vehicle</button>`;
 
     root.innerHTML = `
       ${AD.ui.pageHeader({ title, sub, actions })}
@@ -248,10 +248,31 @@ AD.views.fleet = (function () {
     root.querySelector('#add-veh').onclick = () => AD.vehicleForm(st.section === 'hired' ? { hired: true } : null, (v) => AD.go('vehicle/' + v.id));
     const imp = root.querySelector('#import-docs');
     if (imp) imp.onclick = () => AD.importHiredDocs();
+    const syncBtn = root.querySelector('#sync-odo');
+    if (syncBtn) syncBtn.onclick = () => syncOdometers(syncBtn);
     rows();
   }
 
   function sync() { AD.setParams(st); rows(); }
+
+  async function syncOdometers(btn) {
+    const label = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = `${I.gauge} Syncing…`;
+    try {
+      const { data, error } = await AD.sb.functions.invoke('netstar', { body: { action: 'sync-odometers' } });
+      if (error) throw error;
+      if (data && data.error) throw new Error(data.error);
+      await AD.store.load();
+      const n = (data && data.updated) || 0;
+      AD.ui.toast(n ? `Updated ${n} odometer${n === 1 ? '' : 's'} from GPS` : 'Odometers already up to date', 'ok');
+      draw();
+    } catch (e) {
+      AD.ui.toast('Odometer sync failed: ' + ((e && e.message) || 'could not reach the tracker service'), 'error');
+      btn.disabled = false;
+      btn.innerHTML = label;
+    }
+  }
 
   function rows() {
     const isHired = st.section === 'hired';
@@ -296,7 +317,7 @@ AD.views.fleet = (function () {
         ${isHired
           ? `<td class="col-opt col-wide">${esc(v.hireCompany || '—')}</td>`
           : `<td class="col-opt">${v.driverId ? esc(L.driverName(v.driverId)) : '<span class="muted">Unassigned</span>'}</td>
-             <td class="num col-opt col-wide">${L.fmtKm(v.odometer)}</td>`}
+             <td class="num col-opt col-wide">${L.fmtKm(v.odometer)}${v.odometerSource === 'telematics' ? `<span class="odo-src" title="From GPS${v.odometerSyncedAt ? ' · synced ' + new Date(v.odometerSyncedAt).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''}">GPS</span>` : ''}</td>`}
         <td>${vehicleBadge(v.status)}</td>
         ${isHired
           ? `<td class="col-opt">${docCount ? `<span class="flag flag-muted">${docCount} file${docCount === 1 ? '' : 's'}</span>` : '<span class="muted">None</span>'}</td>`
