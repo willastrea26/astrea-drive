@@ -149,79 +149,38 @@ async function mapLimit<T, R>(
 }
 
 /**
- * Write each matched vehicle's latest telematics odometer into the vehicles
- * table. Odometers only ever go up, so a reading is applied only when it is
- * higher than what's stored — this never clobbers a manual reading and
- * ignores stale/offline devices. Uses the service-role key (auto-injected
- * into the function, never exposed to the browser) so it can write under the
- * nightly cron job that has no user session.
+ * Collect each matched vehicle's latest telematics odometer and hand the
+ * readings to the sync_odometers_from_telematics() database function, which
+ * applies them (only ever increasing) and logs a summary. That function is
+ * SECURITY DEFINER, so no service-role key is needed here — this calls it
+ * with the ordinary anon key.
  */
 async function syncOdometers() {
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
-  // Prefer an explicit secret key (new sb_secret_ API-key system); fall back
-  // to the auto-injected service-role key on projects that still provide it.
-  const serviceKey = Deno.env.get("SB_SERVICE_KEY") ??
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-  if (!supabaseUrl || !serviceKey) {
-    return json({ error: "Supabase service credentials unavailable" }, 500);
-  }
-  const admin = createClient(supabaseUrl, serviceKey, {
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ??
+    "sb_publishable_hInlEU8CHjlKIiMtAz4t1g_qggctjTA";
+  if (!supabaseUrl) return json({ error: "Supabase URL unavailable" }, 500);
+  const db = createClient(supabaseUrl, anonKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
   // Latest odometer per device, matched to fleet by rego.
   const devices = (await fetchVehicles()).filter((v) => v.imei);
   const statuses = await mapLimit(devices, CONCURRENCY, (v) => fetchStatus(v.imei));
-  const odoByRego = new Map<string, number>();
+  const readings: Array<{ rego: string; km: number }> = [];
   devices.forEach((v, i) => {
-    const s = statuses[i];
-    const km = s?.odometerYesterday;
-    if (km != null && km > 0) {
-      odoByRego.set(v.rego.toUpperCase(), Math.round(km));
-    }
+    const km = statuses[i]?.odometerYesterday;
+    if (km != null && km > 0) readings.push({ rego: v.rego, km: Math.round(km) });
   });
 
-  const { data: fleet, error } = await admin
-    .from("vehicles")
-    .select("id, rego, odometer");
+  const { data, error } = await db.rpc("sync_odometers_from_telematics", { readings });
   if (error) throw error;
 
-  const nowIso = new Date().toISOString();
-  const changes: Array<{ id: string; rego: string; from: number; to: number }> = [];
-  for (const veh of fleet ?? []) {
-    const km = odoByRego.get(String(veh.rego ?? "").toUpperCase());
-    if (km == null) continue;
-    const current = Number(veh.odometer ?? 0);
-    if (km <= current) continue; // only ever increase
-    changes.push({ id: veh.id, rego: veh.rego, from: current, to: km });
-  }
-
-  for (const c of changes) {
-    const { error: upErr } = await admin
-      .from("vehicles")
-      .update({ odometer: c.to, odometerSource: "telematics", odometerSyncedAt: nowIso })
-      .eq("id", c.id);
-    if (upErr) throw upErr;
-  }
-
-  if (changes.length) {
-    const added = changes.reduce((n, c) => n + (c.to - c.from), 0);
-    await admin.from("activity").insert({
-      id: "act-odo-" + Date.now().toString(36),
-      ts: nowIso,
-      vehicleId: "",
-      text: `Odometers synced from telematics — ${changes.length} vehicle${
-        changes.length === 1 ? "" : "s"
-      } updated (+${added.toLocaleString("en-AU")} km)`,
-    });
-  }
-
   return json({
-    updated: changes.length,
-    checked: (fleet ?? []).length,
-    matched: odoByRego.size,
-    changes,
-    syncedAt: nowIso,
+    updated: (data && data.updated) ?? 0,
+    added: (data && data.added) ?? 0,
+    readings: readings.length,
+    syncedAt: new Date().toISOString(),
   });
 }
 
