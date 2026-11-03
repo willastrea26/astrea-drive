@@ -229,7 +229,10 @@ AD.views.tracker = (function () {
 
     if (window.L.markerClusterGroup) {
       group = window.L.markerClusterGroup({
-        maxClusterRadius: 92, // markers are ~88px wide; closer than this they would overlap
+        // Lower radius = markers separate into vehicle images at a lower zoom.
+        // Vehicles sharing (or nearly sharing) a site still cluster and spiderfy,
+        // since they sit within any radius at every zoom level.
+        maxClusterRadius: 46,
         showCoverageOnHover: false,
         zoomToBoundsOnClick: false,
         spiderfyOnMaxZoom: false,
