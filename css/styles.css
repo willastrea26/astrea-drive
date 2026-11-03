@@ -1180,6 +1180,36 @@ input[type=text], input[type=number], input[type=date], input[type=datetime-loca
 .tm-wrap:focus-visible .tm-halo { display: block; box-shadow: 0 0 0 2.5px var(--blue); }
 .leaflet-marker-icon.spread .tm-anchor, .leaflet-marker-icon.spread .tm-stem { opacity: .3; }
 
+/* Live GPS mode -------------------------------------------------------- */
+.trk-mode { height: 36px; }
+.only-live { display: none; }
+.mode-live .only-scheduled { display: none; }
+.mode-live .only-live { display: block; }
+.mode-live .fp-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.mode-live .trk-timeline { display: none; }
+
+.trk-refresh { background: none; border: 0; padding: 2px; margin-left: 6px; cursor: pointer; color: inherit; display: inline-flex; border-radius: 6px; }
+.trk-refresh:hover { background: rgba(255,255,255,.12); }
+.trk-refresh .ico { width: 15px; height: 15px; }
+.trk-refresh.spin .ico { animation: trk-spin .8s linear infinite; }
+@keyframes trk-spin { to { transform: rotate(360deg); } }
+
+/* Live status dots on markers */
+.tm-live .tm-status i { background: var(--blue); }
+.tm-moving .tm-status i { background: var(--mint); }
+.tm-idling .tm-status i { background: var(--amber); }
+.tm-parked .tm-status i { background: var(--blue); }
+.tm-offline .tm-status i { background: var(--muted); }
+.tm-offline .veh-svg { opacity: .55; filter: grayscale(.6) drop-shadow(0 1px 1.5px rgba(16,29,53,.28)); }
+
+/* Live status pill in the fleet list */
+.fp-live { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 999px; background: rgba(120,140,170,.14); }
+.fp-live i { width: 7px; height: 7px; border-radius: 50%; background: var(--blue); }
+.fp-live-moving { color: var(--green); } .fp-live-moving i { background: var(--green); }
+.fp-live-idling { color: #b4820a; } .fp-live-idling i { background: var(--amber); }
+.fp-live-parked { color: var(--blue-strong, var(--blue)); } .fp-live-parked i { background: var(--blue); }
+.fp-live-offline { color: var(--muted); } .fp-live-offline i { background: var(--muted); }
+
 /* Clusters */
 .tcluster { background: none; border: 0; }
 .tc {

@@ -14,11 +14,48 @@ AD.views.tracker = (function () {
   const STATUS_WORD = { confirmed: 'Confirmed', tentative: 'Tentative', maintenance: 'Maintenance', depot: 'Depot' };
   const reducedMotion = () => !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
 
+  // Live GPS (Netstar) --------------------------------------------------
+  const LIVE_REFRESH_MS = 60000;   // auto-refresh cadence while on the live tab
+  const LIVE_STALE_HOURS = 24;     // older than this since last report = offline
+  const LIVE_WORD = { moving: 'Moving', idling: 'Idling', parked: 'Parked', offline: 'Offline' };
+  let liveData = null;             // last successful response
+  let liveFetchedAt = 0;           // ms epoch of last success
+  let liveLoading = false, liveError = '', liveTimer = null, liveFitted = false;
+
   let root = null, map = null, group = null, wsGroup = null, centerDot = null, playTimer = null;
   const markers = new Map();
   const wsMarkers = new Map();
   let st = {};
   let prefs = loadPrefs();
+
+  /** Netstar reports times as "DD-MM-YYYY HH:MM:SS" (Australia local). -> ms epoch | null */
+  function parseNetstarTime(s) {
+    const m = /^(\d{2})-(\d{2})-(\d{4})\s+(\d{2}):(\d{2}):(\d{2})/.exec(String(s || ''));
+    if (!m) return null;
+    const [, dd, mm, yyyy, hh, mi, ss] = m;
+    const t = Date.parse(`${yyyy}-${mm}-${dd}T${hh}:${mi}:${ss}+11:00`); // treat as Sydney; close enough for "ago"
+    return Number.isFinite(t) ? t : null;
+  }
+
+  /** How long ago, compactly: "3 min ago", "2 h ago", "5 d ago". */
+  function agoText(ms) {
+    if (ms == null) return 'unknown';
+    const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
+    if (s < 60) return 'just now';
+    if (s < 3600) return `${Math.round(s / 60)} min ago`;
+    if (s < 86400) return `${Math.round(s / 3600)} h ago`;
+    return `${Math.round(s / 86400)} d ago`;
+  }
+
+  /** Classify a live position into moving / idling / parked / offline. */
+  function liveStatus(p) {
+    const seen = parseNetstarTime(p.lastData);
+    if (!p.hasFix || (seen != null && Date.now() - seen > LIVE_STALE_HOURS * 3600000)) return 'offline';
+    const on = String(p.ignition || '').toLowerCase() === 'on';
+    if (on && (p.speed || 0) > 0) return 'moving';
+    if (on) return 'idling';
+    return 'parked';
+  }
 
   function trackedVehicles() {
     const vehicles = new Map(L.vacTrucks().map((v) => [v.id, v]));
@@ -27,10 +64,36 @@ AD.views.tracker = (function () {
   }
 
   function loadPrefs() {
-    try { return Object.assign({ panel: 'open', style: 'dark' }, JSON.parse(localStorage.getItem(PREF_KEY) || '{}')); }
-    catch (e) { return { panel: 'open', style: 'dark' }; }
+    try { return Object.assign({ panel: 'open', style: 'dark', mode: 'scheduled' }, JSON.parse(localStorage.getItem(PREF_KEY) || '{}')); }
+    catch (e) { return { panel: 'open', style: 'dark', mode: 'scheduled' }; }
   }
   function savePrefs() { try { localStorage.setItem(PREF_KEY, JSON.stringify(prefs)); } catch (e) { /* preference only */ } }
+
+  /** Pull the latest live positions from the Netstar proxy function. */
+  async function fetchLive(force) {
+    if (liveLoading) return;
+    if (!force && liveData && Date.now() - liveFetchedAt < LIVE_REFRESH_MS) return;
+    liveLoading = true; liveError = '';
+    if (st.mode === 'live') update();
+    try {
+      const { data, error } = await AD.sb.functions.invoke('netstar', { body: { action: 'live' } });
+      if (error) throw error;
+      if (data && data.error) throw new Error(data.error);
+      liveData = data;
+      liveFetchedAt = Date.now();
+    } catch (e) {
+      liveError = (e && e.message) || 'Could not reach the tracker service';
+    } finally {
+      liveLoading = false;
+      if (st.mode === 'live' && root) update();
+    }
+  }
+
+  function startLiveTimer() {
+    stopLiveTimer();
+    liveTimer = setInterval(() => { if (st.mode === 'live') fetchLive(true); }, LIVE_REFRESH_MS);
+  }
+  function stopLiveTimer() { if (liveTimer) { clearInterval(liveTimer); liveTimer = null; } }
 
   // ------------------------------------------------------------------ render
   function render(el, params) {
@@ -43,14 +106,19 @@ AD.views.tracker = (function () {
       const [hh, mm] = /^\d{2}:\d{2}$/.test(params.time || '') ? params.time.split(':').map(Number) : [now.hour, now.minute];
       t = T.fromParts(y, m, d, hh, mm);
     }
-    st = { t, truck: '', status: params.status || '', avail: params.avail || '', sel: params.truck || '', playing: false };
+    st = { t, truck: '', status: params.status || '', avail: params.avail || '', sel: params.truck || '', playing: false,
+           mode: params.mode === 'live' ? 'live' : prefs.mode, liveStatus: params.livestatus || '' };
 
     const tool = (act, icon, label, extra = '') => `<button type="button" data-act="${act}" title="${label}" aria-label="${label}" ${extra}>${icon}</button>`;
 
     el.innerHTML = `
-      <div class="trk">
+      <div class="trk ${st.mode === 'live' ? 'mode-live' : ''}" id="t-root">
         <header class="trk-head">
           <h1>Tracker</h1>
+          <div class="seg trk-mode" role="group" aria-label="Position source">
+            <button type="button" data-mode="scheduled" class="${st.mode !== 'live' ? 'on' : ''}">Scheduled</button>
+            <button type="button" data-mode="live" class="${st.mode === 'live' ? 'on' : ''}">Live GPS</button>
+          </div>
           <div class="trk-readout" aria-live="polite"><span class="mode" id="t-mode"></span><b id="t-when"></b><span class="muted" id="t-tz"></span></div>
           <a class="btn btn-secondary" id="to-cal" href="#/calendar">${I.calendar} Open Calendar</a>
         </header>
@@ -67,7 +135,9 @@ AD.views.tracker = (function () {
               <span class="sep"></span>
               ${tool('style', prefs.style === 'dark' ? SUN : MOON, prefs.style === 'dark' ? 'Use light map' : 'Use dark map', `aria-pressed="${prefs.style === 'dark'}"`)}
             </div>
-            <div class="trk-gps"><i aria-hidden="true"></i>Scheduled positions · Not live GPS</div>
+            <div class="trk-gps" id="t-gps"><i aria-hidden="true"></i><span id="t-gps-text">Scheduled positions · Not live GPS</span>
+              <button type="button" id="t-refresh" class="trk-refresh" title="Refresh now" aria-label="Refresh live positions" hidden>${REFRESH}</button>
+            </div>
           </div>
 
           <aside class="trk-panel" aria-label="Fleet">
@@ -78,8 +148,9 @@ AD.views.tracker = (function () {
             <div class="fp-body" id="t-panel-body">
               <div class="fp-filters">
                 <select id="f-truck" aria-label="Vehicle">${options(trackedVehicles().map((v) => v.id), st.truck, 'All vehicles')}</select>
-                <select id="f-status" aria-label="Booking status">${options([['confirmed', 'Confirmed'], ['tentative', 'Tentative'], ['maintenance', 'Maintenance'], ['depot', 'Depot'], ['unscheduled', 'Unscheduled'], ['conflict', 'Clash'], ['needs-location', 'Site location required']], st.status, 'Any status')}</select>
-                <select id="f-avail" aria-label="Availability">${options([['free', 'Free (no booking)'], ['booked', 'Booked on a job'], ['unavailable', 'Unavailable']], st.avail, 'Availability')}</select>
+                <select id="f-status" class="only-scheduled" aria-label="Booking status">${options([['confirmed', 'Confirmed'], ['tentative', 'Tentative'], ['maintenance', 'Maintenance'], ['depot', 'Depot'], ['unscheduled', 'Unscheduled'], ['conflict', 'Clash'], ['needs-location', 'Site location required']], st.status, 'Any status')}</select>
+                <select id="f-avail" class="only-scheduled" aria-label="Availability">${options([['free', 'Free (no booking)'], ['booked', 'Booked on a job'], ['unavailable', 'Unavailable']], st.avail, 'Availability')}</select>
+                <select id="f-livestatus" class="only-live" aria-label="Live status">${options([['moving', 'Moving'], ['idling', 'Idling'], ['parked', 'Parked'], ['offline', 'Offline']], st.liveStatus, 'Any status')}</select>
               </div>
               <div class="fp-list" id="t-list" role="list"></div>
             </div>
@@ -122,11 +193,15 @@ AD.views.tracker = (function () {
     $('#f-truck').onchange = (e) => { st.truck = e.target.value; if (st.truck) st.sel = st.truck; update(); fitFleet(); };
     $('#f-status').onchange = (e) => { st.status = e.target.value; update(); };
     $('#f-avail').onchange = (e) => { st.avail = e.target.value; update(); };
+    $('#f-livestatus').onchange = (e) => { st.liveStatus = e.target.value; update(); };
     $('#t-collapse').onclick = () => setPanel('closed');
     $('#t-expand').onclick = () => setPanel('open');
+    $('#t-refresh').onclick = () => fetchLive(true);
+    el.querySelectorAll('.trk-mode [data-mode]').forEach((b) => (b.onclick = () => setMode(b.dataset.mode)));
     el.querySelectorAll('.trk-tools [data-act]').forEach((b) => (b.onclick = () => toolAction(b.dataset.act, b)));
 
     initMap();
+    if (st.mode === 'live') { liveFitted = false; startLiveTimer(); fetchLive(false); }
     update();
     setTimeout(() => {
       if (!map) return;
@@ -137,6 +212,7 @@ AD.views.tracker = (function () {
 
   const PLAY = '<svg class="ico" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l10.5-6.5z"/></svg>';
   const PAUSE = '<svg class="ico" viewBox="0 0 24 24" fill="currentColor"><rect x="6.5" y="5.5" width="4" height="13" rx="1"/><rect x="13.5" y="5.5" width="4" height="13" rx="1"/></svg>';
+  const REFRESH = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v5h-5"/></svg>';
   const MOON = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M19.5 14.5A7.5 7.5 0 0 1 9.5 4.5a7.5 7.5 0 1 0 10 10z"/></svg>';
   const SUN = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></svg>';
 
@@ -232,23 +308,39 @@ AD.views.tracker = (function () {
     });
   }
 
+  const markerLabel = (l) => l.live && !l.matched ? (l.deviceName || l.live.rego || l.truckId) : l.truckId;
+
   function markerIcon(l, sel) {
+    const word = l.live ? (LIVE_WORD[l.cat] || '') : (STATUS_WORD[l.cat] || '');
+    const label = markerLabel(l);
     return window.L.divIcon({
       className: 'tm-wrap',
-      html: `<div class="tm tm-${l.cat}${sel ? ' sel' : ''}">
+      html: `<div class="tm tm-${l.cat}${l.live ? ' tm-live' : ''}${sel ? ' sel' : ''}">
         <span class="tm-halo"></span>
-        <span class="tm-status"><i></i>${STATUS_WORD[l.cat] || ''}</span>
-        ${AD.art.forVehicle(l.truck, 88, `${l.truckId} scheduled location`) || AD.art.car(88, `${l.truckId} vehicle`)}
+        <span class="tm-status"><i></i>${esc(word)}</span>
+        ${AD.art.forVehicle(l.truck, 88, `${label} location`) || AD.art.car(88, `${label} vehicle`)}
         <span class="tm-stem"></span><span class="tm-anchor"></span>
       </div>`,
       iconSize: [88, 64], iconAnchor: [44, 60]
     });
   }
 
+  function markerTip(l) {
+    if (l.live) {
+      const p = l.live;
+      const where = p.location || (p.lat != null ? `${p.lat.toFixed(4)}, ${p.lng.toFixed(4)}` : '');
+      return `<b>${esc(markerLabel(l))}</b> · ${esc(LIVE_WORD[l.cat] || '')}<br>${esc(where)}<br><span class="muted">Seen ${esc(agoText(l.seenAt))}${p.speed ? ` · ${Math.round(p.speed)} km/h` : ''}</span>`;
+    }
+    return `<b>${esc(l.truckId)}</b> · ${esc(STATUS_WORD[l.cat])}<br>${esc(L.bookingTitle(l.booking))}<br><span class="muted">${esc(siteName(l.booking))}</span>`;
+  }
+
   function wireMarker(m, l) {
     const el = m.getElement();
     if (!el) return;
-    el.setAttribute('aria-label', `${l.truckId}, ${STATUS_WORD[l.cat] || ''}: ${L.bookingTitle(l.booking)}, ${l.booking.address || 'pinned site'}`);
+    const aria = l.live
+      ? `${markerLabel(l)}, ${LIVE_WORD[l.cat] || ''}: ${l.live.location || 'location unknown'}, seen ${agoText(l.seenAt)}`
+      : `${l.truckId}, ${STATUS_WORD[l.cat] || ''}: ${L.bookingTitle(l.booking)}, ${l.booking.address || 'pinned site'}`;
+    el.setAttribute('aria-label', aria);
     el.onfocus = () => m.openTooltip();
     el.onblur = () => m.closeTooltip();
   }
@@ -262,7 +354,7 @@ AD.views.tracker = (function () {
       const sel = id === st.sel;
       const key = `${l.cat}|${sel}`;
       const ll = window.L.latLng(l.lat, l.lng);
-      const tip = `<b>${id}</b> · ${esc(STATUS_WORD[l.cat])}<br>${esc(L.bookingTitle(l.booking))}<br><span class="muted">${esc(siteName(l.booking))}</span>`;
+      const tip = markerTip(l);
       let m = markers.get(id);
       if (!m) {
         m = window.L.marker(ll, { icon: markerIcon(l, sel), keyboard: true, riseOnHover: true, zIndexOffset: sel ? 1000 : 0 });
@@ -305,7 +397,7 @@ AD.views.tracker = (function () {
 
   function fitFleet() {
     if (!map) return;
-    const pts = locations().filter(passes).filter((l) => l.state === 'located').map((l) => [l.lat, l.lng]);
+    const pts = activeLocations().filter(activePasses).filter((l) => l.state === 'located').map((l) => [l.lat, l.lng]);
     if (!pts.length) map.fitBounds(AD.maps.AU_BOUNDS, { animate: false });
     else if (pts.length === 1) map.setView(pts[0], 11, { animate: false });
     else map.fitBounds(pts, { padding: [90, 90], maxZoom: 12, animate: false });
@@ -333,6 +425,22 @@ AD.views.tracker = (function () {
     root.querySelector('#t-stage').classList.toggle('panel-closed', state === 'closed');
     root.querySelector('#t-collapse').setAttribute('aria-expanded', String(state !== 'closed'));
     setTimeout(() => { if (map) map.invalidateSize(); (state === 'closed' ? root.querySelector('#t-expand') : root.querySelector('#t-collapse')).focus(); }, 220);
+  }
+
+  function setMode(mode) {
+    if (mode === st.mode) return;
+    stopPlay();
+    st.mode = mode;
+    prefs.mode = mode; savePrefs();
+    st.sel = '';
+    // Clear the current marker set so icons from the other mode don't linger.
+    for (const [, m] of markers) group.removeLayer(m);
+    markers.clear();
+    root.querySelector('#t-root').classList.toggle('mode-live', mode === 'live');
+    root.querySelectorAll('.trk-mode [data-mode]').forEach((b) => b.classList.toggle('on', b.dataset.mode === mode));
+    if (mode === 'live') { liveFitted = false; startLiveTimer(); fetchLive(false); } else { stopLiveTimer(); }
+    update();
+    setTimeout(() => { if (map) { map.invalidateSize(); fitFleet(); } }, 60);
   }
 
   // ---------------------------------------------------------------- time
@@ -407,8 +515,44 @@ AD.views.tracker = (function () {
     return true;
   }
 
+  /**
+   * Live positions from Netstar, matched to the fleet register by rego.
+   * Devices with no matching vehicle (fake/placeholder regos) are kept but
+   * flagged, so nothing is silently dropped. One location object per device.
+   */
+  function liveLocations() {
+    const positions = (liveData && liveData.positions) || [];
+    const byRego = new Map(AD.store.all('vehicles').map((v) => [String(v.rego || '').toUpperCase(), v]));
+    return positions.map((p) => {
+      const v = byRego.get(String(p.rego || '').toUpperCase()) || null;
+      const cat = liveStatus(p);
+      return {
+        truckId: v ? v.id : `dev-${p.imei}`,
+        truck: v,                       // null when not in the fleet register
+        matched: !!v,
+        deviceName: p.deviceName,
+        state: p.hasFix ? 'located' : 'nofix',
+        lat: p.lat, lng: p.lng,
+        cat,                            // moving | idling | parked | offline
+        live: p,
+        seenAt: parseNetstarTime(p.lastData)
+      };
+    }).sort((a, b) => a.truckId.localeCompare(b.truckId));
+  }
+
+  function livePasses(loc) {
+    if (st.truck && loc.truckId !== st.truck) return false;
+    if (st.liveStatus && loc.cat !== st.liveStatus) return false;
+    return true;
+  }
+
+  /** The location set for whichever mode is active. */
+  function activeLocations() { return st.mode === 'live' ? liveLocations() : locations(); }
+  function activePasses(l) { return st.mode === 'live' ? livePasses(l) : passes(l); }
+
   function update() {
     if (!root) return;
+    if (st.mode === 'live') { updateLive(); return; }
     const $ = (s) => root.querySelector(s);
     const key = T.dateKey(st.t);
     const ds = T.startOfDay(key), de = T.startOfDay(T.addDays(key, 1));
@@ -422,7 +566,9 @@ AD.views.tracker = (function () {
     $('#t-when').textContent = `${T.fmtKeyLong(key)} · ${T.fmtTime(st.t)}`;
     $('#t-tz').textContent = `${T.abbr(st.t)} · Australia/Sydney${(de - ds) !== 86400000 ? ' · daylight saving changes today' : ''}`;
     $('#to-cal').href = `#/calendar?view=day&date=${key}`;
-    AD.setParams({ date: key, time: T.fmtTime(st.t), truck: st.sel, status: st.status, avail: st.avail });
+    $('#t-gps-text').textContent = 'Scheduled positions · Not live GPS';
+    $('#t-refresh').hidden = true;
+    AD.setParams({ date: key, time: T.fmtTime(st.t), truck: st.sel, status: st.status, avail: st.avail, mode: '', livestatus: '' });
 
     const locs = locations();
     const shown = locs.filter(passes);
@@ -431,6 +577,38 @@ AD.views.tracker = (function () {
     drawList(shown);
     syncMarkers(shown);
     syncWorkshops(locs);
+  }
+
+  function updateLive() {
+    const $ = (s) => root.querySelector(s);
+    const modeEl = $('#t-mode');
+    modeEl.className = 'mode mode-now';
+    modeEl.textContent = 'Live';
+    $('#to-cal').href = '#/calendar';
+    $('#t-refresh').hidden = false;
+    $('#t-refresh').classList.toggle('spin', liveLoading);
+
+    // GPS banner reflects freshness / loading / error
+    let banner;
+    if (liveError) banner = `Live GPS unavailable — ${esc(liveError)}`;
+    else if (!liveData && liveLoading) banner = 'Loading live positions…';
+    else if (!liveData) banner = 'Live GPS';
+    else banner = `Live GPS · updated ${agoText(liveFetchedAt)}`;
+    $('#t-gps-text').textContent = banner;
+    $('#t-when').textContent = liveData ? `${liveData.located} of ${liveData.count} located` : '';
+    $('#t-tz').textContent = liveData ? 'Positions from Netstar' : '';
+
+    AD.setParams({ mode: 'live', truck: st.sel, livestatus: st.liveStatus, date: '', time: '', status: '', avail: '' });
+
+    const locs = liveLocations();
+    const shown = locs.filter(livePasses);
+    const onMap = shown.filter((l) => l.state === 'located').length;
+    $('#t-count').textContent = liveData ? `${shown.length} of ${locs.length} · ${onMap} on map` : '';
+    drawLiveList(shown);
+    syncMarkers(shown);
+    for (const [, m] of wsMarkers) m.setIcon(wsIcon(0)); // no vehicle-at-workshop counts in live mode
+    // Fit to the fleet once, the first time real positions arrive.
+    if (!liveFitted && onMap > 0) { liveFitted = true; if (!st.sel) fitFleet(); }
   }
 
   // ---------------------------------------------------------------- timeline
@@ -543,6 +721,61 @@ AD.views.tracker = (function () {
     list.querySelectorAll('[data-veh]').forEach((btn) => (btn.onclick = () => AD.go('vehicle/' + btn.dataset.veh, { tab: 'bookings' })));
   }
 
+  const liveBadge = (cat) => `<span class="fp-live fp-live-${cat}"><i></i>${LIVE_WORD[cat] || ''}</span>`;
+
+  function drawLiveList(shown) {
+    const list = root.querySelector('#t-list');
+    if (!liveData && liveLoading) { list.innerHTML = '<p class="empty" style="padding:16px">Loading live positions…</p>'; return; }
+    if (liveError && !liveData) { list.innerHTML = `<p class="empty" style="padding:16px">${esc(liveError)}<br><button type="button" class="btn btn-secondary btn-sm" id="t-retry" style="margin-top:10px">Try again</button></p>`; const r = list.querySelector('#t-retry'); if (r) r.onclick = () => fetchLive(true); return; }
+
+    list.innerHTML = shown.map((l) => {
+      const sel = l.truckId === st.sel;
+      const p = l.live;
+      const name = markerLabel(l);
+      const where = p.hasFix ? esc(p.location || `${p.lat.toFixed(4)}, ${p.lng.toFixed(4)}`) : '<span class="fp-unknown">No GPS fix</span>';
+      const when = `Seen ${esc(agoText(l.seenAt))}${p.speed ? ` · ${Math.round(p.speed)} km/h` : ''}`;
+      return `<div class="fp-item${sel ? ' sel' : ''}" role="listitem" data-t="${l.truckId}">
+        <button type="button" class="fp-row" data-pick="${l.truckId}" aria-expanded="${sel}" aria-controls="fp-d-${l.truckId}" title="${esc(p.location || name)}">
+          <span class="fp-thumb">${AD.art.forVehicle(l.truck, 64, `${name} vehicle`) || AD.art.car(64, `${name} vehicle`)}</span>
+          <span class="fp-main">
+            <span class="fp-top"><b>${esc(name)}</b>${liveBadge(l.cat)}</span>
+            <span class="fp-job">${l.matched ? esc(l.truck.make + ' ' + l.truck.model.split(' —')[0]) : '<span class="muted">Not in fleet register</span>'}</span>
+            <span class="fp-site">${where}</span>
+            <span class="fp-time">${when}</span>
+          </span>
+        </button>
+        ${sel ? `<div class="fp-detail" id="fp-d-${l.truckId}">${liveDetail(l)}</div>` : ''}
+      </div>`;
+    }).join('') || '<p class="empty" style="padding:16px">No vehicles match these filters.</p>';
+
+    list.querySelectorAll('[data-pick]').forEach((btn) => { btn.onclick = (e) => select(btn.dataset.pick, 'list', e.detail === 0); });
+    list.querySelectorAll('[data-veh]').forEach((btn) => (btn.onclick = () => AD.go('vehicle/' + btn.dataset.veh, { tab: 'overview' })));
+  }
+
+  function liveDetail(l) {
+    const p = l.live, v = l.truck;
+    const head = v
+      ? `<div class="fpd-veh">${esc(v.make)} ${esc(v.model.split(' —')[0])} · ${esc(v.rego)} · ${vehicleBadge(v.status)}</div>`
+      : `<div class="fpd-veh">${esc(p.deviceName || 'Telematics device')} · ${esc(p.rego || p.imei)}</div>`;
+    const coords = p.hasFix ? `${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}` : '';
+    const mapLink = p.hasFix ? `<a class="btn btn-link" href="https://www.google.com/maps?q=${p.lat},${p.lng}" target="_blank" rel="noopener">Open in Google Maps</a>` : '';
+    return `${head}
+      ${!l.matched ? '<p class="note">This device isn’t linked to a vehicle in the fleet register (its Netstar rego doesn’t match a plate).</p>' : ''}
+      <dl>
+        <dt>Status</dt><dd>${liveBadge(l.cat)}</dd>
+        <dt>Location</dt><dd>${p.hasFix ? esc(p.location || coords) : '<span class="muted">No GPS fix</span>'}${coords ? `<span class="t2">${coords}</span>` : ''}</dd>
+        <dt>Last report</dt><dd>${esc(agoText(l.seenAt))}${p.lastData ? `<span class="t2">${esc(p.lastData)}</span>` : ''}</dd>
+        <dt>Ignition</dt><dd>${esc(p.ignition || '—')}${p.speed ? ` · ${Math.round(p.speed)} km/h` : ''}</dd>
+        ${p.odometerYesterday != null ? `<dt>Odometer</dt><dd>${esc(Math.round(p.odometerYesterday).toLocaleString('en-AU'))} km<span class="t2">as at yesterday</span></dd>` : ''}
+        ${p.driver ? `<dt>Driver</dt><dd>${esc(p.driver)}</dd>` : ''}
+        <dt>Device</dt><dd>${esc(p.deviceName || '—')}${p.deviceModel ? `<span class="t2">${esc(p.deviceModel)}</span>` : ''}</dd>
+      </dl>
+      <div class="btns">
+        ${v ? `<button type="button" class="btn btn-secondary btn-sm" data-veh="${v.id}">View vehicle</button>` : ''}
+        ${mapLink}
+      </div>`;
+  }
+
   function detail(l) {
     const v = l.truck, b = l.booking;
     const assigned = L.driverName(v.driverId);
@@ -615,6 +848,7 @@ AD.views.tracker = (function () {
 
   function destroy() {
     stopPlay();
+    stopLiveTimer();
     if (map) { map.remove(); map = null; group = null; wsGroup = null; centerDot = null; }
     markers.clear();
     wsMarkers.clear();
