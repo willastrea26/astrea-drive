@@ -309,6 +309,8 @@ AD.views.tracker = (function () {
   }
 
   const markerLabel = (l) => l.live && !l.matched ? (l.deviceName || l.live.rego || l.truckId) : l.truckId;
+  // forVehicle() throws on a null vehicle, so only call it when we actually have one.
+  const vehArt = (truck, size, label) => (truck && AD.art.forVehicle(truck, size, label)) || AD.art.car(size, label);
 
   function markerIcon(l, sel) {
     const word = l.live ? (LIVE_WORD[l.cat] || '') : (STATUS_WORD[l.cat] || '');
@@ -318,7 +320,7 @@ AD.views.tracker = (function () {
       html: `<div class="tm tm-${l.cat}${l.live ? ' tm-live' : ''}${sel ? ' sel' : ''}">
         <span class="tm-halo"></span>
         <span class="tm-status"><i></i>${esc(word)}</span>
-        ${AD.art.forVehicle(l.truck, 88, `${label} location`) || AD.art.car(88, `${label} vehicle`)}
+        ${vehArt(l.truck, 88, `${label} location`)}
         <span class="tm-stem"></span><span class="tm-anchor"></span>
       </div>`,
       iconSize: [88, 64], iconAnchor: [44, 60]
@@ -736,7 +738,7 @@ AD.views.tracker = (function () {
       const when = `Seen ${esc(agoText(l.seenAt))}${p.speed ? ` · ${Math.round(p.speed)} km/h` : ''}`;
       return `<div class="fp-item${sel ? ' sel' : ''}" role="listitem" data-t="${l.truckId}">
         <button type="button" class="fp-row" data-pick="${l.truckId}" aria-expanded="${sel}" aria-controls="fp-d-${l.truckId}" title="${esc(p.location || name)}">
-          <span class="fp-thumb">${AD.art.forVehicle(l.truck, 64, `${name} vehicle`) || AD.art.car(64, `${name} vehicle`)}</span>
+          <span class="fp-thumb">${vehArt(l.truck, 64, `${name} vehicle`)}</span>
           <span class="fp-main">
             <span class="fp-top"><b>${esc(name)}</b>${liveBadge(l.cat)}</span>
             <span class="fp-job">${l.matched ? esc(l.truck.make + ' ' + l.truck.model.split(' —')[0]) : '<span class="muted">Not in fleet register</span>'}</span>
