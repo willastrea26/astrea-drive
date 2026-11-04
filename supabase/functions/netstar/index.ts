@@ -73,6 +73,7 @@ interface Device {
 async function fetchVehicles(): Promise<Device[]> {
   const res = await fetch(`${NETSTAR_BASE}/external/company-vehicles`, {
     method: "POST",
+    signal: AbortSignal.timeout(15000),
     headers: {
       accept: "*/*",
       "x-api-key": API_KEY,
@@ -186,6 +187,53 @@ async function syncOdometers() {
   });
 }
 
+// Read-only report requests. Fixed endpoint allowlist; device IDs are resolved
+// from this company's vehicle list, never accepted directly from the browser.
+async function activityReports(body: Record<string, unknown>) {
+  const from = typeof body.from === 'string' ? Date.parse(body.from) : NaN;
+  const to = typeof body.to === 'string' ? Date.parse(body.to) : NaN;
+  if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from ||
+      to - from > 31 * 86400000 + 3600000 || to > Date.now() + 60000) {
+    return json({ error: 'Choose a past or current period of at most 31 days.' }, 400);
+  }
+  const regos = Array.isArray(body.regos) ? body.regos : [];
+  if (!regos.length || regos.length > 100 || regos.some(r => typeof r !== 'string')) {
+    return json({ error: 'Select between 1 and 100 fleet registrations.' }, 400);
+  }
+  const norm = (s: string) => s.trim().toUpperCase();
+  const wanted = new Set((regos as string[]).map(norm));
+  const vehicles = (await fetchVehicles()).filter(v => v.imei && wanted.has(norm(v.rego)));
+  const imeis = [...new Set(vehicles.map(v => v.imei))];
+  const formatDate = (ms: number) => {
+    const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Australia/Sydney', year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+    }).formatToParts(ms).map(p => [p.type, p.value]));
+    return `${parts.day}-${parts.month}-${parts.year} ${parts.hour}:${parts.minute}:${parts.second}`;
+  };
+  const definitions = [
+    ['work', 'workhour-report'], ['ignition', 'ignition-summary-report'],
+    ['idle', 'idle-summary'], ['trips', 'trip-summary'],
+  ];
+  const entries = await mapLimit(definitions, 2, async ([key, endpoint]) => {
+    if (!imeis.length) return [key, { ok: true, payload: { data: [] } }];
+    try {
+      const response = await fetch(`${NETSTAR_BASE}/external/reports/${endpoint}`, {
+        method: 'POST',
+        headers: { 'x-api-key': API_KEY, 'Content-Type': 'application/json', accept: 'application/json' },
+        body: JSON.stringify({ imeis, start_date_time: formatDate(from), end_date_time: formatDate(to) }),
+        signal: AbortSignal.timeout(20000),
+      });
+      if (!response.ok) return [key, { ok: false, error: `Netstar returned HTTP ${response.status}` }];
+      return [key, { ok: true, payload: await response.json() }];
+    } catch {
+      return [key, { ok: false, error: 'Netstar did not return a readable report. Try again later.' }];
+    }
+  });
+  return json({ reportVersion: 1, from: new Date(from).toISOString(), to: new Date(to).toISOString(),
+    fetchedAt: new Date().toISOString(), vehicles, reports: Object.fromEntries(entries) });
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (!API_KEY) return json({ error: "NETSTAR_API_KEY secret not set" }, 500);
@@ -208,6 +256,7 @@ Deno.serve(async (req: Request) => {
     }
 
     if (action === "sync-odometers") return await syncOdometers();
+    if (action === "activity-reports") return await activityReports(body);
 
     // default: live — list + status joined, one row per device, keyed by rego
     const vehicles = await fetchVehicles();
