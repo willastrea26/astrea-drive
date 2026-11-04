@@ -108,9 +108,6 @@ AD.views['cost-sheet'] = (function () {
     const spend = sum(now), avgSpend = avgOf(base.map((w) => sum(w.rows)));
     const jobs = now.length, avgJobs = avgOf(base.map((w) => w.rows.length));
     const perJob = jobs ? spend / jobs : 0, avgPerJob = avgJobs ? avgSpend / avgJobs : 0;
-    const fleet = AD.store.all('vehicles').length;
-    const vehicleCount = new Set(now.map((r) => r.vehicleId)).size;
-    const avgVehicleCount = avgOf(base.map((w) => new Set(w.rows.map((r) => r.vehicleId)).size));
 
     // Share rather than dollars: unplanned spend rises with a heavy week either way,
     // but the proportion is what says whether maintenance is keeping ahead of failure.
@@ -150,7 +147,6 @@ AD.views['cost-sheet'] = (function () {
         ${kpi('Jobs recorded', String(jobs), delta(jobs, avgJobs, haveBaseline, (n) => n.toFixed(1), false))}
         ${kpi('Average per job', L.fmtAUD(perJob), delta(perJob, avgPerJob, haveBaseline, L.fmtAUD, true), trendTone(perJob, avgPerJob, haveBaseline, true))}
         ${kpi('Unplanned share', `${Math.round(share)}%`, shareFoot, shareTone)}
-        ${kpi('Vehicles charged this week', `${vehicleCount}`, `<small class="cs-delta">of ${fleet} in the fleet · ${haveBaseline ? avgVehicleCount.toFixed(1) + ' avg' : 'no prior weeks'}</small>`)}
         ${restOfYearMonths.length ? kpi('Projected to year-end', L.fmtAUD(projRestTotal), `<small class="cs-delta">${restOfYearMonths.length} month${restOfYearMonths.length === 1 ? '' : 's'} remaining · ${L.fmtAUD(projMonthAvg)}/mo avg</small>`) : ''}
       </div>
 
