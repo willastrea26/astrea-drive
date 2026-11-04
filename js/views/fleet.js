@@ -66,6 +66,8 @@ AD.vehicleForm = function (vehicle, onSaved) {
           <div class="help">Used to pre-fill the next service when logging one.</div></div>
         <div class="form-section-title full"><b>Identifiers and notes</b><span>Optional fleet reference details</span></div>
         <div class="field"><label>VIN</label><input type="text" name="vin" value="${esc(v.vin || '')}" maxlength="20"></div>
+        <div class="field"><label>Netstar rego (if different)</label><input type="text" name="netstarRego" value="${esc(v.netstarRego || '')}" maxlength="12" placeholder="only if Netstar spells the plate differently">
+          <div class="help">Leave blank unless the tracker won't match. The real plate above stays as-is.</div></div>
         <div class="field"><label>Variant / spec</label><input type="text" name="variant" value="${esc(v.variant || '')}"></div>
         <div class="field"><label>Linkt tag</label><input type="text" name="linktTag" value="${esc(v.linktTag || '')}"></div>
         <div class="field"><label>WRDT plant no.</label><input type="text" name="wrdtPlantNo" value="${esc(v.wrdtPlantNo || '')}"></div>
@@ -130,7 +132,7 @@ AD.vehicleForm = function (vehicle, onSaved) {
           serviceIntervalHours: d.serviceIntervalHours === '' ? null : Number(d.serviceIntervalHours),
           trackByDate: !!d.trackByDate, trackByKm: !!d.trackByKm, trackByHours: !!d.trackByHours,
           notes: d.notes,
-          vin: d.vin || null, variant: d.variant || null, linktTag: d.linktTag || null,
+          vin: d.vin || null, variant: d.variant || null, netstarRego: d.netstarRego ? d.netstarRego.toUpperCase() : null, linktTag: d.linktTag || null,
           wrdtPlantNo: d.wrdtPlantNo || null, evieFob: d.evieFob || null, evieCard: d.evieCard || null,
           hired: hiredMode, hireCompany: hiredMode ? (d.hireCompany || '') : ''
         };

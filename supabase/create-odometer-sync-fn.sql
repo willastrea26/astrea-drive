@@ -43,9 +43,12 @@ begin
       continue;
     end if;
 
+    -- Match the real plate, or a vehicle's Netstar alias (set when Netstar
+    -- spells the plate differently), so the register plate can stay correct.
     select id, odometer into v_vehicle
     from public.vehicles
     where upper(btrim(rego)) = r.rego
+       or upper(btrim("netstarRego")) = r.rego
     limit 1 for update;
 
     if not found then

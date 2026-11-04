@@ -527,7 +527,11 @@ AD.views.tracker = (function () {
    */
   function liveLocations() {
     const positions = (liveData && liveData.positions) || [];
-    const byRego = new Map(AD.store.all('vehicles').map((v) => [String(v.rego || '').toUpperCase(), v]));
+    const byRego = new Map();
+    AD.store.all('vehicles').forEach((v) => {
+      byRego.set(String(v.rego || '').toUpperCase(), v);
+      if (v.netstarRego) byRego.set(String(v.netstarRego).toUpperCase(), v); // Netstar's spelling of the plate
+    });
     return positions.map((p) => {
       const v = byRego.get(String(p.rego || '').toUpperCase()) || null;
       const cat = liveStatus(p);
