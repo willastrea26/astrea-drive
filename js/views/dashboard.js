@@ -12,8 +12,8 @@ AD.views.dashboard = (function () {
     const email = (AD.currentUserEmail || '').toLowerCase();
     return FIRST_NAME_BY_EMAIL[email] || 'Will';
   }
-  let stopActivity = null;
-  let root = null, day = '', schedFilter = 'all', followToday = true;
+  const OWNED_SCHEDULE_VAC_IDS = new Set(Array.from({ length: 8 }, (_, i) => `AVT${String(i + 1).padStart(2, '0')}`));
+  let root = null, day = '', schedFilter = 'all';
   // Which insight is on screen. Held across redraws so a background refresh
   // doesn't yank the band back to the first card while it's being read.
   let insightIdx = 0, insightTimer = null;
@@ -414,20 +414,17 @@ AD.views.dashboard = (function () {
   function render(el, params) {
     root = el;
     day = /^\d{4}-\d{2}-\d{2}$/.test(params.date || '') ? params.date : T.todayKey();
-    followToday = !params.date;
     fresh = true;
     hero();
     draw();
   }
 
   function draw() {
-    if (stopActivity) { stopActivity(); stopActivity = null; }
     const el = root;
     const today = T.todayKey();
-    if (followToday) day = today;
     const vehicles = AD.store.all('vehicles');
     const vac = L.vacTrucks();
-    const ownedScheduleVac = vac.filter((v) => !v.hired);
+    const ownedScheduleVac = vac.filter((v) => !v.hired && OWNED_SCHEDULE_VAC_IDS.has(v.id));
     const available = vehicles.filter((v) => v.status === 'Available');
     const svc = vehicles.map((v) => ({ v, s: L.serviceState(v) })).filter((x) => x.s.state !== 'ok')
       .sort((a, b) => (a.s.state === b.s.state ? a.s.daysLeft - b.s.daysLeft : a.s.state === 'overdue' ? -1 : 1));
@@ -537,9 +534,7 @@ AD.views.dashboard = (function () {
         })}
       </div>
 
-      <section class="section fleet-activity" id="fleet-activity"></section>
-
-      ${insights(vehicles, ownedScheduleVac, priParts)}
+      ${insights(vehicles, vac, priParts)}
 
       <section class="section" aria-labelledby="sched-h">
         ${schedule(ownedScheduleVac, today)}
@@ -595,11 +590,10 @@ AD.views.dashboard = (function () {
       location.hash = tr.dataset.href;
     }));
     const dateIn = el.querySelector('#sched-date');
-    dateIn.addEventListener('change', () => { if (dateIn.value) { day = dateIn.value; followToday = day === today; AD.setParams({ date: day === today ? '' : day }); draw(); } });
+    dateIn.addEventListener('change', () => { if (dateIn.value) { day = dateIn.value; AD.setParams({ date: day === today ? '' : day }); draw(); } });
     const todayBtn = el.querySelector('#sched-today');
-    if (todayBtn) todayBtn.onclick = () => { day = today; followToday = true; AD.setParams({}); draw(); };
+    if (todayBtn) todayBtn.onclick = () => { day = today; AD.setParams({}); draw(); };
     el.querySelectorAll('.sched-tab').forEach(t => t.addEventListener('click', () => { schedFilter = t.dataset.scope; draw(); }));
-    if (AD.fleetActivity) stopActivity = AD.fleetActivity.mount(el.querySelector('#fleet-activity'), ownedScheduleVac, day);
   }
 
   // ---------- Fleet insights (charts) ----------
@@ -623,17 +617,16 @@ AD.views.dashboard = (function () {
       return { d, c };
     });
     const totals = V.BOOKING.map((b) => ({ ...b, value: util.reduce((n, u) => n + u.c[b.key], 0) }));
-    const n = vac.length;
-    const scale = n || 1;
+    const n = vac.length || 1;
     const utilCols = util.map((u) => {
       const k = T.parseKey(u.d);
       const dow = T.DOW[T.dayOfWeek(u.d)];
       const booked = n - u.c.free;
       const rows = V.BOOKING.map((b) => [b.label, String(u.c[b.key]), b.color]).concat([['Free', String(u.c.free), 'var(--viz-free-key)']]);
-      const segs = V.BOOKING.filter((b) => u.c[b.key]).map((b) => `<i style="height:${(u.c[b.key] / scale) * 100}%;background:${b.color}"></i>`).join('');
+      const segs = V.BOOKING.filter((b) => u.c[b.key]).map((b) => `<i style="height:${(u.c[b.key] / n) * 100}%;background:${b.color}"></i>`).join('');
       return `<a class="uc-col${u.d === today ? ' is-today' : ''}${T.dayOfWeek(u.d) >= 5 ? ' is-weekend' : ''}" href="#/calendar?view=day&date=${u.d}"
           ${V.tipAttr(`${T.fmtKeyLong(u.d)} · ${booked} of ${n} trucks busy`, rows)} aria-label="${T.fmtKeyLong(u.d)}: ${booked} of ${n} vac trucks busy">
-          <span class="uc-bar">${segs}${u.d === today ? `<span class="uc-cap" style="bottom:calc(${(booked / scale) * 100}% + 4px)">${booked}</span>` : ''}</span>
+          <span class="uc-bar">${segs}${u.d === today ? `<span class="uc-cap" style="bottom:calc(${(booked / n) * 100}% + 4px)">${booked}</span>` : ''}</span>
           <span class="uc-x"><b>${dow}</b>${k.d}</span>
         </a>`;
     }).join('');
@@ -691,7 +684,7 @@ AD.views.dashboard = (function () {
         ${sectionHead({ title: 'Fleet charts', meta: 'Bookings for the next 14 days, costs for the last 12 months' })}
         <div class="insights">
           <figure class="viz-card viz-wide">
-            <figcaption><h3>Planned vac truck bookings</h3><span class="viz-sub">${n} owned vac trucks · next 14 days · ${busyToday} booked today · booking data, not GPS activity</span></figcaption>
+            <figcaption><h3>Vac truck utilisation</h3><span class="viz-sub">Trucks busy each day, next 14 days · ${busyToday} of ${n} today</span></figcaption>
             ${V.legend(totals, { counts: false })}
             <div class="uc" style="--rows:${n}">
               <div class="uc-axis" aria-hidden="true"><span style="bottom:100%">${n}</span><span style="bottom:50%">${n / 2}</span><span style="bottom:0">0</span></div>
@@ -776,7 +769,6 @@ AD.views.dashboard = (function () {
       const menuCell = `<td rowspan="${span}" class="col-action col-opt">
           <button class="row-menu" data-edit="${v.id}" title="Edit ${esc(v.id)}" aria-label="Edit ${esc(v.id)}">${I.dots}</button>
         </td>`;
-      const gpsCell = day === today ? `<td rowspan="${span}" class="fa-schedule-live"><div data-live-vehicle="${esc(v.id)}"><span class="muted">Connecting to GPS…</span></div></td>` : '';
 
       return rows.map((b, i) => {
         const cls = ['row-link', i === span - 1 ? 'group-end' : 'cont', i > 0 ? 'sub' : ''];
@@ -789,7 +781,7 @@ AD.views.dashboard = (function () {
             <td><span class="missing">${list.length ? 'No active bookings on this date' : 'No bookings on this date'}</span></td>
             <td class="col-opt">${dash}</td>
             <td>${scheduleBadge('unscheduled')}</td>
-            ${gpsCell}${attnCell}${menuCell}
+            ${attnCell}${menuCell}
           </tr>`;
         }
         const s = Date.parse(b.start), e = Date.parse(b.end);
@@ -807,7 +799,7 @@ AD.views.dashboard = (function () {
           <td><a class="row-title ${strike}" href="${href}">${esc(L.bookingTitle(b))}</a>${b.jobNumber ? ` <span class="muted small nowrap">${esc(b.jobNumber)}</span>` : ''}${siteHtml(b, cancelled)}<span class="t2 only-mobile ${strike}">${clock(s)} – ${clock(e)}${isNow ? ' · Now' : ''}</span></td>
           <td class="col-opt ${strike}"><span class="nowrap">${clock(s)} –</span> <span class="nowrap">${clock(e)}</span>${isNow ? '<span class="tag-now">Now</span>' : ''}${isNow ? jobProgress(s, e, now) : ''}${dayBar(s, e, cancelled ? 'cancelled' : cat, clash, ds, de, now)}</td>
           <td>${clash ? `${scheduleBadge('conflict')}<span class="t2">${AD.ui.BOOKING_LABEL[cat]} · overlaps</span>` : bookingBadge(cat)}</td>
-          ${i === 0 ? gpsCell + attnCell + menuCell : ''}
+          ${i === 0 ? attnCell + menuCell : ''}
         </tr>`;
       }).join('');
     }).join('');
@@ -829,7 +821,7 @@ AD.views.dashboard = (function () {
       </button>`).join('')}
     </div>`;
 
-    const emptyRow = `<tr><td colspan="${day === today ? 8 : 7}" class="sched-empty">No trucks in this view — try another tab.</td></tr>`;
+    const emptyRow = `<tr><td colspan="7" class="sched-empty">No trucks in this view — try another tab.</td></tr>`;
 
     return `
       ${sectionHead({
@@ -844,8 +836,7 @@ AD.views.dashboard = (function () {
         <table class="data">
           <thead><tr>
             <th style="width:108px">Truck</th><th class="col-opt" style="width:132px">Driver</th><th>Job / site</th>
-            <th class="col-opt" style="width:128px">Booking time</th><th style="width:140px">Booking status</th>
-            ${day === today ? '<th>GPS activity now</th>' : ''}
+            <th class="col-opt" style="width:128px">Booking time</th><th style="width:140px">Status</th>
             <th class="col-opt col-attn" style="width:170px">Needs attention</th>
             <th class="col-opt col-action"><span class="hide">Actions</span></th>
           </tr></thead>
@@ -876,7 +867,5 @@ AD.views.dashboard = (function () {
     return `<span class="t2">${cancelled ? '' : `<span class="flag flag-amber">Site location required</span>`}${b.address ? ` <span class="${strike}">${esc(b.address)} (not located)</span>` : ''}</span>`;
   }
 
-  return { title: 'Fleet overview', render, refresh: () => root && draw(), destroy: () => {
-    stopInsights(); if (stopActivity) stopActivity(); stopActivity = null; root = null;
-  } };
+  return { title: 'Fleet overview', render, refresh: () => root && draw(), destroy: stopInsights };
 })();
