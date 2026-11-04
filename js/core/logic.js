@@ -81,13 +81,31 @@ AD.logic = (function () {
   }
 
   /**
-   * Average distance driven per day, from how far the vehicle has actually
-   * moved since its last service (odometer now kept current by the GPS sync).
-   * Needs at least a week of history for a stable figure — returns null
-   * otherwise so no noisy number is shown. `lastKm`/`lastDate` override the
-   * stored last-service anchor when a precise service record is to hand.
+   * Average distance driven per day. Preferred source is the recorded
+   * odometer-reading history (two snapshots over time), which covers every
+   * synced vehicle and reflects recent driving. Falls back to distance since
+   * the last service when there isn't enough history yet. Needs at least a
+   * week of span for a stable figure — returns null otherwise, so no noisy
+   * number is shown. `lastKm`/`lastDate` override the fallback anchor when a
+   * precise service record is to hand.
    */
   function usageRate(v, lastKm, lastDate) {
+    // 1. From recorded snapshots (earliest vs latest within the window).
+    const reads = (S().all('odometer_readings') || [])
+      .filter((r) => r.vehicleId === v.id && Number.isFinite(Number(r.km)) && r.readDate)
+      .sort((a, b) => a.readDate.localeCompare(b.readDate));
+    if (reads.length >= 2) {
+      const first = reads[0], last = reads[reads.length - 1];
+      const days = T.daysBetween(first.readDate, last.readDate);
+      const driven = Number(last.km) - Number(first.km);
+      if (days >= 7 && driven > 0) {
+        const perDay = driven / days;
+        if (perDay > 0 && Number.isFinite(perDay)) {
+          return { perDay, perWeek: perDay * 7, driven, days, source: 'history' };
+        }
+      }
+    }
+    // 2. Fallback: distance since last service.
     const km0 = lastKm != null ? Number(lastKm)
       : (v.lastServiceKm != null && v.lastServiceKm !== '' ? Number(v.lastServiceKm) : null);
     const d0 = lastDate || v.lastServiceDate || null;
@@ -97,7 +115,7 @@ AD.logic = (function () {
     if (!(elapsed >= 7) || !(driven > 0)) return null;
     const perDay = driven / elapsed;
     if (!(perDay > 0) || !Number.isFinite(perDay)) return null;
-    return { perDay, perWeek: perDay * 7, driven, days: elapsed };
+    return { perDay, perWeek: perDay * 7, driven, days: elapsed, source: 'service' };
   }
 
   function regoState(v) {

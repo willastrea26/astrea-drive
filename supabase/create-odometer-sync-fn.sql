@@ -53,6 +53,19 @@ begin
       continue;
     end if;
     v_old := v_vehicle.odometer;
+
+    -- Record the raw telematics reading as today's snapshot (one per vehicle
+    -- per day), so distance-driven can be measured over time. Kept even when
+    -- the reading is lower than the stored odometer, so the history is a
+    -- consistent run of device readings.
+    insert into public.odometer_readings (id, "vehicleId", km, "readDate", at)
+    values (
+      'odr-' || substr(replace(gen_random_uuid()::text, '-', ''), 1, 12),
+      v_vehicle.id, r.km, (v_now at time zone 'Australia/Sydney')::date, v_now
+    )
+    on conflict ("vehicleId", "readDate")
+      do update set km = excluded.km, at = excluded.at;
+
     if r.km < coalesce(v_old, 0) then
       v_results := v_results || jsonb_build_array(jsonb_build_object('rego', r.rego, 'status', 'lower', 'gpsKm', r.km, 'savedKm', v_old));
       continue;

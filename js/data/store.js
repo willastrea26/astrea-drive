@@ -40,18 +40,33 @@ AD.store = (function () {
     return t === 'activity' ? q.order('ts', { ascending: false }).limit(ACTIVITY_LIMIT) : q;
   }
 
+  // Recent odometer snapshots, for distance-driven (usage). Loaded separately
+  // and tolerantly: the table may not exist yet on older databases, and a
+  // missing table must not break the rest of the app's data load.
+  const ODO_READING_DAYS = 45;
+  async function loadOdometerReadings() {
+    try {
+      const since = new Date(Date.now() - ODO_READING_DAYS * 86400000).toISOString().slice(0, 10);
+      const { data, error } = await sb().from('odometer_readings').select('*').gte('readDate', since);
+      return error ? [] : (data || []);
+    } catch (e) {
+      return [];
+    }
+  }
+
   async function load() {
-    const results = await Promise.all(TABLES.map(query));
+    const [results, readings] = await Promise.all([Promise.all(TABLES.map(query)), loadOdometerReadings()]);
     const next = {};
     results.forEach((r, i) => {
       if (r.error) throw r.error;
       next[TABLES[i]] = r.data;
     });
+    next.odometer_readings = readings;
     db = next;
     emit('*');
   }
 
-  function all(coll) { return db[coll]; }
+  function all(coll) { return db[coll] || []; }
   function get(coll, id) { return db[coll].find((r) => r.id === id) || null; }
 
   async function insert(coll, row, prefix) {
