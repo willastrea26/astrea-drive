@@ -1313,7 +1313,8 @@ input[type=text], input[type=number], input[type=date], input[type=datetime-loca
 .viz-legend b { font-weight: 700; color: var(--ink); }
 
 /* Insights grid */
-.insights { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 16px; }
+.insights { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.insights .viz-wide { grid-column: 1 / -1; }
 .viz-card {
   margin: 0; background: var(--paper); border: 1px solid var(--rule); border-radius: var(--r-lg); box-shadow: var(--shadow-1);
   padding: 16px 18px 12px; display: flex; flex-direction: column; gap: 10px; min-width: 0;

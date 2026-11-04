@@ -631,32 +631,7 @@ AD.views.dashboard = (function () {
         </a>`;
     }).join('');
 
-    // 2. Service spend, last 12 months
-    const nowP = T.parts(Date.now());
-    const months = Array.from({ length: 12 }, (_, i) => {
-      const dt = new Date(Date.UTC(nowP.year, nowP.month - 1 - (11 - i), 1));
-      return { key: dt.toISOString().slice(0, 7), y: dt.getUTCFullYear(), m: dt.getUTCMonth() };
-    });
-    const services = AD.store.all('services');
-    months.forEach((mo) => {
-      const list = services.filter((s) => s.date.slice(0, 7) === mo.key);
-      mo.cost = list.reduce((sum, s) => sum + Number(s.cost || 0), 0);
-      mo.count = list.length;
-    });
-    const spendTotal = months.reduce((s, mo) => s + mo.cost, 0);
-    const maxSpend = Math.max(...months.map((mo) => mo.cost), 1);
-    const step = maxSpend > 8000 ? 4000 : maxSpend > 4000 ? 2000 : 1000;
-    const spendTop = Math.ceil(maxSpend / step) * step;
-    const peak = months.reduce((a, b) => (b.cost > a.cost ? b : a), months[0]);
-    const MON = T.MONTHS.map((x) => x.slice(0, 3));
-    const spendCols = months.map((mo) => `
-      <a class="uc-col" href="#/maintenance" ${V.tipAttr(`${T.MONTHS[mo.m]} ${mo.y}`, [['Service spend', aud0(mo.cost), 'var(--viz-confirmed)'], ['Services', String(mo.count), '']])}
-         aria-label="${T.MONTHS[mo.m]} ${mo.y}: ${aud0(mo.cost)} across ${mo.count} services">
-        <span class="uc-bar">${mo.cost ? `<i style="height:${(mo.cost / spendTop) * 100}%;background:var(--viz-confirmed)"></i>` : ''}${mo === peak && mo.cost ? `<span class="uc-cap" style="bottom:calc(${(mo.cost / spendTop) * 100}% + 4px)">${aud0(mo.cost)}</span>` : ''}</span>
-        <span class="uc-x"><b>${MON[mo.m]}</b>${mo.m === 0 || mo === months[0] ? String(mo.y).slice(2) : '&nbsp;'}</span>
-      </a>`).join('');
-
-    // 3. Open defects by priority (direct labels; severity colours always with text)
+    // 2. Open defects by priority (direct labels; severity colours always with text)
     const maxPri = Math.max(...priParts.map((p) => p.value), 1);
     const priRows = priParts.map((p) => `
       <a class="hb-row" href="#/defects?status=open&priority=${p.label}" ${V.tipAttr(`${p.label} priority`, [['Open defects', String(p.value), p.color]])} aria-label="${p.label}: ${p.value} open">
@@ -698,7 +673,7 @@ AD.views.dashboard = (function () {
     const busyToday = n - util[0].c.free;
     return `
       <section class="section">
-        ${sectionHead({ title: 'Fleet charts', meta: 'Bookings for the next 14 days, costs for the last 12 months' })}
+        ${sectionHead({ title: 'Fleet charts', meta: 'Bookings, usage, open defects and fleet mix' })}
         <div class="insights">
           <figure class="viz-card viz-wide">
             <figcaption><h3>Vac truck utilisation</h3><span class="viz-sub">Trucks busy each day, next 14 days · ${busyToday} of ${n} today</span></figcaption>
@@ -710,7 +685,7 @@ AD.views.dashboard = (function () {
             ${V.table(['Date', 'Confirmed', 'Tentative', 'Depot', 'Maintenance', 'Free'], util.map((u) => [T.fmtKeyLong(u.d), u.c.confirmed, u.c.tentative, u.c.depot, u.c.maintenance, u.c.free].map(String)))}
           </figure>
 
-          <figure class="viz-card viz-wide">
+          <figure class="viz-card">
             <figcaption><h3>Vehicle usage</h3><span class="viz-sub">Average distance driven per day${usageList.length ? ` · busiest ${usageShown.length} of ${usageList.length} with data` : ''}</span></figcaption>
             ${usageRows
               ? `<div class="hb">${usageRows}</div>`
@@ -722,15 +697,6 @@ AD.views.dashboard = (function () {
             <figcaption><h3>Open defects by priority</h3><span class="viz-sub">${priParts.reduce((s, p) => s + p.value, 0)} open · select a bar to filter</span></figcaption>
             <div class="hb">${priRows}</div>
             ${V.table(['Priority', 'Open defects'], priParts.map((p) => [p.label, String(p.value)]))}
-          </figure>
-
-          <figure class="viz-card viz-wide">
-            <figcaption><h3>Service spend</h3><span class="viz-sub">Recorded services, last 12 months · ${aud0(spendTotal)} total</span></figcaption>
-            <div class="uc uc-money">
-              <div class="uc-axis" aria-hidden="true"><span style="bottom:100%">${aud0(spendTop)}</span><span style="bottom:50%">${aud0(spendTop / 2)}</span><span style="bottom:0">$0</span></div>
-              <div class="uc-plot"><div class="uc-grid" aria-hidden="true"><i style="bottom:100%"></i><i style="bottom:50%"></i><i style="bottom:0"></i></div><div class="uc-cols">${spendCols}</div></div>
-            </div>
-            ${V.table(['Month', 'Spend (AUD)', 'Services'], months.map((mo) => [`${T.MONTHS[mo.m]} ${mo.y}`, aud0(mo.cost), String(mo.count)]))}
           </figure>
 
           <figure class="viz-card">
