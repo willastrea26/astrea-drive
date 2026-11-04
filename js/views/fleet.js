@@ -276,16 +276,50 @@ AD.views.fleet = (function () {
       AD.store.all('vehicles').filter((v) => !v.hired && !seen.has(key(v.rego))).forEach((v) => {
         results.push({ rego: v.rego || v.id, status: 'notReturned' });
       });
-      const reasons = {
-        updated: 'Mileage updated from GPS', verified: 'GPS verified — mileage matches',
-        lower: 'Saved mileage is higher — kept unchanged', missing: 'No valid GPS odometer reading',
-        unmatched: 'Registration not found in fleet', notReturned: 'No matching registration returned by Netstar'
+
+      const STATUS = {
+        updated:     { label: 'Updated from GPS',           tone: 'good' },
+        verified:    { label: 'GPS verified',               tone: 'mint' },
+        lower:       { label: 'Saved reading kept',         tone: 'amber' },
+        missing:     { label: 'No GPS reading',             tone: 'muted' },
+        unmatched:   { label: 'Device not in fleet',        tone: 'muted' },
+        notReturned: { label: 'Not on Netstar',             tone: 'muted' }
       };
+      const pill = (status) => { const s = STATUS[status] || { label: 'Unknown', tone: 'muted' }; return `<span class="odo-pill odo-pill-${s.tone}"><i></i>${esc(s.label)}</span>`; };
+      const verified = Number(data.verified) || 0;
+      // Netstar-tracked vehicles (anything other than "no tracker") come first,
+      // in a meaningful order; the long untracked list is collapsed below.
+      const order = ['updated', 'verified', 'lower', 'missing', 'unmatched'];
+      const tracked = results.filter((r) => r.status !== 'notReturned')
+        .sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status));
+      const untracked = results.filter((r) => r.status === 'notReturned');
+      const skipped = tracked.filter((r) => !['updated', 'verified'].includes(r.status)).length + untracked.length;
+
+      const detail = (r) => r.status === 'lower'
+        ? `<span class="odo-sub">GPS ${esc(L.fmtKm(r.gpsKm))} · saved ${esc(L.fmtKm(r.savedKm))}</span>`
+        : (r.gpsKm != null ? `<span class="odo-sub">GPS ${esc(L.fmtKm(r.gpsKm))}</span>` : '');
+
       AD.ui.modal({
         title: 'GPS odometer sync',
-        body: `<p><strong>${n} updated · ${Number(data.verified) || 0} GPS verified · ${results.filter((r) => !['updated', 'verified'].includes(r.status)).length} skipped</strong></p>
-          <p class="note">Netstar provides yesterday’s odometer reading. Higher saved mileage is always preserved.</p>
-          <div class="table-wrap"><table><thead><tr><th>Registration</th><th>Result</th></tr></thead><tbody>${results.map((r) => `<tr><td>${esc(r.rego || 'Unknown registration')}</td><td>${esc(reasons[r.status] || 'Unknown result')}${r.status === 'lower' ? `<div class="muted">GPS ${esc(L.fmtKm(r.gpsKm))} · saved ${esc(L.fmtKm(r.savedKm))}</div>` : ''}</td></tr>`).join('')}</tbody></table></div>`
+        wide: true,
+        body: `
+          <div class="odo-stats">
+            <div class="odo-stat odo-stat-good"><b>${n}</b><span>Updated</span></div>
+            <div class="odo-stat odo-stat-mint"><b>${verified}</b><span>GPS verified</span></div>
+            <div class="odo-stat odo-stat-muted"><b>${skipped}</b><span>Skipped</span></div>
+          </div>
+          <p class="note">Netstar reports yesterday’s odometer. A higher saved reading is always kept, so GPS never lowers a vehicle’s mileage.</p>
+          <div class="odo-table">
+            ${tracked.length ? tracked.map((r) => `<div class="odo-row">
+              <span class="odo-rego">${esc(r.rego || 'Unknown')}</span>
+              <span class="odo-detail">${detail(r)}</span>
+              ${pill(r.status)}
+            </div>`).join('') : '<p class="muted" style="padding:8px 0">No Netstar-tracked vehicles returned a reading.</p>'}
+          </div>
+          ${untracked.length ? `<details class="odo-untracked">
+            <summary><b>${untracked.length}</b> vehicles aren’t on Netstar <span class="muted">— no tracker fitted, nothing to sync</span></summary>
+            <div class="odo-untracked-list">${untracked.map((r) => esc(r.rego || r.id || '—')).join(', ')}</div>
+          </details>` : ''}`
       });
     } catch (e) {
       AD.ui.toast('Odometer sync failed: ' + ((e && e.message) || 'could not reach the tracker service'), 'error');

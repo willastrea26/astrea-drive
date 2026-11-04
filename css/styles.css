@@ -1215,6 +1215,37 @@ input[type=text], input[type=number], input[type=date], input[type=datetime-loca
 /* "From GPS" sub-line on the vehicle profile */
 .sub.sub-gps { color: var(--mint); }
 
+/* GPS odometer sync results modal */
+.odo-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 14px; }
+.odo-stat { display: flex; flex-direction: column; gap: 2px; padding: 12px 16px; border-radius: var(--r-lg); background: rgba(120,140,170,.10); border: 1px solid var(--rule); }
+.odo-stat b { font-size: 28px; font-weight: 700; line-height: 1; font-family: var(--font-display); }
+.odo-stat span { font-size: 13px; color: var(--muted); font-weight: 600; }
+.odo-stat-good { background: rgba(95,224,180,.12); border-color: rgba(95,224,180,.30); }
+.odo-stat-good b { color: var(--green); }
+.odo-stat-mint { background: rgba(103,163,255,.12); border-color: rgba(103,163,255,.30); }
+.odo-stat-mint b { color: var(--blue); }
+.odo-stat-muted b { color: var(--ink-2); }
+
+.odo-table { display: flex; flex-direction: column; margin-top: 14px; border: 1px solid var(--rule); border-radius: var(--r-lg); overflow: hidden; }
+.odo-row { display: grid; grid-template-columns: 110px 1fr auto; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--rule); }
+.odo-row:last-child { border-bottom: 0; }
+.odo-row:nth-child(even) { background: rgba(120,140,170,.05); }
+.odo-rego { font-weight: 700; font-family: var(--font-display); font-size: 14.5px; }
+.odo-detail { font-size: 13px; color: var(--muted); }
+.odo-sub { white-space: nowrap; }
+
+.odo-pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 700; padding: 3px 10px; border-radius: 999px; white-space: nowrap; }
+.odo-pill i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.odo-pill-good { color: var(--green); background: rgba(95,224,180,.14); }
+.odo-pill-mint { color: var(--blue); background: rgba(103,163,255,.14); }
+.odo-pill-amber { color: var(--amber); background: rgba(251,191,36,.14); }
+.odo-pill-muted { color: var(--muted); background: rgba(120,140,170,.14); }
+
+.odo-untracked { margin-top: 14px; border: 1px solid var(--rule); border-radius: var(--r-lg); padding: 10px 14px; }
+.odo-untracked summary { cursor: pointer; font-size: 14px; }
+.odo-untracked summary b { font-family: var(--font-display); }
+.odo-untracked-list { margin-top: 10px; font-size: 12.5px; color: var(--muted); line-height: 1.7; word-spacing: 2px; }
+
 /* Clusters */
 .tcluster { background: none; border: 0; }
 .tc {
