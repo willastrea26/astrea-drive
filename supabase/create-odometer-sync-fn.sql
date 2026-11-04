@@ -11,9 +11,9 @@
 -- to write — and this function can ONLY touch odometers, nothing else.
 --
 -- Rules enforced here:
---   * a reading is applied only when higher than the stored odometer
---     (odometers never go backwards; a manual reading is never clobbered)
---   * zero / missing readings and unmatched regos are ignored
+--   * higher readings update mileage; equal readings verify it against GPS
+--   * lower readings preserve mileage and its existing source/timestamp
+--   * zero / missing readings and unmatched regos are reported as skipped
 --   * a single summary line is written to the activity feed
 -- =====================================================================
 
@@ -26,24 +26,35 @@ as $$
 declare
   r        record;
   v_old    integer;
+  v_vehicle record;
+  v_verified integer := 0;
+  v_results jsonb := '[]'::jsonb;
   v_updated integer := 0;
   v_added  bigint  := 0;
   v_now    timestamptz := now();
 begin
   for r in
-    select (x->>'rego') as rego, (x->>'km')::integer as km
+    select upper(btrim(x->>'rego')) as rego, max((x->>'km')::integer) as km
     from jsonb_array_elements(coalesce(readings, '[]'::jsonb)) as x
+    group by upper(btrim(x->>'rego'))
   loop
     if r.rego is null or r.km is null or r.km <= 0 then
+      v_results := v_results || jsonb_build_array(jsonb_build_object('rego', r.rego, 'status', 'missing'));
       continue;
     end if;
 
-    select odometer into v_old
+    select id, odometer into v_vehicle
     from public.vehicles
-    where upper(rego) = upper(r.rego)
-    limit 1;
+    where upper(btrim(rego)) = r.rego
+    limit 1 for update;
 
-    if not found or r.km <= coalesce(v_old, 0) then
+    if not found then
+      v_results := v_results || jsonb_build_array(jsonb_build_object('rego', r.rego, 'status', 'unmatched', 'gpsKm', r.km));
+      continue;
+    end if;
+    v_old := v_vehicle.odometer;
+    if r.km < coalesce(v_old, 0) then
+      v_results := v_results || jsonb_build_array(jsonb_build_object('rego', r.rego, 'status', 'lower', 'gpsKm', r.km, 'savedKm', v_old));
       continue;
     end if;
 
@@ -51,9 +62,14 @@ begin
       set odometer = r.km,
           "odometerSource"   = 'telematics',
           "odometerSyncedAt" = v_now
-      where upper(rego) = upper(r.rego);
+      where id = v_vehicle.id;
 
-    v_updated := v_updated + 1;
+    if r.km = v_old then
+      v_verified := v_verified + 1;
+    else
+      v_updated := v_updated + 1;
+    end if;
+    v_results := v_results || jsonb_build_array(jsonb_build_object('rego', r.rego, 'status', case when r.km = v_old then 'verified' else 'updated' end, 'gpsKm', r.km));
     v_added   := v_added + (r.km - coalesce(v_old, 0));
   end loop;
 
@@ -68,7 +84,7 @@ begin
     );
   end if;
 
-  return jsonb_build_object('updated', v_updated, 'added', v_added);
+  return jsonb_build_object('updated', v_updated, 'verified', v_verified, 'added', v_added, 'results', v_results);
 end;
 $$;
 

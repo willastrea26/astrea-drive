@@ -167,10 +167,10 @@ async function syncOdometers() {
   // Latest odometer per device, matched to fleet by rego.
   const devices = (await fetchVehicles()).filter((v) => v.imei);
   const statuses = await mapLimit(devices, CONCURRENCY, (v) => fetchStatus(v.imei));
-  const readings: Array<{ rego: string; km: number }> = [];
+  const readings: Array<{ rego: string; km: number | null }> = [];
   devices.forEach((v, i) => {
     const km = statuses[i]?.odometerYesterday;
-    if (km != null && km > 0) readings.push({ rego: v.rego, km: Math.round(km) });
+    readings.push({ rego: v.rego, km: km != null && km > 0 ? Math.round(km) : null });
   });
 
   const { data, error } = await db.rpc("sync_odometers_from_telematics", { readings });
@@ -178,6 +178,8 @@ async function syncOdometers() {
 
   return json({
     updated: (data && data.updated) ?? 0,
+    verified: (data && data.verified) ?? 0,
+    results: data?.results ?? null,
     added: (data && data.added) ?? 0,
     readings: readings.length,
     syncedAt: new Date().toISOString(),

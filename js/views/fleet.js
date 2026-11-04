@@ -265,8 +265,28 @@ AD.views.fleet = (function () {
       if (data && data.error) throw new Error(data.error);
       await AD.store.load();
       const n = (data && data.updated) || 0;
-      AD.ui.toast(n ? `Updated ${n} odometer${n === 1 ? '' : 's'} from GPS` : 'Odometers already up to date', 'ok');
       draw();
+      if (!Array.isArray(data && data.results)) {
+        AD.ui.toast(`Updated ${n} odometers. Detailed GPS verification requires the latest server update.`, 'ok');
+        return;
+      }
+      const results = data.results.slice();
+      const key = (rego) => String(rego || '').trim().toUpperCase();
+      const seen = new Set(results.map((r) => key(r.rego)));
+      AD.store.all('vehicles').filter((v) => !v.hired && !seen.has(key(v.rego))).forEach((v) => {
+        results.push({ rego: v.rego || v.id, status: 'notReturned' });
+      });
+      const reasons = {
+        updated: 'Mileage updated from GPS', verified: 'GPS verified — mileage matches',
+        lower: 'Saved mileage is higher — kept unchanged', missing: 'No valid GPS odometer reading',
+        unmatched: 'Registration not found in fleet', notReturned: 'No matching registration returned by Netstar'
+      };
+      AD.ui.modal({
+        title: 'GPS odometer sync',
+        body: `<p><strong>${n} updated · ${Number(data.verified) || 0} GPS verified · ${results.filter((r) => !['updated', 'verified'].includes(r.status)).length} skipped</strong></p>
+          <p class="note">Netstar provides yesterday’s odometer reading. Higher saved mileage is always preserved.</p>
+          <div class="table-wrap"><table><thead><tr><th>Registration</th><th>Result</th></tr></thead><tbody>${results.map((r) => `<tr><td>${esc(r.rego || 'Unknown registration')}</td><td>${esc(reasons[r.status] || 'Unknown result')}${r.status === 'lower' ? `<div class="muted">GPS ${esc(L.fmtKm(r.gpsKm))} · saved ${esc(L.fmtKm(r.savedKm))}</div>` : ''}</td></tr>`).join('')}</tbody></table></div>`
+      });
     } catch (e) {
       AD.ui.toast('Odometer sync failed: ' + ((e && e.message) || 'could not reach the tracker service'), 'error');
       btn.disabled = false;
