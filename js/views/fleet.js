@@ -280,8 +280,10 @@ AD.views.fleet = (function () {
       });
 
       const STATUS = {
+        accumulated: { label: 'Mileage added from GPS',     tone: 'good' },
         updated:     { label: 'Updated from GPS',           tone: 'good' },
         verified:    { label: 'GPS verified',               tone: 'mint' },
+        baseline:    { label: 'GPS baseline set',           tone: 'mint' },
         lower:       { label: 'Saved reading kept',         tone: 'amber' },
         missing:     { label: 'No GPS reading',             tone: 'muted' },
         unmatched:   { label: 'Device not in fleet',        tone: 'muted' },
@@ -291,13 +293,16 @@ AD.views.fleet = (function () {
       const verified = Number(data.verified) || 0;
       // Netstar-tracked vehicles (anything other than "no tracker") come first,
       // in a meaningful order; the long untracked list is collapsed below.
-      const order = ['updated', 'verified', 'lower', 'missing', 'unmatched'];
+      const order = ['accumulated', 'updated', 'verified', 'baseline', 'lower', 'missing', 'unmatched'];
+      const done = ['accumulated', 'updated', 'verified', 'baseline'];
       const tracked = results.filter((r) => r.status !== 'notReturned')
         .sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status));
       const untracked = results.filter((r) => r.status === 'notReturned');
-      const skipped = tracked.filter((r) => !['updated', 'verified'].includes(r.status)).length + untracked.length;
+      const skipped = tracked.filter((r) => !done.includes(r.status)).length + untracked.length;
 
-      const detail = (r) => r.status === 'lower'
+      const detail = (r) => r.status === 'accumulated'
+        ? `<span class="odo-sub">+${esc(L.fmtKm(r.addedKm))} driven · now ${esc(L.fmtKm(r.savedKm))}</span>`
+        : r.status === 'lower'
         ? `<span class="odo-sub">GPS ${esc(L.fmtKm(r.gpsKm))} · saved ${esc(L.fmtKm(r.savedKm))}</span>`
         : (r.gpsKm != null ? `<span class="odo-sub">GPS ${esc(L.fmtKm(r.gpsKm))}</span>` : '');
 
@@ -306,11 +311,11 @@ AD.views.fleet = (function () {
         wide: true,
         body: `
           <div class="odo-stats">
-            <div class="odo-stat odo-stat-good"><b>${n}</b><span>Updated</span></div>
+            <div class="odo-stat odo-stat-good"><b>${n}</b><span>Mileage added</span></div>
             <div class="odo-stat odo-stat-mint"><b>${verified}</b><span>GPS verified</span></div>
             <div class="odo-stat odo-stat-muted"><b>${skipped}</b><span>Skipped</span></div>
           </div>
-          <p class="note">Netstar reports yesterday’s odometer. A higher saved reading is always kept, so GPS never lowers a vehicle’s mileage.</p>
+          <p class="note">The tracker counts distance from when it was installed, so your saved odometer is kept as the baseline and the day-to-day GPS increase is added to it — the real mileage stays correct and grows with actual driving.</p>
           <div class="odo-table">
             ${tracked.length ? tracked.map((r) => `<div class="odo-row">
               <span class="odo-rego">${esc(r.rego || 'Unknown')}</span>
