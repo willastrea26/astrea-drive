@@ -621,21 +621,20 @@ AD.views.vehicle = (function () {
    * trigger, a positive distance-to-go, and at least a week of history for a
    * stable average — otherwise returns '' so no noisy guess is shown.
    */
+  const fmtPerDay = (perDay) => perDay >= 10 ? Math.round(perDay).toLocaleString('en-AU') : perDay.toFixed(1);
+
+  /** The vehicle's usage rate, anchored on its most precise last-service record. */
+  function usageFor(v, services) {
+    const last = services && services[0];
+    return L.usageRate(v, last && last.odometer != null ? last.odometer : null, last ? last.date : null);
+  }
+
   function projServiceByDistance(v, s, services) {
     if (!(s.triggers.km && s.hasKm) || !Number.isFinite(s.kmLeft) || s.kmLeft <= 0) return '';
-    const last = services[0];
-    const lastKm = last && last.odometer != null ? Number(last.odometer)
-      : (v.lastServiceKm != null && v.lastServiceKm !== '' ? Number(v.lastServiceKm) : null);
-    const lastDate = last ? last.date : (v.lastServiceDate || null);
-    if (lastKm == null || !lastDate) return '';
-    const elapsed = T.daysBetween(lastDate, T.todayKey()); // days since last service
-    const driven = Number(v.odometer || 0) - lastKm;
-    if (!(elapsed >= 7) || !(driven > 0)) return '';
-    const rate = driven / elapsed; // km per day
-    if (!(rate > 0) || !Number.isFinite(rate)) return '';
-    const daysTo = Math.round(s.kmLeft / rate);
-    const perDay = rate >= 10 ? Math.round(rate).toLocaleString('en-AU') : rate.toFixed(1);
-    return `About ${daysTo.toLocaleString('en-AU')} day${daysTo === 1 ? '' : 's'} at current use (~${perDay} km/day)`;
+    const u = usageFor(v, services);
+    if (!u) return '';
+    const daysTo = Math.round(s.kmLeft / u.perDay);
+    return `About ${daysTo.toLocaleString('en-AU')} day${daysTo === 1 ? '' : 's'} at current use (~${fmtPerDay(u.perDay)} km/day)`;
   }
 
   function overview(v, services, defects) {
@@ -665,6 +664,10 @@ AD.views.vehicle = (function () {
     }
     const lastServiceCell = lastBits.length ? lastBits.join(' · ') : faint('Not recorded');
     const projService = projServiceByDistance(v, s, services);
+    const usage = usageFor(v, services);
+    const usageFact = usage
+      ? `<div><dt>Usage</dt><dd>${Math.round(usage.perWeek).toLocaleString('en-AU')} km/week<span class="sub">~${fmtPerDay(usage.perDay)} km/day · measured over ${usage.days} days</span></dd></div>`
+      : '';
     const openDefs = defects.filter((d) => d.status !== 'Resolved');
     return `
       <div class="cols-main-aside">
@@ -673,6 +676,7 @@ AD.views.vehicle = (function () {
             <div><dt>Assigned driver</dt><dd>${v.driverId ? esc(L.driverName(v.driverId)) : faint('Unassigned')}</dd></div>
             <div><dt>Charge-out rate</dt><dd>${aud0(L.hourlyRate(v))}/hr</dd></div>
             ${readingFact}
+            ${usageFact}
             <div><dt>Registration expiry</dt><dd>${T.fmtKey(v.regoExpiry)}<span class="sub ${flagTone(L.attentionTone(r.state, r.days))}">${esc(r.state === 'ok' ? 'Current — ' + r.why : r.why)}</span></dd></div>
             <div><dt>Last service</dt><dd>${lastServiceCell}</dd></div>
             <div><dt>Next service</dt><dd>${nextServiceLabel(v, s)}<span class="sub ${flagTone(L.attentionTone(s.state, s.daysLeft, s.kmLeft, s.hoursLeft))}">${esc(s.why.charAt(0).toUpperCase() + s.why.slice(1))}</span>${projService ? `<span class="sub">${esc(projService)}</span>` : ''}</dd></div>

@@ -80,6 +80,26 @@ AD.logic = (function () {
     return Object.assign(base, { state: 'ok', label: 'OK', why, kind: nextActive[0] ? nextActive[0].kind : 'date' });
   }
 
+  /**
+   * Average distance driven per day, from how far the vehicle has actually
+   * moved since its last service (odometer now kept current by the GPS sync).
+   * Needs at least a week of history for a stable figure — returns null
+   * otherwise so no noisy number is shown. `lastKm`/`lastDate` override the
+   * stored last-service anchor when a precise service record is to hand.
+   */
+  function usageRate(v, lastKm, lastDate) {
+    const km0 = lastKm != null ? Number(lastKm)
+      : (v.lastServiceKm != null && v.lastServiceKm !== '' ? Number(v.lastServiceKm) : null);
+    const d0 = lastDate || v.lastServiceDate || null;
+    if (km0 == null || !d0) return null;
+    const elapsed = T.daysBetween(d0, T.todayKey());
+    const driven = Number(v.odometer || 0) - km0;
+    if (!(elapsed >= 7) || !(driven > 0)) return null;
+    const perDay = driven / elapsed;
+    if (!(perDay > 0) || !Number.isFinite(perDay)) return null;
+    return { perDay, perWeek: perDay * 7, driven, days: elapsed };
+  }
+
   function regoState(v) {
     const d = T.daysBetween(T.todayKey(), v.regoExpiry);
     if (d < 0) return { state: 'overdue', days: d, label: 'Expired', why: `Expired ${-d} day${d === -1 ? '' : 's'} ago` };
@@ -350,7 +370,7 @@ AD.logic = (function () {
   }
 
   return {
-    serviceState, serviceTriggers, HOURS_TYPES,
+    serviceState, serviceTriggers, usageRate, HOURS_TYPES,
     regoState, attentionTone, openDefects, fmtKm, fmtHours, fmtAUD, driverName, userName,
     vacTrucks, schedulableVehicles, bookingsFor, activeAt, overlaps, conflictIds, driverConflictIds, nextBooking, locate, hasCoords,
     bookingCategory, bookingTitle, SOON_DAYS, SOON_KM, SOON_HOURS, URGENT_HOURS,

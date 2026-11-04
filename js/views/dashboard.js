@@ -678,6 +678,23 @@ AD.views.dashboard = (function () {
     }).join('');
     const statusTotals = V.VEHICLE.map((s) => ({ ...s, value: vehicles.filter((v) => v.status === s.key).length }));
 
+    // 5. Vehicle usage — average distance driven per day, from odometer movement
+    //    since last service (odometer kept current by the GPS sync).
+    const usageColor = 'var(--mint)';
+    const usageList = vehicles.filter((v) => !v.hired)
+      .map((v) => ({ v, u: L.usageRate(v) }))
+      .filter((x) => x.u)
+      .sort((a, b) => b.u.perDay - a.u.perDay);
+    const usageShown = usageList.slice(0, 10);
+    const maxUse = Math.max(...usageShown.map((x) => x.u.perDay), 1);
+    const km0 = (n) => Math.round(n).toLocaleString('en-AU');
+    const usageRows = usageShown.map(({ v, u }) => `
+      <a class="hb-row" href="#/vehicle/${v.id}" ${V.tipAttr(v.id, [['Per day', km0(u.perDay) + ' km', usageColor], ['Per week', km0(u.perWeek) + ' km', 'var(--muted)']])} aria-label="${v.id}: ${km0(u.perDay)} km per day">
+        <span class="hb-label">${esc(v.id)}</span>
+        <span class="hb-track"><i style="width:${(u.perDay / maxUse) * 100}%;background:${usageColor}"></i></span>
+        <span class="hb-val">${km0(u.perDay)}<small> km/day</small></span>
+      </a>`).join('');
+
     const busyToday = n - util[0].c.free;
     return `
       <section class="section">
@@ -691,6 +708,14 @@ AD.views.dashboard = (function () {
               <div class="uc-plot"><div class="uc-grid" aria-hidden="true"><i style="bottom:100%"></i><i style="bottom:50%"></i><i style="bottom:0"></i></div><div class="uc-cols">${utilCols}</div></div>
             </div>
             ${V.table(['Date', 'Confirmed', 'Tentative', 'Depot', 'Maintenance', 'Free'], util.map((u) => [T.fmtKeyLong(u.d), u.c.confirmed, u.c.tentative, u.c.depot, u.c.maintenance, u.c.free].map(String)))}
+          </figure>
+
+          <figure class="viz-card viz-wide">
+            <figcaption><h3>Vehicle usage</h3><span class="viz-sub">Average distance driven per day${usageList.length ? ` · busiest ${usageShown.length} of ${usageList.length} with data` : ''}</span></figcaption>
+            ${usageRows
+              ? `<div class="hb">${usageRows}</div>`
+              : '<p class="empty" style="padding:16px">No usage data yet. It needs a current odometer and a last-service reading — run “Sync odometers from GPS” on the fleet register, then check back.</p>'}
+            ${usageList.length ? V.table(['Vehicle', 'Per day', 'Per week', 'Measured over'], usageList.map(({ v, u }) => [v.id, km0(u.perDay) + ' km', km0(u.perWeek) + ' km', u.days + ' days'])) : ''}
           </figure>
 
           <figure class="viz-card">
