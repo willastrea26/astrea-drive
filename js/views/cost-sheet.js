@@ -166,6 +166,8 @@ AD.views['cost-sheet'] = (function () {
         ${running(end)}
       </section>
 
+      ${costVsUsage(end)}
+
       <p class="section-foot muted small">Spend is recorded services plus resolved defects, counted on the day the service was recorded or the defect was resolved. Planned is scheduled servicing; unplanned is a defect repair. The average is the ${AVG_WEEKS} weeks before this one. Running cost divides a vehicle's spend by the distance or hours covered between its first and last service in the window, so it needs at least two services to show a rate.</p>
 
       ${projection(end)}`;
@@ -542,6 +544,72 @@ AD.views['cost-sheet'] = (function () {
       ${lines.length ? V.table(['Vehicle', 'Jobs', 'This week', `${AVG_WEEKS}-week average`, 'Change'],
         lines.map((r) => [r.id, String(r.jobs), L.fmtAUD(r.a), L.fmtAUD(r.b), fmtChange(r.change)])) : ''}
     </figure>`;
+  }
+
+  /**
+   * Cost against actual use. Spend over the trailing year divided by the
+   * distance the vehicle actually drove in that time (from the telematics
+   * usage rate), giving a real cost per kilometre — and flagging the two
+   * cases that matter: vehicles that are expensive per km, and vehicles that
+   * barely move yet still cost money. Only covers vehicles with a usage rate
+   * (i.e. GPS-tracked with enough history); the rest have nothing to divide by.
+   */
+  function costVsUsage(end) {
+    const from = T.addDays(end, -(7 * RUN_WEEKS - 1));
+    const windowDays = RUN_WEEKS * 7;
+    const spendByVeh = new Map();
+    rowsBetween(from, end).forEach((r) => spendByVeh.set(r.vehicleId, (spendByVeh.get(r.vehicleId) || 0) + r.cost));
+    const unplannedByVeh = new Map();
+    rowsBetween(from, end).filter((r) => r.kind === UNPLANNED).forEach((r) => unplannedByVeh.set(r.vehicleId, (unplannedByVeh.get(r.vehicleId) || 0) + r.cost));
+
+    const lines = AD.store.all('vehicles').filter((v) => !v.hired).map((v) => {
+      const u = L.usageRate(v);
+      if (!u) return null;
+      const windowKm = u.perDay * windowDays;
+      if (!(windowKm > 0)) return null;
+      const spend = spendByVeh.get(v.id) || 0;
+      return { v, spend, unplanned: unplannedByVeh.get(v.id) || 0, perDay: u.perDay, perWeek: u.perWeek, windowKm, perKm: spend / windowKm };
+    }).filter(Boolean).sort((a, b) => b.perKm - a.perKm);
+
+    if (!lines.length) {
+      return `<section class="section">
+        ${sectionHead({ title: 'Cost vs usage', meta: 'Spend per kilometre actually driven' })}
+        <figure class="viz-card"><p class="empty">No usage data yet. Once vehicles have GPS-synced odometers with a week of history, their cost per kilometre appears here.</p></figure>
+      </section>`;
+    }
+
+    const medKm = median(lines.map((l) => l.perKm));
+    const medUse = median(lines.map((l) => l.perDay));
+    const top = Math.max(...lines.map((l) => l.perKm), 0.0001);
+    const fmtKmRate = (n) => '$' + (n >= 10 ? Math.round(n).toLocaleString('en-AU') : n.toFixed(2));
+
+    const rows = lines.map((l, i) => {
+      const costly = medKm > 0 && l.perKm > medKm * 1.3;
+      const lowUse = medUse > 0 && l.perDay < medUse * 0.6;
+      const flag = costly && lowUse ? '<span class="cs-flag">Low use · high cost</span>'
+        : costly ? '<span class="cs-flag">Costly per km</span>'
+        : lowUse ? '<span class="cs-flag cs-flag-soft">Low use</span>' : '';
+      return `<a class="cs-row" href="${vehHref(l.v.id)}" style="--i:${i}" ${V.tipAttr(l.v.id, [
+        ['Cost per km', fmtKmRate(l.perKm), 'var(--amber)'],
+        ['Spend (year)', L.fmtAUD(l.spend), 'var(--muted)'],
+        ['Driven', `${Math.round(l.windowKm).toLocaleString('en-AU')} km`, 'var(--mint)']
+      ])}>
+        <span class="id">${esc(l.v.id)}</span>
+        <span class="cs-hbar"><i${costly ? ' class="cs-high"' : ''} style="width:${(l.perKm / top) * 100}%"></i><b class="cs-median" style="left:${(medKm / top) * 100}%"></b></span>
+        <span class="cs-row-val">${fmtKmRate(l.perKm)}<small>/km</small></span>
+        <span class="cs-row-meta">${flag ? flag + ' · ' : ''}${L.fmtAUD(l.spend)} over the year · ~${Math.round(l.perWeek).toLocaleString('en-AU')} km/week</span>
+      </a>`;
+    }).join('');
+
+    return `<section class="section">
+      ${sectionHead({ title: 'Cost vs usage', meta: `${lines.length} GPS-tracked vehicle${lines.length === 1 ? '' : 's'} · spend over ${RUN_WEEKS} weeks ÷ distance driven · the tick marks the median` })}
+      <figure class="viz-card">
+        <figcaption><span class="viz-sub">A high cost per kilometre, or a vehicle that barely moves yet still costs money, is a candidate to question, service, or replace.</span></figcaption>
+        <div class="cs-rows">${rows}</div>
+        ${V.table(['Vehicle', 'Cost / km', 'Spend (year)', 'Unplanned', 'Driven (year)', 'Per week'],
+          lines.map((l) => [l.v.id, fmtKmRate(l.perKm), L.fmtAUD(l.spend), L.fmtAUD(l.unplanned), `${Math.round(l.windowKm).toLocaleString('en-AU')} km`, `${Math.round(l.perWeek).toLocaleString('en-AU')} km`]))}
+      </figure>
+    </section>`;
   }
 
   /**

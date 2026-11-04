@@ -1403,6 +1403,7 @@ input[type=text], input[type=number], input[type=date], input[type=datetime-loca
 .cs-row-val small { margin-left: 2px; font-size: 12px; font-weight: 500; color: var(--muted); }
 .cs-row-meta { grid-column: 2 / -1; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .cs-flag { color: var(--amber); font-weight: 600; }
+.cs-flag-soft { color: var(--muted); font-weight: 600; }
 .cs-more { margin: 8px 8px 0; font-size: 12.5px; color: var(--muted); }
 
 .cs-hbar { position: relative; height: 10px; border-radius: 5px; background: var(--viz-free); }
