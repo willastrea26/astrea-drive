@@ -44,10 +44,9 @@ AD.store = (function () {
   // and tolerantly: the table may not exist yet on older databases, and a
   // missing table must not break the rest of the app's data load.
   const ODO_READING_DAYS = 45;
-  async function loadOdometerReadings() {
+  async function loadOptional(table, build) {
     try {
-      const since = new Date(Date.now() - ODO_READING_DAYS * 86400000).toISOString().slice(0, 10);
-      const { data, error } = await sb().from('odometer_readings').select('*').gte('readDate', since);
+      const { data, error } = await build(sb().from(table).select('*'));
       return error ? [] : (data || []);
     } catch (e) {
       return [];
@@ -55,13 +54,19 @@ AD.store = (function () {
   }
 
   async function load() {
-    const [results, readings] = await Promise.all([Promise.all(TABLES.map(query)), loadOdometerReadings()]);
+    const since = new Date(Date.now() - ODO_READING_DAYS * 86400000).toISOString().slice(0, 10);
+    const [results, readings, workHours] = await Promise.all([
+      Promise.all(TABLES.map(query)),
+      loadOptional('odometer_readings', (q) => q.gte('readDate', since)),
+      loadOptional('vehicle_work_hours', (q) => q)
+    ]);
     const next = {};
     results.forEach((r, i) => {
       if (r.error) throw r.error;
       next[TABLES[i]] = r.data;
     });
     next.odometer_readings = readings;
+    next.vehicle_work_hours = workHours;
     db = next;
     emit('*');
   }

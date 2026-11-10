@@ -97,6 +97,38 @@ async function fetchVehicles(): Promise<Device[]> {
   return out;
 }
 
+// Netstar wants dates as "dd-MM-yyyy HH:mm:ss" in Australia/Sydney time.
+function netstarDate(ms: number): string {
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Australia/Sydney", year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+  }).formatToParts(ms).map((x) => [x.type, x.value]));
+  return `${p.day}-${p.month}-${p.year} ${p.hour}:${p.minute}:${p.second}`;
+}
+
+// "22:45:09" -> 22.7525 (decimal hours) | null
+function parseWorkHour(s: unknown): number | null {
+  const m = /^(\d+):(\d{2}):(\d{2})/.exec(String(s ?? ""));
+  if (!m) return null;
+  return Number(m[1]) + Number(m[2]) / 60 + Number(m[3]) / 3600;
+}
+
+// Engine work hours + distance for one device over a date window.
+async function fetchWorkHours(imei: string, from: string, to: string) {
+  const url = `${NETSTAR_BASE}/external/reports/workhour-report?imei=${
+    encodeURIComponent(imei)
+  }&start_date_time=${encodeURIComponent(from)}&end_date_time=${encodeURIComponent(to)}`;
+  const res = await fetch(url, {
+    headers: { accept: "*/*", "x-api-key": API_KEY },
+    signal: AbortSignal.timeout(20000),
+  });
+  if (!res.ok) return null;
+  const payload = await res.json();
+  const d = Array.isArray(payload?.data) ? payload.data[0] : null;
+  if (!d) return null;
+  return { hours: parseWorkHour(d.work_hour), distance: num(d.distance) };
+}
+
 async function fetchStatus(imei: string) {
   const url = `${NETSTAR_BASE}/external/reports/object-status?imei=${
     encodeURIComponent(imei)
@@ -176,12 +208,40 @@ async function syncOdometers() {
   const { data, error } = await db.rpc("sync_odometers_from_telematics", { readings });
   if (error) throw error;
 
+  // Also refresh each vehicle's engine work hours over the last 30 days, so
+  // utilisation can be measured in hours (right for stationary vac-truck work).
+  let workHoursRecorded = 0;
+  try {
+    const WINDOW_DAYS = 30;
+    const now = Date.now();
+    const from = netstarDate(now - WINDOW_DAYS * 86400000);
+    const to = netstarDate(now);
+    const wh = await mapLimit(devices, CONCURRENCY, (v) => fetchWorkHours(v.imei, from, to));
+    const workRows: Array<{ rego: string; hours: number; distance: number | null; days: number }> = [];
+    devices.forEach((v, i) => {
+      const w = wh[i];
+      if (w && w.hours != null && w.hours > 0) {
+        workRows.push({
+          rego: v.rego,
+          hours: Math.round(w.hours * 100) / 100,
+          distance: w.distance != null ? Math.round(w.distance) : null,
+          days: WINDOW_DAYS,
+        });
+      }
+    });
+    if (workRows.length) {
+      const { data: whData, error: whErr } = await db.rpc("record_work_hours", { rows: workRows });
+      if (!whErr) workHoursRecorded = Number(whData) || workRows.length;
+    }
+  } catch (_e) { /* work hours are a bonus; never fail the odometer sync over them */ }
+
   return json({
     updated: (data && data.updated) ?? 0,
     verified: (data && data.verified) ?? 0,
     results: data?.results ?? null,
     added: (data && data.added) ?? 0,
     readings: readings.length,
+    workHoursRecorded,
     syncedAt: new Date().toISOString(),
   });
 }

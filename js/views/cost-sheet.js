@@ -564,8 +564,13 @@ AD.views['cost-sheet'] = (function () {
       const windowKm = u.perDay * windowDays;
       if (!(windowKm > 0)) return null;
       const spend = spendByVeh.get(v.id) || 0;
-      return { v, spend, unplanned: unplannedByVeh.get(v.id) || 0, perDay: u.perDay, perWeek: u.perWeek, windowKm, perKm: spend / windowKm };
+      const wh = L.workHours(v);                                  // engine hours from telematics
+      const hoursYear = wh ? wh.perWeek * 52 : null;
+      return { v, spend, unplanned: unplannedByVeh.get(v.id) || 0, perDay: u.perDay, perWeek: u.perWeek,
+               windowKm, perKm: spend / windowKm,
+               hrsWeek: wh ? wh.perWeek : null, perHour: hoursYear && hoursYear > 0 ? spend / hoursYear : null };
     }).filter(Boolean).sort((a, b) => b.perKm - a.perKm);
+    const anyHours = lines.some((l) => l.perHour != null);
 
     if (!lines.length) {
       return `<section class="section">
@@ -593,17 +598,23 @@ AD.views['cost-sheet'] = (function () {
         <span class="id">${esc(l.v.id)}</span>
         <span class="cs-hbar"><i${costly ? ' class="cs-high"' : ''} style="width:${(l.perKm / top) * 100}%"></i><b class="cs-median" style="left:${(medKm / top) * 100}%"></b></span>
         <span class="cs-row-val">${fmtKmRate(l.perKm)}<small>/km</small></span>
-        <span class="cs-row-meta">${flag ? flag + ' · ' : ''}${L.fmtAUD(l.spend)} over the year · ~${Math.round(l.perWeek).toLocaleString('en-AU')} km/week</span>
+        <span class="cs-row-meta">${flag ? flag + ' · ' : ''}${L.fmtAUD(l.spend)} over the year · ~${Math.round(l.perWeek).toLocaleString('en-AU')} km/week${l.perHour != null ? ` · ${fmtKmRate(l.perHour)}/hr · ~${Math.round(l.hrsWeek).toLocaleString('en-AU')} hrs/week` : ''}</span>
       </a>`;
     }).join('');
 
+    const tableHead = ['Vehicle', 'Cost / km', anyHours ? 'Cost / hr' : null, 'Spend (year)', 'Unplanned', 'Driven (year)', 'Per week', anyHours ? 'Hrs / week' : null].filter(Boolean);
+    const tableRows = lines.map((l) => [l.v.id, fmtKmRate(l.perKm),
+      anyHours ? (l.perHour != null ? fmtKmRate(l.perHour) : '—') : null,
+      L.fmtAUD(l.spend), L.fmtAUD(l.unplanned), `${Math.round(l.windowKm).toLocaleString('en-AU')} km`,
+      `${Math.round(l.perWeek).toLocaleString('en-AU')} km`,
+      anyHours ? (l.hrsWeek != null ? Math.round(l.hrsWeek).toLocaleString('en-AU') : '—') : null].filter((x) => x !== null));
+
     return `<section class="section">
-      ${sectionHead({ title: 'Cost vs usage', meta: `${lines.length} GPS-tracked vehicle${lines.length === 1 ? '' : 's'} · spend over ${RUN_WEEKS} weeks ÷ distance driven · the tick marks the median` })}
+      ${sectionHead({ title: 'Cost vs usage', meta: `${lines.length} GPS-tracked vehicle${lines.length === 1 ? '' : 's'} · spend over ${RUN_WEEKS} weeks ÷ distance driven${anyHours ? ' / engine hours' : ''} · the tick marks the median` })}
       <figure class="viz-card">
-        <figcaption><span class="viz-sub">A high cost per kilometre, or a vehicle that barely moves yet still costs money, is a candidate to question, service, or replace.</span></figcaption>
+        <figcaption><span class="viz-sub">A high cost per kilometre or hour, or a vehicle that barely moves yet still costs money, is a candidate to question, service, or replace.${anyHours ? ' Cost per hour counts stationary work, so it is the fairer measure for vac trucks.' : ''}</span></figcaption>
         <div class="cs-rows">${rows}</div>
-        ${V.table(['Vehicle', 'Cost / km', 'Spend (year)', 'Unplanned', 'Driven (year)', 'Per week'],
-          lines.map((l) => [l.v.id, fmtKmRate(l.perKm), L.fmtAUD(l.spend), L.fmtAUD(l.unplanned), `${Math.round(l.windowKm).toLocaleString('en-AU')} km`, `${Math.round(l.perWeek).toLocaleString('en-AU')} km`]))}
+        ${V.table(tableHead, tableRows)}
       </figure>
     </section>`;
   }

@@ -668,6 +668,10 @@ AD.views.vehicle = (function () {
     const usageFact = usage
       ? `<div><dt>Usage</dt><dd>${Math.round(usage.perWeek).toLocaleString('en-AU')} km/week<span class="sub">~${fmtPerDay(usage.perDay)} km/day · measured over ${usage.days} days</span></dd></div>`
       : '';
+    const wh = L.workHours(v);
+    const workHoursFact = wh
+      ? `<div><dt>Work hours</dt><dd>${Math.round(wh.perWeek).toLocaleString('en-AU')} hrs/week<span class="sub sub-gps">${Math.round(wh.hours).toLocaleString('en-AU')} hrs engine time over ${wh.days} days · from GPS</span></dd></div>`
+      : '';
     const openDefs = defects.filter((d) => d.status !== 'Resolved');
     return `
       <div class="cols-main-aside">
@@ -677,6 +681,7 @@ AD.views.vehicle = (function () {
             <div><dt>Charge-out rate</dt><dd>${aud0(L.hourlyRate(v))}/hr</dd></div>
             ${readingFact}
             ${usageFact}
+            ${workHoursFact}
             <div><dt>Registration expiry</dt><dd>${T.fmtKey(v.regoExpiry)}<span class="sub ${flagTone(L.attentionTone(r.state, r.days))}">${esc(r.state === 'ok' ? 'Current — ' + r.why : r.why)}</span></dd></div>
             <div><dt>Last service</dt><dd>${lastServiceCell}</dd></div>
             <div><dt>Next service</dt><dd>${nextServiceLabel(v, s)}<span class="sub ${flagTone(L.attentionTone(s.state, s.daysLeft, s.kmLeft, s.hoursLeft))}">${esc(s.why.charAt(0).toUpperCase() + s.why.slice(1))}</span>${projService ? `<span class="sub">${esc(projService)}</span>` : ''}</dd></div>

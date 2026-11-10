@@ -118,6 +118,20 @@ AD.logic = (function () {
     return { perDay, perWeek: perDay * 7, driven, days: elapsed, source: 'service' };
   }
 
+  /**
+   * A vehicle's engine work hours from telematics (Netstar workhour-report),
+   * refreshed by the sync. Returns hours over the stored window plus a
+   * per-week figure, or null if none recorded. This is the right utilisation
+   * measure for vac trucks that work stationary (km understates them).
+   */
+  function workHours(v) {
+    const row = (S().all('vehicle_work_hours') || []).find((r) => r.vehicleId === v.id);
+    if (!row || !(Number(row.hours) > 0)) return null;
+    const days = Number(row.windowDays) || 30;
+    const hours = Number(row.hours);
+    return { hours, days, perWeek: hours * 7 / days, perDay: hours / days, distanceKm: row.distanceKm, updatedAt: row.updatedAt };
+  }
+
   function regoState(v) {
     const d = T.daysBetween(T.todayKey(), v.regoExpiry);
     if (d < 0) return { state: 'overdue', days: d, label: 'Expired', why: `Expired ${-d} day${d === -1 ? '' : 's'} ago` };
@@ -388,7 +402,7 @@ AD.logic = (function () {
   }
 
   return {
-    serviceState, serviceTriggers, usageRate, HOURS_TYPES,
+    serviceState, serviceTriggers, usageRate, workHours, HOURS_TYPES,
     regoState, attentionTone, openDefects, fmtKm, fmtHours, fmtAUD, driverName, userName,
     vacTrucks, schedulableVehicles, bookingsFor, activeAt, overlaps, conflictIds, driverConflictIds, nextBooking, locate, hasCoords,
     bookingCategory, bookingTitle, SOON_DAYS, SOON_KM, SOON_HOURS, URGENT_HOURS,

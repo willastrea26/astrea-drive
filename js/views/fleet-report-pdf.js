@@ -1018,7 +1018,11 @@ AD.fleetReportPdf = (function () {
       const windowKm = u.perDay * windowDays;
       if (!(windowKm > 0)) return null;
       const sp = spend.get(v.id) || 0;
-      return { id: v.id, type: v.type, spend: sp, unplanned: unpl.get(v.id) || 0, perDay: u.perDay, perWeek: u.perWeek, windowKm, perKm: sp / windowKm };
+      const wh = L.workHours(v);
+      const hoursYear = wh ? wh.perWeek * 52 : null;
+      return { id: v.id, type: v.type, spend: sp, unplanned: unpl.get(v.id) || 0, perDay: u.perDay, perWeek: u.perWeek,
+               windowKm, perKm: sp / windowKm,
+               hrsWeek: wh ? wh.perWeek : null, perHour: hoursYear && hoursYear > 0 ? sp / hoursYear : null };
     }).filter(Boolean).sort((a, b) => b.perKm - a.perKm);
     const medKm = medianOf(lines.map((l) => l.perKm));
     const medUse = medianOf(lines.map((l) => l.perDay));
@@ -1027,9 +1031,10 @@ AD.fleetReportPdf = (function () {
       l.lowUse = medUse > 0 && l.perDay < medUse * 0.6;
       l.watch = l.costly && l.lowUse;
     });
+    const anyHours = lines.some((l) => l.perHour != null);
     const owned = AD.store.all('vehicles').filter((v) => !v.hired);
     const gpsVerified = owned.filter((v) => v.odometerSource === 'telematics').length;
-    return { lines, medKm, ownedCount: owned.length, gpsVerified };
+    return { lines, medKm, anyHours, ownedCount: owned.length, gpsVerified };
   }
 
   // Live fleet-activity snapshot (best-effort; null if Netstar can't be reached).
@@ -1086,37 +1091,43 @@ AD.fleetReportPdf = (function () {
     g.text(`Odometers GPS-verified: ${u.gpsVerified} of ${u.ownedCount} vehicles`, M.l, y, { size: 9, color: C.body });
     y += 10;
 
-    /* Cost per km table. */
-    y = heading(g, M.l, y, 'Cost per kilometre', 'Yearly spend divided by distance driven · worst value first');
+    /* Cost per km (and per hour) table. */
+    const hrs = u.anyHours;
+    y = heading(g, M.l, y, hrs ? 'Cost per km & per hour' : 'Cost per kilometre',
+      hrs ? 'Yearly spend over distance driven and engine hours · worst value first'
+          : 'Yearly spend divided by distance driven · worst value first');
     if (!u.lines.length) {
       g.text('No telematics usage data yet. Figures appear once tracked vehicles have a current', M.l, y + 1, { size: 9, italic: true, color: C.muted });
       g.text('odometer and a week of history.', M.l, y + 6, { size: 9, italic: true, color: C.muted });
       return;
     }
-    const cw = [28, 34, 30, 34, 52];
-    const tableW = cw.reduce((a, b) => a + b, 0);
+    // Columns: Vehicle, Cost/km, [Cost/hr], Driven/wk, [Hrs/wk], Spend, Status
+    const cols = hrs
+      ? [{ k: 'id', t: 'Vehicle', w: 24, a: 'left' }, { k: 'km', t: 'Cost / km', w: 24, a: 'right' }, { k: 'hr', t: 'Cost / hr', w: 24, a: 'right' }, { k: 'drv', t: 'Driven/wk', w: 26, a: 'right' }, { k: 'hw', t: 'Hrs/wk', w: 20, a: 'right' }, { k: 'sp', t: 'Spend', w: 24, a: 'right' }, { k: 'st', t: 'Status', w: 36, a: 'left' }]
+      : [{ k: 'id', t: 'Vehicle', w: 28, a: 'left' }, { k: 'drv', t: 'Driven / wk', w: 34, a: 'right' }, { k: 'km', t: 'Cost / km', w: 30, a: 'right' }, { k: 'sp', t: 'Spend (yr)', w: 34, a: 'right' }, { k: 'st', t: 'Status', w: 52, a: 'left' }];
+    const tableW = cols.reduce((a, c) => a + c.w, 0);
     const ox = M.l;
     g.rect(ox, y, tableW, 7.5, C.navy);
-    ['Vehicle', 'Driven / wk', 'Cost / km', 'Spend (yr)', 'Status'].forEach((t, i) => {
-      const x = ox + cw.slice(0, i).reduce((a, b) => a + b, 0);
-      g.text(t, i === 0 ? x + 3 : (i === 4 ? x + 3 : x + cw[i] - 3), y + 5.1, { size: 7.4, bold: true, color: C.white, align: i === 0 || i === 4 ? 'left' : 'right' });
-    });
+    let hx = ox;
+    cols.forEach((c) => { g.text(c.t, c.a === 'left' ? hx + 3 : hx + c.w - 3, y + 5.1, { size: 7.2, bold: true, color: C.white, align: c.a }); hx += c.w; });
     y += 7.5;
     u.lines.slice(0, 14).forEach((l, i) => {
       const rowH = 8;
       if (i % 2 === 1) g.rect(ox, y, tableW, rowH, C.ruleSoft);
-      let x = ox;
-      g.text(safe(l.id), x + 3, y + 5.4, { size: 8.6, bold: true, color: C.navy });
-      x += cw[0];
-      g.text(shortKm(l.perWeek), x + cw[1] - 3, y + 5.4, { size: 8.4, color: C.body, align: 'right' });
-      x += cw[1];
-      g.text(perKmStr(l.perKm), x + cw[2] - 3, y + 5.4, { size: 8.6, bold: true, color: l.costly ? C.red : C.navy, align: 'right' });
-      x += cw[2];
-      g.text(AD.fleetReport.aud(l.spend), x + cw[3] - 3, y + 5.4, { size: 8.4, color: C.body, align: 'right' });
-      x += cw[3];
       const status = l.watch ? 'Low use / high cost' : l.costly ? 'Costly per km' : l.lowUse ? 'Low use' : 'OK';
-      const col = l.watch ? C.red : l.costly ? C.amber : C.muted;
-      g.text(status, x + 3, y + 5.4, { size: 7.8, bold: l.watch, color: col });
+      const stCol = l.watch ? C.red : l.costly ? C.amber : C.muted;
+      let x = ox;
+      cols.forEach((c) => {
+        const tx = c.a === 'left' ? x + 3 : x + c.w - 3;
+        if (c.k === 'id') g.text(safe(l.id), tx, y + 5.4, { size: 8.4, bold: true, color: C.navy, align: c.a });
+        else if (c.k === 'km') g.text(perKmStr(l.perKm), tx, y + 5.4, { size: 8.4, bold: true, color: l.costly ? C.red : C.navy, align: c.a });
+        else if (c.k === 'hr') g.text(l.perHour != null ? perKmStr(l.perHour) : '—', tx, y + 5.4, { size: 8.4, color: C.navy, align: c.a });
+        else if (c.k === 'drv') g.text(shortKm(l.perWeek), tx, y + 5.4, { size: 8, color: C.body, align: c.a });
+        else if (c.k === 'hw') g.text(l.hrsWeek != null ? Math.round(l.hrsWeek).toLocaleString('en-AU') : '—', tx, y + 5.4, { size: 8, color: C.body, align: c.a });
+        else if (c.k === 'sp') g.text(AD.fleetReport.aud(l.spend), tx, y + 5.4, { size: 8, color: C.body, align: c.a });
+        else if (c.k === 'st') g.text(status, tx, y + 5.4, { size: 7.4, bold: l.watch, color: stCol, align: c.a });
+        x += c.w;
+      });
       y += rowH;
     });
     y += 10;
