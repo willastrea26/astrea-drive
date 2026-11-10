@@ -114,19 +114,25 @@ function parseWorkHour(s: unknown): number | null {
 }
 
 // Engine work hours + distance for one device over a date window.
+// Never throws — a slow or failed call returns null so one bad device
+// can't sink the whole batch.
 async function fetchWorkHours(imei: string, from: string, to: string) {
-  const url = `${NETSTAR_BASE}/external/reports/workhour-report?imei=${
-    encodeURIComponent(imei)
-  }&start_date_time=${encodeURIComponent(from)}&end_date_time=${encodeURIComponent(to)}`;
-  const res = await fetch(url, {
-    headers: { accept: "*/*", "x-api-key": API_KEY },
-    signal: AbortSignal.timeout(20000),
-  });
-  if (!res.ok) return null;
-  const payload = await res.json();
-  const d = Array.isArray(payload?.data) ? payload.data[0] : null;
-  if (!d) return null;
-  return { hours: parseWorkHour(d.work_hour), distance: num(d.distance) };
+  try {
+    const url = `${NETSTAR_BASE}/external/reports/workhour-report?imei=${
+      encodeURIComponent(imei)
+    }&start_date_time=${encodeURIComponent(from)}&end_date_time=${encodeURIComponent(to)}`;
+    const res = await fetch(url, {
+      headers: { accept: "*/*", "x-api-key": API_KEY },
+      signal: AbortSignal.timeout(25000),
+    });
+    if (!res.ok) return null;
+    const payload = await res.json();
+    const d = Array.isArray(payload?.data) ? payload.data[0] : null;
+    if (!d) return null;
+    return { hours: parseWorkHour(d.work_hour), distance: num(d.distance) };
+  } catch (_e) {
+    return null;
+  }
 }
 
 async function fetchStatus(imei: string) {
@@ -216,7 +222,7 @@ async function syncOdometers() {
     const now = Date.now();
     const from = netstarDate(now - WINDOW_DAYS * 86400000);
     const to = netstarDate(now);
-    const wh = await mapLimit(devices, CONCURRENCY, (v) => fetchWorkHours(v.imei, from, to));
+    const wh = await mapLimit(devices, 3, (v) => fetchWorkHours(v.imei, from, to));
     const workRows: Array<{ rego: string; hours: number; distance: number | null; days: number }> = [];
     devices.forEach((v, i) => {
       const w = wh[i];
