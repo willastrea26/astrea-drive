@@ -123,7 +123,6 @@ async function fetchWorkHours(imei: string, from: string, to: string) {
     }&start_date_time=${encodeURIComponent(from)}&end_date_time=${encodeURIComponent(to)}`;
     const res = await fetch(url, {
       headers: { accept: "*/*", "x-api-key": API_KEY },
-      signal: AbortSignal.timeout(25000),
     });
     if (!res.ok) return null;
     const payload = await res.json();
@@ -217,12 +216,15 @@ async function syncOdometers() {
   // Also refresh each vehicle's engine work hours over the last 30 days, so
   // utilisation can be measured in hours (right for stationary vac-truck work).
   let workHoursRecorded = 0;
+  const workHoursDebug: Record<string, unknown> = {};
   try {
     const WINDOW_DAYS = 30;
     const now = Date.now();
     const from = netstarDate(now - WINDOW_DAYS * 86400000);
     const to = netstarDate(now);
+    workHoursDebug.window = [from, to];
     const wh = await mapLimit(devices, 3, (v) => fetchWorkHours(v.imei, from, to));
+    workHoursDebug.fetched = wh.filter((w) => w && w.hours != null).length;
     const workRows: Array<{ rego: string; hours: number; distance: number | null; days: number }> = [];
     devices.forEach((v, i) => {
       const w = wh[i];
@@ -235,11 +237,15 @@ async function syncOdometers() {
         });
       }
     });
+    workHoursDebug.rows = workRows.length;
     if (workRows.length) {
       const { data: whData, error: whErr } = await db.rpc("record_work_hours", { rows: workRows });
-      if (!whErr) workHoursRecorded = Number(whData) || workRows.length;
+      if (whErr) workHoursDebug.rpcError = whErr.message;
+      else workHoursRecorded = Number(whData) || workRows.length;
     }
-  } catch (_e) { /* work hours are a bonus; never fail the odometer sync over them */ }
+  } catch (e) {
+    workHoursDebug.error = String((e as Error)?.message ?? e);
+  }
 
   return json({
     updated: (data && data.updated) ?? 0,
@@ -248,6 +254,7 @@ async function syncOdometers() {
     added: (data && data.added) ?? 0,
     readings: readings.length,
     workHoursRecorded,
+    workHoursDebug,
     syncedAt: new Date().toISOString(),
   });
 }
