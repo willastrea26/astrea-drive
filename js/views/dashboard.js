@@ -689,7 +689,7 @@ AD.views.dashboard = (function () {
             <figcaption><h3>Vehicle usage</h3><span class="viz-sub">Average distance driven per day${usageList.length ? ` · busiest ${usageShown.length} of ${usageList.length} with data` : ''}</span></figcaption>
             ${usageRows
               ? `<div class="hb">${usageRows}</div>`
-              : '<p class="empty" style="padding:16px">No usage data yet. It needs a current odometer and a last-service reading — run “Sync odometers from GPS” on the fleet register, then check back.</p>'}
+              : '<p class="empty" style="padding:16px">No usage data yet. It needs a current odometer and a last-service reading — run “Sync GPS data” on the fleet register, then check back.</p>'}
             ${usageList.length ? V.table(['Vehicle', 'Per day', 'Per week', 'Measured over'], usageList.map(({ v, u }) => [v.id, km0(u.perDay) + ' km', km0(u.perWeek) + ' km', u.days + ' days'])) : ''}
           </figure>
 

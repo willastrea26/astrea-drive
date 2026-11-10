@@ -206,7 +206,7 @@ AD.views.fleet = (function () {
 
     const actions = isHired
       ? `<button class="btn btn-secondary" id="import-docs">${I.file} Import documents from folder</button><button class="btn btn-primary" id="add-veh">${I.plus} Add hired vehicle</button>`
-      : `<button class="btn btn-secondary" id="sync-odo">${I.gauge} Sync odometers from GPS</button><button class="btn btn-primary" id="add-veh">${I.plus} Add vehicle</button>`;
+      : `<button class="btn btn-secondary" id="sync-odo">${I.gauge} Sync GPS data</button><button class="btn btn-primary" id="add-veh">${I.plus} Add vehicle</button>`;
 
     root.innerHTML = `
       ${AD.ui.pageHeader({ title, sub, actions })}
@@ -307,7 +307,7 @@ AD.views.fleet = (function () {
         : (r.gpsKm != null ? `<span class="odo-sub">GPS ${esc(L.fmtKm(r.gpsKm))}</span>` : '');
 
       AD.ui.modal({
-        title: 'GPS odometer sync',
+        title: 'GPS data sync',
         wide: true,
         body: `
           <div class="odo-stats">
@@ -329,7 +329,7 @@ AD.views.fleet = (function () {
           </details>` : ''}`
       });
     } catch (e) {
-      AD.ui.toast('Odometer sync failed: ' + ((e && e.message) || 'could not reach the tracker service'), 'error');
+      AD.ui.toast('GPS sync failed: ' + ((e && e.message) || 'could not reach the tracker service'), 'error');
       btn.disabled = false;
       btn.innerHTML = label;
     }
