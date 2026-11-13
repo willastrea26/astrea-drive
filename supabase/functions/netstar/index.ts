@@ -215,6 +215,42 @@ async function fetchWorkHoursDay(imei: string, from: string, to: string) {
   }
 }
 
+// Diagnostic: when the reports come back empty, try the plausible request
+// shapes against ONE tracker and record Netstar's reply to each, so we can see
+// which shape it actually accepts. Only ever runs when nothing saved.
+async function probeReports(imei: string, from: string, to: string) {
+  const q = (o: Record<string, string>) =>
+    Object.entries(o).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&");
+  const base = { start_date_time: from, end_date_time: to };
+  const tests: Array<[string, string, string, unknown?]> = [
+    ["GET workhour imei", "GET", `/external/reports/workhour-report?${q({ ...base, imei })}`],
+    ["GET workhour imei_nos", "GET", `/external/reports/workhour-report?${q({ ...base, imei_nos: imei })}`],
+    ["GET workhour imeis", "GET", `/external/reports/workhour-report?${q({ ...base, imeis: imei })}`],
+    ["GET workhour imei+imeis", "GET", `/external/reports/workhour-report?${q({ ...base, imei, imeis: imei })}`],
+    ["GET workhour imei+config0", "GET", `/external/reports/workhour-report?${q({ ...base, imei, user_api_config_id: "0" })}`],
+    ["POST workhour imei_nos+imeis", "POST", "/external/reports/workhour-report", { ...base, imei_nos: imei, imeis: [imei] }],
+    ["POST workhour imei_nos only", "POST", "/external/reports/workhour-report", { ...base, imei_nos: imei }],
+    ["POST workhour imei_nos+imeis+config0", "POST", "/external/reports/workhour-report", { ...base, imei_nos: imei, imeis: [imei], user_api_config_id: 0 }],
+    ["GET trip-summary imei", "GET", `/external/reports/trip-summary?${q({ ...base, imei })}`],
+    ["POST trip-summary imei_nos", "POST", "/external/reports/trip-summary", { ...base, imei_nos: imei }],
+    ["GET object-status (control)", "GET", `/external/reports/object-status?${q({ imei })}`],
+  ];
+  const out: Record<string, string> = {};
+  for (const [name, method, path, body] of tests) {
+    try {
+      const res = await fetch(`${NETSTAR_BASE}${path}`, {
+        method,
+        headers: netstarHeaders(body ? { "Content-Type": "application/json" } : {}),
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      out[name] = `${res.status} ${(await res.text()).slice(0, 150)}`;
+    } catch (e) {
+      out[name] = `error ${String((e as Error)?.message ?? e)}`;
+    }
+  }
+  return out;
+}
+
 async function fetchStatus(imei: string) {
   const url = `${NETSTAR_BASE}/external/reports/object-status?imei=${
     encodeURIComponent(imei)
@@ -356,6 +392,11 @@ async function syncOdometers() {
     dailyDebug.withData = dayRows.length;
     dailyDebug.skippedForTime = skipped;
     dailyDebug.firstResponse = firstRaw; // what Netstar actually said, for diagnosing empties
+    if (!dayRows.length && devices.length) {
+      const y = days[1] || days[0]; // yesterday, a full day
+      dailyDebug.probeImei = devices[0].imei;
+      dailyDebug.probe = await probeReports(devices[0].imei, y.from, y.to);
+    }
     for (let i = 0; i < dayRows.length; i += 400) {
       const { data: dData, error: dErr } = await db.rpc("record_work_hours_daily", { rows: dayRows.slice(i, i + 400) });
       if (dErr) { dailyDebug.rpcError = dErr.message; break; }
