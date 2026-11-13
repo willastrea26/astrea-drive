@@ -306,6 +306,35 @@ AD.views.fleet = (function () {
         ? `<span class="odo-sub">GPS ${esc(L.fmtKm(r.gpsKm))} · saved ${esc(L.fmtKm(r.savedKm))}</span>`
         : (r.gpsKm != null ? `<span class="odo-sub">GPS ${esc(L.fmtKm(r.gpsKm))}</span>` : '');
 
+      // Telematics extras: did engine hours / daily hours / trip stats actually
+      // save? Shows "not deployed" for an older server function, and the raw
+      // diagnostics when nothing was saved, so empty charts can be explained.
+      const extras = [
+        { label: 'Engine hours (30-day total)', rec: data.workHoursRecorded, dbg: data.workHoursDebug },
+        { label: 'Daily engine hours (chart)',  rec: data.dailyRecorded,     dbg: data.dailyDebug },
+        { label: 'Trip stats (idle, trips, speed)', rec: data.tripStatsRecorded, dbg: data.tripStatsDebug }
+      ];
+      const extraRow = (x) => {
+        const missing = x.rec === undefined;
+        const ok = !missing && Number(x.rec) > 0;
+        const tone = ok ? 'good' : missing ? 'muted' : 'amber';
+        const text = missing ? 'Server function not updated yet' : ok ? `${Number(x.rec)} saved` : 'Nothing saved';
+        return `<div class="odo-row">
+          <span class="odo-rego" style="font-size:.95em">${esc(x.label)}</span>
+          <span class="odo-detail"></span>
+          <span class="odo-pill odo-pill-${tone}"><i></i>${esc(text)}</span>
+        </div>`;
+      };
+      const needsDebug = extras.some((x) => x.rec !== undefined && !(Number(x.rec) > 0));
+      const debugJson = JSON.stringify({ workHours: data.workHoursDebug, daily: data.dailyDebug, tripStats: data.tripStatsDebug }, null, 2);
+      const extrasHtml = `
+        <h4 style="margin:18px 0 8px;font-size:.95em">Telematics data</h4>
+        <div class="odo-table">${extras.map(extraRow).join('')}</div>
+        ${needsDebug ? `<details class="odo-untracked" open>
+          <summary>Why nothing saved <span class="muted">— what Netstar replied</span></summary>
+          <pre style="white-space:pre-wrap;word-break:break-word;font-size:.78em;margin:8px 0 0;max-height:220px;overflow:auto">${esc(debugJson)}</pre>
+        </details>` : ''}`;
+
       AD.ui.modal({
         title: 'GPS data sync',
         wide: true,
@@ -323,6 +352,7 @@ AD.views.fleet = (function () {
               ${pill(r.status)}
             </div>`).join('') : '<p class="muted" style="padding:8px 0">No Netstar-tracked vehicles returned a reading.</p>'}
           </div>
+          ${extrasHtml}
           ${untracked.length ? `<details class="odo-untracked">
             <summary><b>${untracked.length}</b> vehicles aren’t on Netstar <span class="muted">— no tracker fitted, nothing to sync</span></summary>
             <div class="odo-untracked-list">${untracked.map((r) => esc(r.rego || r.id || '—')).join(', ')}</div>
