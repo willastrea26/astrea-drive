@@ -30,6 +30,15 @@ const API_KEY = Deno.env.get("NETSTAR_API_KEY") ?? "";
 const COMPANY = Deno.env.get("NETSTAR_COMPANY") ?? "Astrea";
 const CONCURRENCY = 6; // how many object-status calls to run at once
 
+// The FleetAI reference says to send a browser-style User-Agent, otherwise
+// some calls are blocked/ignored when made programmatically. We attach it to
+// every Netstar request through this helper.
+const NETSTAR_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
+function netstarHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  return { accept: "*/*", "x-api-key": API_KEY, "User-Agent": NETSTAR_UA, ...extra };
+}
+
 const cors = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
@@ -73,11 +82,7 @@ interface Device {
 async function fetchVehicles(): Promise<Device[]> {
   const res = await fetch(`${NETSTAR_BASE}/external/company-vehicles`, {
     method: "POST",
-    headers: {
-      accept: "*/*",
-      "x-api-key": API_KEY,
-      "Content-Type": "application/json",
-    },
+    headers: netstarHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ company_name: COMPANY, company_names: [COMPANY] }),
   });
   if (!res.ok) throw new Error(`company-vehicles ${res.status}`);
@@ -113,6 +118,45 @@ function parseWorkHour(s: unknown): number | null {
   return Number(m[1]) + Number(m[2]) / 60 + Number(m[3]) / 3600;
 }
 
+// Netstar durations come in two shapes: "HH:MM:SS" (e.g. work_duration
+// "05:25:06") and "HH:MM" (e.g. total_idle_duration "01:33"). Return whole
+// minutes, or null if it isn't a time we recognise.
+function durToMinutes(s: unknown): number | null {
+  const parts = String(s ?? "").trim().split(":").map(Number);
+  if (!parts.length || parts.some((n) => !Number.isFinite(n))) return null;
+  if (parts.length === 3) return Math.round(parts[0] * 60 + parts[1] + parts[2] / 60);
+  if (parts.length === 2) return Math.round(parts[0] * 60 + parts[1]);
+  return null;
+}
+
+// Trip-summary totals per device over a date window. One POST covers every
+// IMEI; returns the raw data rows (one per device) or [] on any failure, so a
+// bad trip-summary call can never sink the odometer/work-hour sync.
+async function fetchTripSummaries(
+  imeis: string[],
+  from: string,
+  to: string,
+): Promise<Record<string, unknown>[]> {
+  try {
+    const res = await fetch(`${NETSTAR_BASE}/external/reports/trip-summary`, {
+      method: "POST",
+      headers: netstarHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({
+        start_date_time: from,
+        end_date_time: to,
+        imei_nos: imeis.join(","),
+        imeis,
+        user_api_config_id: 0,
+      }),
+    });
+    if (!res.ok) return [];
+    const payload = await res.json();
+    return Array.isArray(payload?.data) ? payload.data : [];
+  } catch (_e) {
+    return [];
+  }
+}
+
 // Engine work hours + distance for one device over a date window.
 // Never throws — a slow or failed call returns null so one bad device
 // can't sink the whole batch.
@@ -121,9 +165,7 @@ async function fetchWorkHours(imei: string, from: string, to: string) {
     const url = `${NETSTAR_BASE}/external/reports/workhour-report?imei=${
       encodeURIComponent(imei)
     }&start_date_time=${encodeURIComponent(from)}&end_date_time=${encodeURIComponent(to)}`;
-    const res = await fetch(url, {
-      headers: { accept: "*/*", "x-api-key": API_KEY },
-    });
+    const res = await fetch(url, { headers: netstarHeaders() });
     if (!res.ok) return null;
     const payload = await res.json();
     const d = Array.isArray(payload?.data) ? payload.data[0] : null;
@@ -138,9 +180,7 @@ async function fetchStatus(imei: string) {
   const url = `${NETSTAR_BASE}/external/reports/object-status?imei=${
     encodeURIComponent(imei)
   }`;
-  const res = await fetch(url, {
-    headers: { accept: "*/*", "x-api-key": API_KEY },
-  });
+  const res = await fetch(url, { headers: netstarHeaders() });
   if (!res.ok) return null;
   const payload = await res.json();
   const d = Array.isArray(payload?.data) ? payload.data[0] : null;
@@ -247,6 +287,51 @@ async function syncOdometers() {
     workHoursDebug.error = String((e as Error)?.message ?? e);
   }
 
+  // Trip-summary stats over the same window: distance, working days, engine/
+  // idle/stop time, trips, speeds and overspeed events. One POST for the whole
+  // fleet. Matched back to a rego by imei, falling back to the returned
+  // vehicle_info, then applied by record_trip_stats (handles the Netstar alias).
+  let tripStatsRecorded = 0;
+  const tripStatsDebug: Record<string, unknown> = {};
+  try {
+    const WINDOW_DAYS = 30;
+    const now = Date.now();
+    const from = netstarDate(now - WINDOW_DAYS * 86400000);
+    const to = netstarDate(now);
+    tripStatsDebug.window = [from, to];
+    const imeis = devices.map((v) => v.imei).filter(Boolean);
+    const summaries = await fetchTripSummaries(imeis, from, to);
+    tripStatsDebug.returned = summaries.length;
+    const byImei = new Map(devices.map((v) => [String(v.imei), v]));
+    const tripRows: Array<Record<string, unknown>> = [];
+    for (const d of summaries) {
+      const dev = byImei.get(String((d as Record<string, unknown>).imei_no ?? ""));
+      const rego = dev ? dev.rego : String((d as Record<string, unknown>).vehicle_info ?? "").trim();
+      if (!rego) continue;
+      tripRows.push({
+        rego,
+        runningKm: num(d.total_running_km),
+        workingDays: num(d.working_days),
+        workMinutes: durToMinutes(d.work_duration),
+        idleMinutes: durToMinutes(d.total_idle_duration),
+        stopMinutes: durToMinutes(d.total_stop_duration),
+        trips: num(d.no_of_trip),
+        avgSpeed: num(d.avg_speed),
+        maxSpeed: num(d.max_speed),
+        overspeed: num(d.overspeed),
+        days: WINDOW_DAYS,
+      });
+    }
+    tripStatsDebug.rows = tripRows.length;
+    if (tripRows.length) {
+      const { data: tData, error: tErr } = await db.rpc("record_trip_stats", { rows: tripRows });
+      if (tErr) tripStatsDebug.rpcError = tErr.message;
+      else tripStatsRecorded = Number(tData) || tripRows.length;
+    }
+  } catch (e) {
+    tripStatsDebug.error = String((e as Error)?.message ?? e);
+  }
+
   return json({
     updated: (data && data.updated) ?? 0,
     verified: (data && data.verified) ?? 0,
@@ -255,6 +340,8 @@ async function syncOdometers() {
     readings: readings.length,
     workHoursRecorded,
     workHoursDebug,
+    tripStatsRecorded,
+    tripStatsDebug,
     syncedAt: new Date().toISOString(),
   });
 }

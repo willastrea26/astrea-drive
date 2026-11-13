@@ -132,6 +132,37 @@ AD.logic = (function () {
     return { hours, days, perWeek: hours * 7 / days, perDay: hours / days, distanceKm: row.distanceKm, updatedAt: row.updatedAt };
   }
 
+  /**
+   * A vehicle's Netstar trip-summary figures over the stored window: distance,
+   * working days, engine/idle/stop minutes, trips, speeds and overspeed events.
+   * Returns null when nothing's been synced. `idlePct` is idle time as a share
+   * of engine-on time (idle + moving), handy for spotting vehicles left running.
+   */
+  function tripStats(v) {
+    const row = (S().all('vehicle_trip_stats') || []).find((r) => r.vehicleId === v.id);
+    if (!row) return null;
+    const n = (x) => (x == null || x === '' || !Number.isFinite(Number(x)) ? null : Number(x));
+    const days = n(row.windowDays) || 30;
+    const idleMin = n(row.idleMinutes);
+    const workMin = n(row.workMinutes);
+    const engineMin = (idleMin || 0) + (workMin || 0);
+    const idlePct = engineMin > 0 && idleMin != null ? idleMin / engineMin : null;
+    return {
+      days,
+      runningKm: n(row.runningKm),
+      workingDays: n(row.workingDays),
+      workMinutes: workMin,
+      idleMinutes: idleMin,
+      stopMinutes: n(row.stopMinutes),
+      trips: n(row.trips),
+      avgSpeed: n(row.avgSpeed),
+      maxSpeed: n(row.maxSpeed),
+      overspeed: n(row.overspeed),
+      idlePct,
+      updatedAt: row.updatedAt
+    };
+  }
+
   function regoState(v) {
     const d = T.daysBetween(T.todayKey(), v.regoExpiry);
     if (d < 0) return { state: 'overdue', days: d, label: 'Expired', why: `Expired ${-d} day${d === -1 ? '' : 's'} ago` };
@@ -402,7 +433,7 @@ AD.logic = (function () {
   }
 
   return {
-    serviceState, serviceTriggers, usageRate, workHours, HOURS_TYPES,
+    serviceState, serviceTriggers, usageRate, workHours, tripStats, HOURS_TYPES,
     regoState, attentionTone, openDefects, fmtKm, fmtHours, fmtAUD, driverName, userName,
     vacTrucks, schedulableVehicles, bookingsFor, activeAt, overlaps, conflictIds, driverConflictIds, nextBooking, locate, hasCoords,
     bookingCategory, bookingTitle, SOON_DAYS, SOON_KM, SOON_HOURS, URGENT_HOURS,
