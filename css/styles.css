@@ -2780,3 +2780,18 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 @media (prefers-reduced-motion: reduce) {
   .brand-road { display: none; }
 }
+
+/* ---- Vehicle profile: engine hours per day (from GPS) ---- */
+.eh-chart { display: flex; gap: 10px; align-items: stretch; height: 150px; margin-top: 6px; }
+.eh-y { display: flex; flex-direction: column; justify-content: space-between; font-size: 12px; color: var(--muted, #88a3bb); text-align: right; min-width: 28px; padding: 0 0 2px; }
+.eh-plot { flex: 1; display: flex; align-items: flex-end; gap: 3px; border-left: 1px solid var(--line, rgba(255,255,255,.12)); border-bottom: 1px solid var(--line, rgba(255,255,255,.12)); padding: 0 4px; background: repeating-linear-gradient(to top, transparent 0, transparent calc(50% - 1px), rgba(255,255,255,.06) calc(50% - 1px), rgba(255,255,255,.06) 50%); }
+.eh-col { flex: 1; height: 100%; display: flex; align-items: flex-end; justify-content: center; min-width: 0; }
+.eh-bar { display: block; width: 100%; max-width: 18px; border-radius: 4px 4px 0 0; background: rgba(95, 224, 180, .38); transition: filter .15s; }
+.eh-bar.eh-recent { background: var(--mint, #5fe0b4); }
+.eh-bar.eh-none { height: 3px; background: rgba(255,255,255,.14); border-radius: 2px; }
+.eh-col:hover .eh-bar { filter: brightness(1.25); }
+.eh-x { display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 12px; color: var(--muted, #88a3bb); margin: 6px 0 4px 38px; flex-wrap: wrap; }
+.eh-key { display: inline-flex; align-items: center; gap: 6px; }
+.eh-dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; background: rgba(95, 224, 180, .38); margin-left: 8px; }
+.eh-dot-recent { background: var(--mint, #5fe0b4); margin-left: 0; }
+.eh-dot-none { background: rgba(255,255,255,.18); }

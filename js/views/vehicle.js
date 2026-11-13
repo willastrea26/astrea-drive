@@ -637,6 +637,46 @@ AD.views.vehicle = (function () {
     return `About ${daysTo.toLocaleString('en-AU')} day${daysTo === 1 ? '' : 's'} at current use (~${fmtPerDay(u.perDay)} km/day)`;
   }
 
+  /**
+   * Engine hours per day for the last 30 days, straight from Netstar. The last
+   * 7 days are drawn in mint, earlier days dimmer; days with no data from the
+   * tracker are shown as a faint dot rather than a misleading zero. Vehicles
+   * with no tracker get no section at all.
+   */
+  function engineHoursChart(v) {
+    const daily = L.workHoursDaily(v, 30);
+    const tracked = v.odometerSource === 'telematics';
+    if (!daily && !tracked) return '';
+    if (!daily || !daily.withData) {
+      return `<section class="section">
+        ${sectionHead({ title: 'Engine hours', meta: 'last 30 days · from GPS', level: 3 })}
+        <div class="empty-tidy">${I.activity}No daily engine-hour data yet. Press “Sync GPS data” on the Fleet register to pull it in.</div>
+      </section>`;
+    }
+    const max = Math.max(...daily.days.map((d) => d.hours || 0), 1);
+    const niceMax = Math.ceil(max / 2) * 2 || 2;
+    const fmtDay = (k) => new Date(k + 'T12:00:00').toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
+    const fmtH = (h) => (Math.round(h * 10) / 10).toLocaleString('en-AU');
+    const bars = daily.days.map((d, i) => {
+      const recent = i >= daily.days.length - 7;
+      if (d.hours == null) {
+        return `<div class="eh-col" title="${esc(fmtDay(d.day))} — no data"><span class="eh-bar eh-none"></span></div>`;
+      }
+      const pct = Math.max(d.hours / niceMax * 100, d.hours > 0 ? 2 : 0);
+      return `<div class="eh-col" title="${esc(fmtDay(d.day))} — ${fmtH(d.hours)} hrs${d.km != null ? ' · ' + Math.round(d.km).toLocaleString('en-AU') + ' km' : ''}"><span class="eh-bar${recent ? ' eh-recent' : ''}" style="height:${pct.toFixed(1)}%"></span></div>`;
+    }).join('');
+    const first = daily.days[0].day, last = daily.days[daily.days.length - 1].day;
+    return `<section class="section">
+      ${sectionHead({ title: 'Engine hours', meta: `${fmtH(daily.last7)} hrs this week · ${fmtH(daily.total)} hrs in 30 days`, level: 3 })}
+      <div class="eh-chart" role="img" aria-label="Engine hours per day over the last 30 days">
+        <div class="eh-y"><span>${niceMax}h</span><span>${niceMax / 2}h</span><span>0</span></div>
+        <div class="eh-plot">${bars}</div>
+      </div>
+      <div class="eh-x"><span>${esc(fmtDay(first))}</span><span class="eh-key"><i class="eh-dot eh-dot-recent"></i>Last 7 days <i class="eh-dot"></i>Earlier <i class="eh-dot eh-dot-none"></i>No data</span><span>${esc(fmtDay(last))}</span></div>
+      <p class="help">Daily engine time reported by the vehicle’s GPS tracker. ${daily.withData} of 30 days had data.</p>
+    </section>`;
+  }
+
   function overview(v, services, defects) {
     const s = L.serviceState(v), r = L.regoState(v);
     const flagTone = (tone) => (tone ? 'flag-' + tone : 'muted');
@@ -682,6 +722,7 @@ AD.views.vehicle = (function () {
       ? `<div><dt>GPS activity</dt><dd>${ts.trips != null ? `${ts.trips.toLocaleString('en-AU')} trip${ts.trips === 1 ? '' : 's'}` : '—'}${ts.runningKm != null ? ` · ${L.fmtKm(ts.runningKm)}` : ''}<span class="sub sub-gps">${tripSub ? tripSub + ' · ' : ''}over ${ts.days} days · from GPS</span></dd></div>`
       : '';
     const openDefs = defects.filter((d) => d.status !== 'Resolved');
+    const engineChart = engineHoursChart(v);
     return `
       <div class="cols-main-aside">
         <div>
@@ -710,6 +751,7 @@ AD.views.vehicle = (function () {
               ${openDefs.slice(0, 4).map((d) => `<li><span class="id">${T.fmtKey(d.reportedDate)}</span><span class="what">${esc(d.description)}<span class="t2">${esc(d.reportedBy)}</span></span><span class="when">${priorityBadge(d.priority)}</span></li>`).join('')}
             </ul>` : `<div class="empty-tidy ok">${I.check}No open defects — all clear.</div>`}
           </section>
+          ${engineChart}
         </div>
         <aside class="aside">
           <section class="section">

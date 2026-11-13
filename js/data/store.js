@@ -55,11 +55,13 @@ AD.store = (function () {
 
   async function load() {
     const since = new Date(Date.now() - ODO_READING_DAYS * 86400000).toISOString().slice(0, 10);
-    const [results, readings, workHours, tripStats] = await Promise.all([
+    const dailySince = new Date(Date.now() - 40 * 86400000).toISOString().slice(0, 10);
+    const [results, readings, workHours, tripStats, workDaily] = await Promise.all([
       Promise.all(TABLES.map(query)),
       loadOptional('odometer_readings', (q) => q.gte('readDate', since)),
       loadOptional('vehicle_work_hours', (q) => q),
-      loadOptional('vehicle_trip_stats', (q) => q)
+      loadOptional('vehicle_trip_stats', (q) => q),
+      loadOptional('vehicle_work_hours_daily', (q) => q.gte('day', dailySince))
     ]);
     const next = {};
     results.forEach((r, i) => {
@@ -69,6 +71,7 @@ AD.store = (function () {
     next.odometer_readings = readings;
     next.vehicle_work_hours = workHours;
     next.vehicle_trip_stats = tripStats;
+    next.vehicle_work_hours_daily = workDaily;
     db = next;
     emit('*');
   }

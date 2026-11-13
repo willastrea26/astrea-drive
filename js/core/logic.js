@@ -133,6 +133,29 @@ AD.logic = (function () {
   }
 
   /**
+   * Engine hours per day for the last `days` days (oldest first), from the
+   * daily telematics rows. Days Netstar returned nothing for have hours:null so
+   * the chart can show "no data" instead of pretending it was zero. Returns
+   * null when no daily rows exist for the vehicle at all.
+   */
+  function workHoursDaily(v, days = 30) {
+    const rows = (S().all('vehicle_work_hours_daily') || []).filter((r) => r.vehicleId === v.id);
+    if (!rows.length) return null;
+    const byDay = new Map(rows.map((r) => [String(r.day).slice(0, 10), r]));
+    const out = [];
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date(Date.now() - i * 86400000);
+      const key = d.toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' }); // YYYY-MM-DD
+      const r = byDay.get(key);
+      out.push({ day: key, hours: r ? Number(r.hours) : null, km: r && r.distanceKm != null ? Number(r.distanceKm) : null });
+    }
+    const last7 = out.slice(-7).reduce((s, x) => s + (x.hours || 0), 0);
+    const total = out.reduce((s, x) => s + (x.hours || 0), 0);
+    const withData = out.filter((x) => x.hours != null).length;
+    return { days: out, last7, total, withData };
+  }
+
+  /**
    * A vehicle's Netstar trip-summary figures over the stored window: distance,
    * working days, engine/idle/stop minutes, trips, speeds and overspeed events.
    * Returns null when nothing's been synced. `idlePct` is idle time as a share
@@ -433,7 +456,7 @@ AD.logic = (function () {
   }
 
   return {
-    serviceState, serviceTriggers, usageRate, workHours, tripStats, HOURS_TYPES,
+    serviceState, serviceTriggers, usageRate, workHours, workHoursDaily, tripStats, HOURS_TYPES,
     regoState, attentionTone, openDefects, fmtKm, fmtHours, fmtAUD, driverName, userName,
     vacTrucks, schedulableVehicles, bookingsFor, activeAt, overlaps, conflictIds, driverConflictIds, nextBooking, locate, hasCoords,
     bookingCategory, bookingTitle, SOON_DAYS, SOON_KM, SOON_HOURS, URGENT_HOURS,

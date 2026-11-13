@@ -176,6 +176,45 @@ async function fetchWorkHours(imei: string, from: string, to: string) {
   }
 }
 
+// Last `count` calendar days in Sydney time, newest first, each with the
+// day key (YYYY-MM-DD) and Netstar-formatted start/end of that day.
+function sydneyDays(count: number): Array<{ key: string; from: string; to: string }> {
+  const out: Array<{ key: string; from: string; to: string }> = [];
+  const seen = new Set<string>();
+  const now = Date.now();
+  for (let i = 0; i < count + 2 && out.length < count; i++) {
+    const p = Object.fromEntries(new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Australia/Sydney", year: "numeric", month: "2-digit", day: "2-digit",
+    }).formatToParts(now - i * 86400000).map((x) => [x.type, x.value]));
+    const key = `${p.year}-${p.month}-${p.day}`;
+    if (seen.has(key)) continue; // DST edge: same day twice
+    seen.add(key);
+    out.push({ key, from: `${p.day}-${p.month}-${p.year} 00:00:00`, to: `${p.day}-${p.month}-${p.year} 23:59:59` });
+  }
+  return out;
+}
+
+// One device, one day of engine work hours. Returns { raw } always (for
+// diagnostics) plus hours/distance only when Netstar actually returned a row.
+async function fetchWorkHoursDay(imei: string, from: string, to: string) {
+  try {
+    const url = `${NETSTAR_BASE}/external/reports/workhour-report?imei=${
+      encodeURIComponent(imei)
+    }&start_date_time=${encodeURIComponent(from)}&end_date_time=${encodeURIComponent(to)}`;
+    const res = await fetch(url, { headers: netstarHeaders() });
+    const text = await res.text();
+    const raw = `${res.status} ${text.slice(0, 240)}`;
+    if (!res.ok) return { raw, hours: null as number | null, distance: null as number | null };
+    let payload: { data?: Array<Record<string, unknown>> } = {};
+    try { payload = JSON.parse(text); } catch (_e) { /* not json */ }
+    const d = Array.isArray(payload?.data) ? payload.data[0] : null;
+    if (!d) return { raw, hours: null as number | null, distance: null as number | null };
+    return { raw, hours: parseWorkHour(d.work_hour), distance: num(d.distance) };
+  } catch (e) {
+    return { raw: `error ${String((e as Error)?.message ?? e)}`, hours: null as number | null, distance: null as number | null };
+  }
+}
+
 async function fetchStatus(imei: string) {
   const url = `${NETSTAR_BASE}/external/reports/object-status?imei=${
     encodeURIComponent(imei)
@@ -287,6 +326,45 @@ async function syncOdometers() {
     workHoursDebug.error = String((e as Error)?.message ?? e);
   }
 
+  // Daily engine hours for the last 30 days (feeds the vehicle "Engine hours"
+  // chart). One workhour-report call per device per day, run a few at a time
+  // with a time budget so a slow run can't hit the function limit.
+  let dailyRecorded = 0;
+  const dailyDebug: Record<string, unknown> = {};
+  try {
+    const days = sydneyDays(30);
+    const tasks: Array<{ rego: string; imei: string; day: { key: string; from: string; to: string } }> = [];
+    for (const v of devices) for (const day of days) tasks.push({ rego: v.rego, imei: v.imei, day });
+    dailyDebug.calls = tasks.length;
+    const deadline = Date.now() + 100000; // stop starting new calls after ~100s
+    let skipped = 0;
+    let firstRaw = "";
+    const dayRows: Array<{ rego: string; day: string; hours: number; distance: number | null }> = [];
+    await mapLimit(tasks, 8, async (t) => {
+      if (Date.now() > deadline) { skipped++; return; }
+      const r = await fetchWorkHoursDay(t.imei, t.day.from, t.day.to);
+      if (!firstRaw) firstRaw = r.raw;
+      if (r.hours != null) {
+        dayRows.push({
+          rego: t.rego,
+          day: t.day.key,
+          hours: Math.round(r.hours * 100) / 100,
+          distance: r.distance != null ? Math.round(r.distance) : null,
+        });
+      }
+    });
+    dailyDebug.withData = dayRows.length;
+    dailyDebug.skippedForTime = skipped;
+    dailyDebug.firstResponse = firstRaw; // what Netstar actually said, for diagnosing empties
+    for (let i = 0; i < dayRows.length; i += 400) {
+      const { data: dData, error: dErr } = await db.rpc("record_work_hours_daily", { rows: dayRows.slice(i, i + 400) });
+      if (dErr) { dailyDebug.rpcError = dErr.message; break; }
+      dailyRecorded += Number(dData) || 0;
+    }
+  } catch (e) {
+    dailyDebug.error = String((e as Error)?.message ?? e);
+  }
+
   // Trip-summary stats over the same window: distance, working days, engine/
   // idle/stop time, trips, speeds and overspeed events. One POST for the whole
   // fleet. Matched back to a rego by imei, falling back to the returned
@@ -340,6 +418,8 @@ async function syncOdometers() {
     readings: readings.length,
     workHoursRecorded,
     workHoursDebug,
+    dailyRecorded,
+    dailyDebug,
     tripStatsRecorded,
     tripStatsDebug,
     syncedAt: new Date().toISOString(),
