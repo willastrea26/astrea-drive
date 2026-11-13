@@ -19,8 +19,9 @@
 //   'vehicles'        the flat device list only (imei / rego / name / branch)
 //   'positions'       { imeis: [...] } latest status for specific imeis
 //   'sync-odometers'  write each matched vehicle's latest odometer into the
-//                     vehicles table (only ever increasing it). Used by the
-//                     "Sync from GPS" button and the nightly cron job.
+//                     vehicles table (only ever increasing it), plus trip
+//                     stats and daily engine hours. Used by the
+//                     "Sync GPS data" button and the nightly cron job.
 // =====================================================================
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
@@ -37,6 +38,32 @@ const NETSTAR_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
 function netstarHeaders(extra: Record<string, string> = {}): Record<string, string> {
   return { accept: "*/*", "x-api-key": API_KEY, "User-Agent": NETSTAR_UA, ...extra };
+}
+
+// Netstar rate-limits with a token bucket ("429 Rate limit exceeded"). The
+// report calls (the many per-day ones especially) go through nsFetch, which
+// spaces requests ~4/second and, on a 429, waits and retries instead of
+// failing. The live-map calls stay on plain fetch so the map stays snappy.
+const GAP_MS = 250;
+let nextSlot = 0;
+async function paced(): Promise<void> {
+  const now = Date.now();
+  const at = Math.max(now, nextSlot);
+  nextSlot = at + GAP_MS;
+  if (at > now) await new Promise((r) => setTimeout(r, at - now));
+}
+async function nsFetch(url: string, init: RequestInit = {}, tries = 4): Promise<Response> {
+  let res!: Response;
+  for (let a = 0; a < tries; a++) {
+    await paced();
+    res = await fetch(url, init);
+    if (res.status !== 429) return res;
+    const ra = Number(res.headers.get("retry-after"));
+    const wait = Number.isFinite(ra) && ra > 0 ? ra * 1000 : 1500 * (a + 1);
+    await res.text().catch(() => "");
+    await new Promise((r) => setTimeout(r, Math.min(wait, 8000)));
+  }
+  return res;
 }
 
 const cors = {
@@ -130,15 +157,15 @@ function durToMinutes(s: unknown): number | null {
 }
 
 // Trip-summary totals per device over a date window. One POST covers every
-// IMEI; returns the raw data rows (one per device) or [] on any failure, so a
-// bad trip-summary call can never sink the odometer/work-hour sync.
+// IMEI. Returns the data rows (one per device) plus Netstar's raw reply for
+// diagnostics; never throws, so a bad call can't sink the rest of the sync.
 async function fetchTripSummaries(
   imeis: string[],
   from: string,
   to: string,
-): Promise<Record<string, unknown>[]> {
+): Promise<{ rows: Record<string, unknown>[]; raw: string }> {
   try {
-    const res = await fetch(`${NETSTAR_BASE}/external/reports/trip-summary`, {
+    const res = await nsFetch(`${NETSTAR_BASE}/external/reports/trip-summary`, {
       method: "POST",
       headers: netstarHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({
@@ -149,30 +176,14 @@ async function fetchTripSummaries(
         user_api_config_id: 0,
       }),
     });
-    if (!res.ok) return [];
-    const payload = await res.json();
-    return Array.isArray(payload?.data) ? payload.data : [];
-  } catch (_e) {
-    return [];
-  }
-}
-
-// Engine work hours + distance for one device over a date window.
-// Never throws — a slow or failed call returns null so one bad device
-// can't sink the whole batch.
-async function fetchWorkHours(imei: string, from: string, to: string) {
-  try {
-    const url = `${NETSTAR_BASE}/external/reports/workhour-report?imei=${
-      encodeURIComponent(imei)
-    }&start_date_time=${encodeURIComponent(from)}&end_date_time=${encodeURIComponent(to)}`;
-    const res = await fetch(url, { headers: netstarHeaders() });
-    if (!res.ok) return null;
-    const payload = await res.json();
-    const d = Array.isArray(payload?.data) ? payload.data[0] : null;
-    if (!d) return null;
-    return { hours: parseWorkHour(d.work_hour), distance: num(d.distance) };
-  } catch (_e) {
-    return null;
+    const text = await res.text();
+    const raw = `${res.status} ${text.slice(0, 200)}`;
+    if (!res.ok) return { rows: [], raw };
+    let payload: { data?: Record<string, unknown>[] } = {};
+    try { payload = JSON.parse(text); } catch (_e) { /* not json */ }
+    return { rows: Array.isArray(payload?.data) ? payload.data : [], raw };
+  } catch (e) {
+    return { rows: [], raw: `error ${String((e as Error)?.message ?? e)}` };
   }
 }
 
@@ -201,7 +212,7 @@ async function fetchWorkHoursDay(imei: string, from: string, to: string) {
     const url = `${NETSTAR_BASE}/external/reports/workhour-report?imei=${
       encodeURIComponent(imei)
     }&start_date_time=${encodeURIComponent(from)}&end_date_time=${encodeURIComponent(to)}`;
-    const res = await fetch(url, { headers: netstarHeaders() });
+    const res = await nsFetch(url, { headers: netstarHeaders() });
     const text = await res.text();
     const raw = `${res.status} ${text.slice(0, 240)}`;
     if (!res.ok) return { raw, hours: null as number | null, distance: null as number | null };
@@ -215,9 +226,9 @@ async function fetchWorkHoursDay(imei: string, from: string, to: string) {
   }
 }
 
-// Diagnostic: when the reports come back empty, try the plausible request
-// shapes against ONE tracker and record Netstar's reply to each, so we can see
-// which shape it actually accepts. Only ever runs when nothing saved.
+// Diagnostic: when the reports come back empty (and not just rate-limited),
+// try the plausible request shapes against ONE tracker and record Netstar's
+// reply to each, so we can see which shape it actually accepts.
 async function probeReports(imei: string, from: string, to: string) {
   const q = (o: Record<string, string>) =>
     Object.entries(o).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&");
@@ -238,7 +249,7 @@ async function probeReports(imei: string, from: string, to: string) {
   const out: Record<string, string> = {};
   for (const [name, method, path, body] of tests) {
     try {
-      const res = await fetch(`${NETSTAR_BASE}${path}`, {
+      const res = await nsFetch(`${NETSTAR_BASE}${path}`, {
         method,
         headers: netstarHeaders(body ? { "Content-Type": "application/json" } : {}),
         body: body ? JSON.stringify(body) : undefined,
@@ -328,88 +339,10 @@ async function syncOdometers() {
   const { data, error } = await db.rpc("sync_odometers_from_telematics", { readings });
   if (error) throw error;
 
-  // Also refresh each vehicle's engine work hours over the last 30 days, so
-  // utilisation can be measured in hours (right for stationary vac-truck work).
-  let workHoursRecorded = 0;
-  const workHoursDebug: Record<string, unknown> = {};
-  try {
-    const WINDOW_DAYS = 30;
-    const now = Date.now();
-    const from = netstarDate(now - WINDOW_DAYS * 86400000);
-    const to = netstarDate(now);
-    workHoursDebug.window = [from, to];
-    const wh = await mapLimit(devices, 3, (v) => fetchWorkHours(v.imei, from, to));
-    workHoursDebug.fetched = wh.filter((w) => w && w.hours != null).length;
-    const workRows: Array<{ rego: string; hours: number; distance: number | null; days: number }> = [];
-    devices.forEach((v, i) => {
-      const w = wh[i];
-      if (w && w.hours != null && w.hours > 0) {
-        workRows.push({
-          rego: v.rego,
-          hours: Math.round(w.hours * 100) / 100,
-          distance: w.distance != null ? Math.round(w.distance) : null,
-          days: WINDOW_DAYS,
-        });
-      }
-    });
-    workHoursDebug.rows = workRows.length;
-    if (workRows.length) {
-      const { data: whData, error: whErr } = await db.rpc("record_work_hours", { rows: workRows });
-      if (whErr) workHoursDebug.rpcError = whErr.message;
-      else workHoursRecorded = Number(whData) || workRows.length;
-    }
-  } catch (e) {
-    workHoursDebug.error = String((e as Error)?.message ?? e);
-  }
-
-  // Daily engine hours for the last 30 days (feeds the vehicle "Engine hours"
-  // chart). One workhour-report call per device per day, run a few at a time
-  // with a time budget so a slow run can't hit the function limit.
-  let dailyRecorded = 0;
-  const dailyDebug: Record<string, unknown> = {};
-  try {
-    const days = sydneyDays(30);
-    const tasks: Array<{ rego: string; imei: string; day: { key: string; from: string; to: string } }> = [];
-    for (const v of devices) for (const day of days) tasks.push({ rego: v.rego, imei: v.imei, day });
-    dailyDebug.calls = tasks.length;
-    const deadline = Date.now() + 100000; // stop starting new calls after ~100s
-    let skipped = 0;
-    let firstRaw = "";
-    const dayRows: Array<{ rego: string; day: string; hours: number; distance: number | null }> = [];
-    await mapLimit(tasks, 8, async (t) => {
-      if (Date.now() > deadline) { skipped++; return; }
-      const r = await fetchWorkHoursDay(t.imei, t.day.from, t.day.to);
-      if (!firstRaw) firstRaw = r.raw;
-      if (r.hours != null) {
-        dayRows.push({
-          rego: t.rego,
-          day: t.day.key,
-          hours: Math.round(r.hours * 100) / 100,
-          distance: r.distance != null ? Math.round(r.distance) : null,
-        });
-      }
-    });
-    dailyDebug.withData = dayRows.length;
-    dailyDebug.skippedForTime = skipped;
-    dailyDebug.firstResponse = firstRaw; // what Netstar actually said, for diagnosing empties
-    if (!dayRows.length && devices.length) {
-      const y = days[1] || days[0]; // yesterday, a full day
-      dailyDebug.probeImei = devices[0].imei;
-      dailyDebug.probe = await probeReports(devices[0].imei, y.from, y.to);
-    }
-    for (let i = 0; i < dayRows.length; i += 400) {
-      const { data: dData, error: dErr } = await db.rpc("record_work_hours_daily", { rows: dayRows.slice(i, i + 400) });
-      if (dErr) { dailyDebug.rpcError = dErr.message; break; }
-      dailyRecorded += Number(dData) || 0;
-    }
-  } catch (e) {
-    dailyDebug.error = String((e as Error)?.message ?? e);
-  }
-
-  // Trip-summary stats over the same window: distance, working days, engine/
-  // idle/stop time, trips, speeds and overspeed events. One POST for the whole
-  // fleet. Matched back to a rego by imei, falling back to the returned
-  // vehicle_info, then applied by record_trip_stats (handles the Netstar alias).
+  // ---- Trip-summary stats (ONE call for the whole fleet, so it goes first
+  // while Netstar's rate allowance is fullest) ----------------------------
+  // distance, working days, engine/idle/stop time, trips, speeds, overspeed.
+  // Matched back to a rego by imei, then applied by record_trip_stats.
   let tripStatsRecorded = 0;
   const tripStatsDebug: Record<string, unknown> = {};
   try {
@@ -419,8 +352,9 @@ async function syncOdometers() {
     const to = netstarDate(now);
     tripStatsDebug.window = [from, to];
     const imeis = devices.map((v) => v.imei).filter(Boolean);
-    const summaries = await fetchTripSummaries(imeis, from, to);
+    const { rows: summaries, raw } = await fetchTripSummaries(imeis, from, to);
     tripStatsDebug.returned = summaries.length;
+    tripStatsDebug.firstResponse = raw;
     const byImei = new Map(devices.map((v) => [String(v.imei), v]));
     const tripRows: Array<Record<string, unknown>> = [];
     for (const d of summaries) {
@@ -449,6 +383,83 @@ async function syncOdometers() {
     }
   } catch (e) {
     tripStatsDebug.error = String((e as Error)?.message ?? e);
+  }
+
+  // ---- Daily engine hours, last 30 days (feeds the vehicle "Engine hours"
+  // chart AND the 30-day total). One workhour-report call per device per day,
+  // newest days first so a partial run still fills the most recent week. Calls
+  // are paced and retried on 429 (see nsFetch) and stop at a time budget.
+  let dailyRecorded = 0;
+  let workHoursRecorded = 0;
+  const dailyDebug: Record<string, unknown> = {};
+  const workHoursDebug: Record<string, unknown> = {};
+  try {
+    const days = sydneyDays(30);
+    const tasks: Array<{ rego: string; imei: string; day: { key: string; from: string; to: string } }> = [];
+    for (const day of days) for (const v of devices) tasks.push({ rego: v.rego, imei: v.imei, day });
+    dailyDebug.calls = tasks.length;
+    const deadline = Date.now() + 90000; // stop starting new calls after ~90s
+    let started = 0, skipped = 0, rateLimited = 0;
+    let firstRaw = "", firstError = "";
+    const dayRows: Array<{ rego: string; day: string; hours: number; distance: number | null }> = [];
+    await mapLimit(tasks, 2, async (t) => {
+      if (Date.now() > deadline) { skipped++; return; }
+      started++;
+      const r = await fetchWorkHoursDay(t.imei, t.day.from, t.day.to);
+      if (!firstRaw) firstRaw = r.raw;
+      if (r.raw.startsWith("429")) rateLimited++;
+      else if (!firstError && !r.raw.startsWith("200")) firstError = r.raw;
+      if (r.hours != null) {
+        dayRows.push({
+          rego: t.rego,
+          day: t.day.key,
+          hours: Math.round(r.hours * 100) / 100,
+          distance: r.distance != null ? Math.round(r.distance) : null,
+        });
+      }
+    });
+    dailyDebug.withData = dayRows.length;
+    dailyDebug.skippedForTime = skipped;
+    dailyDebug.rateLimited = rateLimited;
+    dailyDebug.firstResponse = firstRaw;
+    dailyDebug.firstError = firstError; // first non-200, non-429 reply (e.g. the 400)
+    // Nothing came back and it wasn't mainly throttling: test request shapes.
+    if (!dayRows.length && devices.length && rateLimited < started / 2) {
+      const y = days[1] || days[0]; // yesterday, a full day
+      dailyDebug.probeImei = devices[0].imei;
+      dailyDebug.probe = await probeReports(devices[0].imei, y.from, y.to);
+    }
+    for (let i = 0; i < dayRows.length; i += 400) {
+      const { data: dData, error: dErr } = await db.rpc("record_work_hours_daily", { rows: dayRows.slice(i, i + 400) });
+      if (dErr) { dailyDebug.rpcError = dErr.message; break; }
+      dailyRecorded += Number(dData) || 0;
+    }
+
+    // 30-day total per vehicle = sum of the daily rows we got. windowDays is
+    // how many days we actually got through, so the per-week rate stays honest.
+    const daysDone = devices.length ? Math.max(1, Math.floor(started / devices.length)) : 1;
+    const sums = new Map<string, { hours: number; distance: number }>();
+    for (const r of dayRows) {
+      const s = sums.get(r.rego) ?? { hours: 0, distance: 0 };
+      s.hours += r.hours;
+      s.distance += r.distance ?? 0;
+      sums.set(r.rego, s);
+    }
+    const workRows = [...sums].filter(([, s]) => s.hours > 0).map(([rego, s]) => ({
+      rego,
+      hours: Math.round(s.hours * 100) / 100,
+      distance: Math.round(s.distance),
+      days: daysDone,
+    }));
+    workHoursDebug.rows = workRows.length;
+    workHoursDebug.daysCovered = daysDone;
+    if (workRows.length) {
+      const { data: whData, error: whErr } = await db.rpc("record_work_hours", { rows: workRows });
+      if (whErr) workHoursDebug.rpcError = whErr.message;
+      else workHoursRecorded = Number(whData) || workRows.length;
+    }
+  } catch (e) {
+    dailyDebug.error = String((e as Error)?.message ?? e);
   }
 
   return json({
