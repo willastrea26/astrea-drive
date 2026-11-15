@@ -702,13 +702,14 @@ AD.views.vehicle = (function () {
         ${tile('Busiest day', peak.day ? cfg.fmt(peak.v) : '—', peak.day ? fmtDay(peak.day) : 'no activity')}
         ${tile('30-day total', cfg.fmt(total), `${worked} of 30 days active`)}`;
 
-      // Spline line + area chart (matches the cost sheet's style).
-      const W = 760, H = 190, padL = 44, padR = 14, padT = 14, padB = 26;
+      // Smooth, glowing line + gradient area fill.
+      const W = 760, H = 220, padL = 46, padR = 16, padT = 18, padB = 34;
       const plotW = W - padL - padR, plotH = H - padT - padB, n = days.length;
       const top = (() => { const m = Math.max(...active, cfg.min); const step = cfg.step; return Math.max(step, Math.ceil(m / step) * step); })();
       const x = (i) => padL + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2);
       const y = (val) => padT + plotH - (Math.min(val, top) / top) * plotH;
-      // Points we actually have (gaps are skipped so the line doesn't dive to 0).
+      // Only the days we have data for; the spline runs through them in order so
+      // the line is one connected curve (it bridges gaps rather than breaking).
       const pts = days.map((d, i) => ({ i, x: x(i), v: cfg.get(d), day: d.day, d })).filter((p) => p.v != null).map((p) => ({ ...p, y: y(p.v) }));
       const clampY = (val) => Math.max(padT, Math.min(padT + plotH, val));
       const spline = (ps) => ps.length < 2 ? (ps.length ? `M${ps[0].x.toFixed(1)},${ps[0].y.toFixed(1)}` : '') : ps.reduce((dd, p1, i) => {
@@ -724,20 +725,40 @@ AD.views.vehicle = (function () {
       const gridY = [0, 0.5, 1].map((f) => padT + plotH * (1 - f));
       const grid = gridY.map((gy) => `<line x1="${padL}" y1="${gy.toFixed(1)}" x2="${W - padR}" y2="${gy.toFixed(1)}" class="act-grid"></line>`).join('');
       // gridY is [bottom, middle, top], so the tick values must run 0 → top.
-      const yTicks = [0, top / 2, top].map((val, i) => `<text class="act-axis" x="${padL - 7}" y="${(gridY[i] + 4).toFixed(1)}" text-anchor="end">${cfg.axis(val)}</text>`).join('');
-      const dots = pts.map((p) => {
-        const recent = p.i >= n - 7;
-        const tipRows = [['Engine hours', p.d.hours != null ? r1(p.d.hours) + ' hr' : '—'], ['Distance', p.d.km != null ? r0(p.d.km) + ' km' : '—']];
-        return `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${recent ? 4.5 : 3.5}" class="act-dot${recent ? ' recent' : ''}" tabindex="0" ${AD.viz.tipAttr(fmtDay(p.day), tipRows)}></circle>`;
+      const yTicks = [0, top / 2, top].map((val, i) => `<text class="act-axis" x="${padL - 8}" y="${(gridY[i] + 4).toFixed(1)}" text-anchor="end">${cfg.axis(val)}</text>`).join('');
+      // Dated x-axis: ~6 evenly spaced labels across the 30 days.
+      const fmtTick = (k) => new Date(k + 'T12:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
+      const stepN = Math.max(1, Math.round((n - 1) / 5));
+      const tickIdx = []; for (let i = 0; i < n; i += stepN) tickIdx.push(i);
+      if (tickIdx[tickIdx.length - 1] !== n - 1) tickIdx.push(n - 1);
+      const xTicks = tickIdx.map((i) => {
+        const anchor = i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle';
+        const px = i === 0 ? padL : i === n - 1 ? W - padR : x(i);
+        return `<text class="act-axis" x="${px.toFixed(1)}" y="${H - 12}" text-anchor="${anchor}">${esc(fmtTick(days[i].day))}</text>`;
       }).join('');
+      const vgrid = tickIdx.map((i) => `<line x1="${x(i).toFixed(1)}" y1="${padT}" x2="${x(i).toFixed(1)}" y2="${(padT + plotH).toFixed(1)}" class="act-grid act-grid-v"></line>`).join('');
+      // Consistent filled dots at every data point — no "hollow = no data"
+      // confusion. Missing days simply have no dot; the line bridges them.
+      const dots = pts.map((p) => {
+        const tipRows = [['Engine hours', p.d.hours != null ? r1(p.d.hours) + ' hr' : '—'], ['Distance', p.d.km != null ? r0(p.d.km) + ' km' : '—']];
+        return `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3.4" class="act-dot" style="fill:${cfg.color}" tabindex="0" ${AD.viz.tipAttr(fmtDay(p.day), tipRows)}></circle>`;
+      }).join('');
+      const last = pts[pts.length - 1];
       const chart = `<svg class="act-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${cfg.label} per day over the last 30 days">
-        ${grid}${yTicks}
-        ${areaD ? `<path d="${areaD}" class="act-area" style="fill:url(#actgrad-${cfg.key})"></path>` : ''}
-        <defs><linearGradient id="actgrad-${cfg.key}" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="${cfg.color}" stop-opacity="0.34"></stop>
-          <stop offset="100%" stop-color="${cfg.color}" stop-opacity="0.02"></stop>
-        </linearGradient></defs>
-        ${lineD ? `<path d="${lineD}" class="act-line" style="stroke:${cfg.color}"></path>` : ''}
+        <defs>
+          <linearGradient id="actgrad-${cfg.key}" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="${cfg.color}" stop-opacity="0.42"></stop>
+            <stop offset="55%" stop-color="${cfg.color}" stop-opacity="0.12"></stop>
+            <stop offset="100%" stop-color="${cfg.color}" stop-opacity="0"></stop>
+          </linearGradient>
+          <filter id="actglow-${cfg.key}" x="-20%" y="-40%" width="140%" height="180%">
+            <feDropShadow dx="0" dy="0" stdDeviation="4" flood-color="${cfg.color}" flood-opacity="0.55"></feDropShadow>
+          </filter>
+        </defs>
+        ${grid}${vgrid}${yTicks}${xTicks}
+        ${areaD ? `<path d="${areaD}" style="fill:url(#actgrad-${cfg.key})"></path>` : ''}
+        ${lineD ? `<path d="${lineD}" class="act-line" style="stroke:${cfg.color};filter:url(#actglow-${cfg.key})"></path>` : ''}
+        ${last ? `<circle cx="${last.x.toFixed(1)}" cy="${last.y.toFixed(1)}" r="5" class="act-dot-last" style="fill:${cfg.color}"></circle>` : ''}
         ${dots}
       </svg>`;
       return { tiles, chart };
@@ -761,7 +782,7 @@ AD.views.vehicle = (function () {
       <div class="act-tiles act-when-k">${km.tiles}</div>
       <div class="act-chartwrap act-when-h">${hours.chart}</div>
       <div class="act-chartwrap act-when-k">${km.chart}</div>
-      <div class="act-x"><span>${esc(first)}</span><span class="act-key"><i class="act-keydot recent"></i>Last 7 days <i class="act-keydot"></i>Earlier · gaps = no GPS data</span><span>${esc(lastDay)}</span></div>
+      <p class="act-note">Each dot is a day the tracker reported. Days with no GPS data are skipped and the line joins across them.</p>
       ${AD.viz.table(['Date', 'Engine hours', 'Distance'], tableRows)}
     </section>`;
   }
