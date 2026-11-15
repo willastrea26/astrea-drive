@@ -744,16 +744,16 @@ AD.views.vehicle = (function () {
       <div class="trk-map-wrap trip-mapwrap" id="tp-wrap">
         <div class="trk-map" id="tp-map" aria-label="Map of where ${esc(v.id)} has been"></div>
         <div class="replay-legend">Slow<i class="replay-ramp"></i>Fast</div>
+        <div class="trip-source" id="tp-source" hidden></div>
         <div class="trip-play" id="tp-bar" hidden>
-          <button class="btn btn-sm btn-primary" id="tp-play">${I.play} Play</button>
+          <button class="btn btn-sm btn-primary trip-playbtn" id="tp-play">${I.play} Play</button>
           <input type="range" id="tp-scrub" min="0" max="1000" value="0" aria-label="Scrub through the day">
           <span class="replay-read" id="tp-read"></span>
-          <select id="tp-speed" class="replay-speed" aria-label="Playback speed">
-            <option value="10">10 min/s</option>
-            <option value="30" selected>30 min/s</option>
-            <option value="60">1 hr/s</option>
-            <option value="120">2 hr/s</option>
-          </select>
+          <div class="trip-dur" role="group" aria-label="Replay length">
+            <button type="button" data-dur="15">15s</button>
+            <button type="button" data-dur="30" class="on">30s</button>
+            <button type="button" data-dur="60">60s</button>
+          </div>
         </div>
       </div>
     </div>`;
@@ -774,7 +774,13 @@ AD.views.vehicle = (function () {
     const playBtn = el.querySelector('#tp-play');
     const scrub = el.querySelector('#tp-scrub');
     const read = el.querySelector('#tp-read');
-    const speedSel = el.querySelector('#tp-speed');
+    const sourceEl = el.querySelector('#tp-source');
+    const durWrap = el.querySelector('.trip-dur');
+    let durSec = 30; // whole route replays in this many seconds (max 60)
+    if (durWrap) durWrap.querySelectorAll('[data-dur]').forEach((b) => (b.onclick = () => {
+      durSec = Number(b.dataset.dur) || 30;
+      durWrap.querySelectorAll('[data-dur]').forEach((o) => o.classList.toggle('on', o === b));
+    }));
     if (!wrap || !LF) { if (daysEl) daysEl.innerHTML = '<span class="t2">Map library unavailable — check your connection.</span>'; return; }
 
     const dark = mapStyle() === 'dark';
@@ -810,12 +816,64 @@ AD.views.vehicle = (function () {
     const clearLayers = () => { layers.forEach((l) => map.removeLayer(l)); layers = []; if (marker) { map.removeLayer(marker); marker = null; } };
     const stopPlay = () => { playing = false; if (tripRaf) { cancelAnimationFrame(tripRaf); tripRaf = null; } playBtn.innerHTML = `${I.play} Play`; };
 
+    const km2 = (a, b) => {
+      const R = 6371, rad = (x) => x * Math.PI / 180;
+      const dLa = rad(b.lat - a.lat), dLo = rad(b.lng - a.lng);
+      const s = Math.sin(dLa / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLo / 2) ** 2;
+      return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
+    };
+    // Netstar doesn't always send a speed per point; work it out from the
+    // distance and time between neighbours so the line is always coloured.
+    function fillSpeeds(pts) {
+      for (let i = 0; i < pts.length; i++) {
+        const s = Number(pts[i].speed);
+        if (Number.isFinite(s) && s > 0) { pts[i].speed = s; continue; }
+        const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)];
+        const hrs = Math.abs(b.ms - a.ms) / 3600000;
+        pts[i].speed = hrs > 0 ? Math.min(130, km2(a, b) / hrs) : 0;
+      }
+      return pts;
+    }
+    // Sparse routes (e.g. two points per trip) animate in jerky hops; add
+    // in-between points so the vehicle glides and the colour reads smoothly.
+    function densify(pts, target = 220) {
+      if (pts.length < 2 || pts.length >= target) return pts;
+      const spans = pts.length - 1, per = Math.max(1, Math.ceil(target / spans));
+      const out = [];
+      for (let i = 0; i < spans; i++) {
+        const a = pts[i], b = pts[i + 1];
+        for (let k = 0; k < per; k++) {
+          const f = k / per;
+          out.push({ lat: a.lat + (b.lat - a.lat) * f, lng: a.lng + (b.lng - a.lng) * f, ms: a.ms + (b.ms - a.ms) * f, speed: a.speed != null ? a.speed : b.speed });
+        }
+      }
+      out.push(pts[pts.length - 1]);
+      return out;
+    }
     function normalise(pts) {
       pts = (pts || []).filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
       if (pts.length < 2) return pts;
       if (!pts.every((p) => Number.isFinite(p.ms))) pts.forEach((p, i) => (p.ms = i * 60000));
       pts.sort((a, b) => a.ms - b.ms);
       return pts;
+    }
+    /** Thick, speed-coloured route: a dark casing with coloured runs on top. */
+    function drawRoute(points) {
+      layers.push(LF.polyline(points.map((p) => [p.lat, p.lng]), {
+        color: dark ? '#071a2b' : '#1d3550', weight: 12, opacity: 0.55, lineJoin: 'round', lineCap: 'round'
+      }).addTo(map));
+      const bucket = (s) => Math.min(7, Math.floor((Number(s) || 0) / 15));
+      let runStart = 0;
+      for (let i = 1; i < points.length; i++) {
+        const last = i === points.length - 1;
+        if (last || bucket(points[i + 1].speed) !== bucket(points[i].speed)) {
+          const seg = points.slice(runStart, i + 1).map((p) => [p.lat, p.lng]);
+          if (seg.length > 1) {
+            layers.push(LF.polyline(seg, { color: speedColor(points[i].speed), weight: 7, opacity: 0.98, lineJoin: 'round', lineCap: 'round' }).addTo(map));
+          }
+          runStart = i;
+        }
+      }
     }
     // Fallback when there are no GPS breadcrumbs: the trips' own start/end points.
     function tripPoints(day) {
@@ -838,15 +896,6 @@ AD.views.vehicle = (function () {
       const out = { points: pts, approx };
       pathCache[date] = out;
       return out;
-    }
-    function drawLine(points, dim) {
-      for (let i = 0; i < points.length - 1; i++) {
-        const a = points[i], b = points[i + 1];
-        layers.push(LF.polyline([[a.lat, a.lng], [b.lat, b.lng]], {
-          color: dim ? (dark ? '#7f9bb3' : '#51708c') : speedColor(b.speed != null ? b.speed : a.speed),
-          weight: dim ? 3 : 5, opacity: dim ? 0.55 : 0.95
-        }).addTo(map));
-      }
     }
     const fitTo = (pts) => { if (pts.length) map.fitBounds(LF.latLngBounds(pts.map((p) => [p.lat, p.lng])), { padding: [30, 30] }); };
 
@@ -872,48 +921,59 @@ AD.views.vehicle = (function () {
 
     // --- views ------------------------------------------------------------
     function showAll() {
-      stopPlay(); sel = null; bar.hidden = true; clearLayers(); markChips();
+      stopPlay(); sel = null; bar.hidden = true; sourceEl.hidden = true; clearLayers(); markChips();
       statsEl.innerHTML = statStrip(statsFor(days));
       const all = [];
       days.forEach((d) => {
-        const pts = (pathCache[d.date] && pathCache[d.date].points) || tripPoints(d);
-        if (pts.length > 1) { drawLine(pts, true); all.push(...pts); }
+        const pts = (pathCache[d.date] && pathCache[d.date].points) || fillSpeeds(tripPoints(d));
+        if (pts.length > 1) { drawRoute(pts); all.push(...pts); }
       });
       if (all.length) fitTo(all);
-      else read.textContent = '';
     }
 
     async function showDay(date) {
       stopPlay(); sel = date; clearLayers(); markChips();
       const day = days.find((d) => d.date === date);
       statsEl.innerHTML = statStrip(statsFor([day]));
-      bar.hidden = false;
+      bar.hidden = false; sourceEl.hidden = true;
       playBtn.disabled = true; scrub.disabled = true;
       read.textContent = 'Loading route…';
+
       const { points, approx } = await pathFor(date, day);
       if (sel !== date || tripMap !== map) return; // switched away while loading
       clearLayers();
-      if (points.length < 2) { read.textContent = 'No route recorded for this day.'; return; }
-      layers.push(LF.polyline(points.map((p) => [p.lat, p.lng]), { color: dark ? '#7f9bb3' : '#51708c', weight: 3, opacity: 0.35 }).addTo(map));
-      fitTo(points);
-      setupReplay(points, approx);
+      if (points.length < 2) {
+        read.textContent = 'No route recorded for this day.';
+        playBtn.disabled = true; scrub.disabled = true;
+        return;
+      }
+      // The whole route, thick and speed-coloured, straight away — the operator
+      // should see where it went without having to press anything.
+      const route = fillSpeeds(densify(points));
+      drawRoute(route);
+      fitTo(route);
+      sourceEl.hidden = false;
+      sourceEl.className = `trip-source${approx ? ' is-approx' : ''}`;
+      sourceEl.textContent = approx ? 'Straight-line estimate — no GPS breadcrumbs for this day' : 'GPS route';
+      setupReplay(route, approx);
     }
 
     function setupReplay(points, approx) {
       const t0 = points[0].ms, t1 = points[points.length - 1].ms;
-      const realTime = t1 - t0 > 120000; // index-based fallback has fake ms
-      let simMs = t0, lastSeg = -1, lastReal = null, trail = [];
+      const span = t1 - t0;
+      const realTime = span > 120000; // the index-based fallback has synthetic times
+      let simMs = t0, lastReal = null;
 
       marker = LF.marker([points[0].lat, points[0].lng], {
-        interactive: false,
+        interactive: false, zIndexOffset: 1000,
         icon: LF.divIcon({
           className: 'trip-veh',
-          html: `<div class="trip-veh-in">${AD.art.forVehicle(v, 64, `${v.id}`) || AD.art.car(64, v.id)}</div>`,
-          iconSize: [64, 48], iconAnchor: [32, 38]
+          html: `<div class="trip-veh-in">${AD.art.forVehicle(v, 72, `${v.id}`) || AD.art.car(72, v.id)}</div>`,
+          iconSize: [72, 54], iconAnchor: [36, 42]
         })
       }).addTo(map);
 
-      const clock = (ms) => realTime ? new Date(ms).toISOString().slice(11, 16) : '';
+      const clock = (ms) => realTime ? new Date(ms).toISOString().slice(11, 16) : `${Math.round((ms - t0) / span * 100)}%`;
       function posAt(ms) {
         if (ms <= t0) return points[0];
         if (ms >= t1) return points[points.length - 1];
@@ -926,28 +986,17 @@ AD.views.vehicle = (function () {
         }
         return points[points.length - 1];
       }
-      function growTrail() {
-        while (lastSeg + 1 <= points.length - 2 && points[lastSeg + 2].ms <= simMs) {
-          const a = points[lastSeg + 1], b = points[lastSeg + 2];
-          const line = LF.polyline([[a.lat, a.lng], [b.lat, b.lng]], { color: speedColor(b.speed != null ? b.speed : a.speed), weight: 5, opacity: 0.95 }).addTo(map);
-          trail.push(line); layers.push(line); lastSeg++;
-        }
-      }
-      function rebuild() { trail.forEach((l) => { map.removeLayer(l); layers = layers.filter((x) => x !== l); }); trail = []; lastSeg = -1; growTrail(); }
       function render() {
         const p = posAt(simMs);
         marker.setLatLng([p.lat, p.lng]);
-        growTrail();
-        const bits = [clock(simMs), `${Math.round(p.speed || 0)} km/h`];
-        if (approx) bits.push('approx route');
-        read.textContent = bits.filter(Boolean).join(' · ');
-        scrub.value = String(Math.round((simMs - t0) / (t1 - t0) * 1000));
+        read.textContent = `${clock(simMs)} · ${Math.round(p.speed || 0)} km/h`;
+        scrub.value = String(Math.round((simMs - t0) / span * 1000));
       }
       function frame(ts) {
         if (!playing) return;
         if (lastReal == null) lastReal = ts;
         const dt = ts - lastReal; lastReal = ts;
-        simMs += dt * (Number(speedSel.value) * 60); // value = simulated minutes per real second
+        simMs += dt * (span / (durSec * 1000)); // whole route in durSec seconds
         if (simMs >= t1) { simMs = t1; render(); stopPlay(); return; }
         render();
         tripRaf = requestAnimationFrame(frame);
@@ -956,11 +1005,11 @@ AD.views.vehicle = (function () {
       playBtn.disabled = false; scrub.disabled = false;
       playBtn.onclick = () => {
         if (playing) { stopPlay(); return; }
-        if (simMs >= t1) { simMs = t0; rebuild(); }
+        if (simMs >= t1) simMs = t0;
         playing = true; lastReal = null; playBtn.innerHTML = `${I.pause} Pause`;
         tripRaf = requestAnimationFrame(frame);
       };
-      scrub.oninput = () => { stopPlay(); simMs = t0 + (Number(scrub.value) / 1000) * (t1 - t0); rebuild(); render(); };
+      scrub.oninput = () => { stopPlay(); simMs = t0 + (Number(scrub.value) / 1000) * span; render(); };
       render();
     }
 

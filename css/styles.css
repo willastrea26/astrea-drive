@@ -2820,6 +2820,14 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 .trip-play { position: absolute; left: 12px; right: 12px; bottom: 12px; z-index: 600; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 9px 12px; border-radius: 12px; background: rgba(11,27,46,.86); border: 1px solid rgba(255,255,255,.14); }
 .trip-play #tp-scrub { flex: 1; min-width: 140px; accent-color: var(--mint, #5fe0b4); }
 .replay-read { font-variant-numeric: tabular-nums; font-size: .88rem; color: #eef5fb; min-width: 150px; }
-.replay-speed { background: rgba(255,255,255,.08); color: #eef5fb; border: 1px solid rgba(255,255,255,.18); border-radius: 8px; padding: 5px 8px; font: inherit; font-size: .84rem; }
 .replay-legend { position: absolute; right: 12px; top: 12px; z-index: 600; display: flex; align-items: center; gap: 6px; font-size: 12px; color: #eef5fb; background: rgba(11,27,46,.78); padding: 5px 10px; border-radius: 999px; }
 .replay-ramp { display: inline-block; width: 60px; height: 8px; border-radius: 4px; background: linear-gradient(90deg, rgb(70,232,171), rgb(245,177,76), rgb(240,103,95)); }
+
+/* Trips replay controls */
+.trip-playbtn { min-width: 104px; justify-content: center; }
+.trip-dur { display: inline-flex; gap: 2px; padding: 2px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.18); border-radius: 9px; }
+.trip-dur button { background: none; border: 0; color: #cfe0ee; font: inherit; font-size: .82rem; padding: 5px 11px; border-radius: 7px; cursor: pointer; }
+.trip-dur button:hover { color: #fff; }
+.trip-dur button.on { background: var(--mint, #5fe0b4); color: #07202f; font-weight: 600; }
+.trip-source { position: absolute; left: 58px; top: 12px; z-index: 600; font-size: 12px; font-weight: 600; color: #07202f; background: var(--mint, #5fe0b4); padding: 5px 11px; border-radius: 999px; }
+.trip-source.is-approx { background: #f5b14c; }
