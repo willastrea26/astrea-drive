@@ -360,6 +360,12 @@ AD.views.vehicle = (function () {
   }
 
   function bindOverview(el, v) {
+    // Activity panel: switch the chart + insight tiles between hours and km.
+    const panel = el.querySelector('.act-panel');
+    if (panel) panel.querySelectorAll('[data-act-chart]').forEach((b) => (b.onclick = () => {
+      panel.dataset.unit = b.dataset.actChart;
+      panel.querySelectorAll('[data-act-chart]').forEach((o) => o.classList.toggle('on', o === b));
+    }));
     el.querySelector('#odo-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const f = e.target, val = Number(f.odo.value);
@@ -651,42 +657,112 @@ AD.views.vehicle = (function () {
   }
 
   /**
-   * Engine hours per day for the last 30 days, straight from Netstar. The last
-   * 7 days are drawn in mint, earlier days dimmer; days with no data from the
-   * tracker are shown as a faint dot rather than a misleading zero. Vehicles
-   * with no tracker get no section at all.
+   * Activity over the last 30 days from the GPS tracker — engine hours and
+   * distance, each as a line/area chart with per-day detail on hover, four
+   * insight tiles, and a full table. A toggle switches between the two; days
+   * the tracker reported nothing for are left as gaps, not zeros. Vehicles with
+   * no tracker get no section at all.
    */
   function engineHoursChart(v) {
     const daily = L.workHoursDaily(v, 30);
-    const tracked = v.odometerSource === 'telematics';
+    const tracked = v.odometerSource === 'telematics' || !!v.netstarRego;
     if (!daily && !tracked) return '';
     if (!daily || !daily.withData) {
       return `<section class="section">
-        ${sectionHead({ title: 'Engine hours', meta: 'last 30 days · from GPS', level: 3 })}
-        <div class="empty-tidy">${I.activity}No daily engine-hour data yet. Press “Sync GPS data” on the Fleet register to pull it in.</div>
+        ${sectionHead({ title: 'Activity', meta: 'last 30 days · from GPS', level: 3 })}
+        <div class="empty-tidy">${I.activity}No daily activity data yet. Press “Sync GPS data” on the Fleet register to pull it in.</div>
       </section>`;
     }
-    const max = Math.max(...daily.days.map((d) => d.hours || 0), 1);
-    const niceMax = Math.ceil(max / 2) * 2 || 2;
+
+    const days = daily.days;
     const fmtDay = (k) => new Date(k + 'T12:00:00').toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
-    const fmtH = (h) => (Math.round(h * 10) / 10).toLocaleString('en-AU');
-    const bars = daily.days.map((d, i) => {
-      const recent = i >= daily.days.length - 7;
-      if (d.hours == null) {
-        return `<div class="eh-col" title="${esc(fmtDay(d.day))} — no data"><span class="eh-bar eh-none"></span></div>`;
-      }
-      const pct = Math.max(d.hours / niceMax * 100, d.hours > 0 ? 2 : 0);
-      return `<div class="eh-col" title="${esc(fmtDay(d.day))} — ${fmtH(d.hours)} hrs${d.km != null ? ' · ' + Math.round(d.km).toLocaleString('en-AU') + ' km' : ''}"><span class="eh-bar${recent ? ' eh-recent' : ''}" style="height:${pct.toFixed(1)}%"></span></div>`;
-    }).join('');
-    const first = daily.days[0].day, last = daily.days[daily.days.length - 1].day;
-    return `<section class="section">
-      ${sectionHead({ title: 'Engine hours', meta: `${fmtH(daily.last7)} hrs this week · ${fmtH(daily.total)} hrs in 30 days`, level: 3 })}
-      <div class="eh-chart" role="img" aria-label="Engine hours per day over the last 30 days">
-        <div class="eh-y"><span>${niceMax}h</span><span>${niceMax / 2}h</span><span>0</span></div>
-        <div class="eh-plot">${bars}</div>
+    const r1 = (n) => (Math.round(n * 10) / 10).toLocaleString('en-AU');
+    const r0 = (n) => Math.round(n).toLocaleString('en-AU');
+
+    // One unit's worth of numbers + insight tiles + chart.
+    function build(cfg) {
+      const vals = days.map((d) => cfg.get(d));
+      const active = vals.filter((x) => x != null);
+      const total = active.reduce((s, x) => s + x, 0);
+      const worked = active.filter((x) => x > 0).length;
+      const avg = worked ? total / worked : 0;
+      let peak = { v: -1, day: null };
+      days.forEach((d) => { const x = cfg.get(d); if (x != null && x > peak.v) peak = { v: x, day: d.day }; });
+      const sumRange = (from, to) => days.slice(from, to).reduce((s, d) => s + (cfg.get(d) || 0), 0);
+      const last7 = sumRange(days.length - 7, days.length);
+      const prev7 = sumRange(days.length - 14, days.length - 7);
+      const delta = prev7 > 0 ? (last7 - prev7) / prev7 * 100 : null;
+      const trend = delta == null ? '—' : `${delta >= 0 ? '▲' : '▼'} ${Math.abs(Math.round(delta))}%`;
+      const trendTone = delta == null ? 'muted' : (delta >= 0 ? 'up' : 'down');
+
+      const tile = (label, big, sub) => `<div class="act-tile"><span class="act-tile-l">${label}</span><b>${big}</b><span class="act-tile-s">${sub}</span></div>`;
+      const tiles = `
+        ${tile('This week', `${cfg.fmt(last7)}`, `<span class="act-trend ${trendTone}">${trend}</span> vs last week`)}
+        ${tile('Daily average', cfg.fmt(avg), `on the ${worked} day${worked === 1 ? '' : 's'} it worked`)}
+        ${tile('Busiest day', peak.day ? cfg.fmt(peak.v) : '—', peak.day ? fmtDay(peak.day) : 'no activity')}
+        ${tile('30-day total', cfg.fmt(total), `${worked} of 30 days active`)}`;
+
+      // Spline line + area chart (matches the cost sheet's style).
+      const W = 760, H = 190, padL = 44, padR = 14, padT = 14, padB = 26;
+      const plotW = W - padL - padR, plotH = H - padT - padB, n = days.length;
+      const top = (() => { const m = Math.max(...active, cfg.min); const step = cfg.step; return Math.max(step, Math.ceil(m / step) * step); })();
+      const x = (i) => padL + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2);
+      const y = (val) => padT + plotH - (Math.min(val, top) / top) * plotH;
+      // Points we actually have (gaps are skipped so the line doesn't dive to 0).
+      const pts = days.map((d, i) => ({ i, x: x(i), v: cfg.get(d), day: d.day, d })).filter((p) => p.v != null).map((p) => ({ ...p, y: y(p.v) }));
+      const clampY = (val) => Math.max(padT, Math.min(padT + plotH, val));
+      const spline = (ps) => ps.length < 2 ? (ps.length ? `M${ps[0].x.toFixed(1)},${ps[0].y.toFixed(1)}` : '') : ps.reduce((dd, p1, i) => {
+        if (i === ps.length - 1) return dd;
+        const p0 = ps[i - 1] || p1, p2 = ps[i + 1], p3 = ps[i + 2] || p2;
+        const c1x = p1.x + (p2.x - p0.x) / 6, c1y = clampY(p1.y + (p2.y - p0.y) / 6);
+        const c2x = p2.x - (p3.x - p1.x) / 6, c2y = clampY(p2.y - (p3.y - p1.y) / 6);
+        return `${dd} C${c1x.toFixed(1)},${c1y.toFixed(1)} ${c2x.toFixed(1)},${c2y.toFixed(1)} ${p2.x.toFixed(1)},${p2.y.toFixed(1)}`;
+      }, `M${ps[0].x.toFixed(1)},${ps[0].y.toFixed(1)}`);
+      const floorY = (padT + plotH).toFixed(1);
+      const lineD = spline(pts);
+      const areaD = pts.length >= 2 ? `${lineD} L${pts[pts.length - 1].x.toFixed(1)},${floorY} L${pts[0].x.toFixed(1)},${floorY} Z` : '';
+      const gridY = [0, 0.5, 1].map((f) => padT + plotH * (1 - f));
+      const grid = gridY.map((gy) => `<line x1="${padL}" y1="${gy.toFixed(1)}" x2="${W - padR}" y2="${gy.toFixed(1)}" class="act-grid"></line>`).join('');
+      // gridY is [bottom, middle, top], so the tick values must run 0 → top.
+      const yTicks = [0, top / 2, top].map((val, i) => `<text class="act-axis" x="${padL - 7}" y="${(gridY[i] + 4).toFixed(1)}" text-anchor="end">${cfg.axis(val)}</text>`).join('');
+      const dots = pts.map((p) => {
+        const recent = p.i >= n - 7;
+        const tipRows = [['Engine hours', p.d.hours != null ? r1(p.d.hours) + ' hr' : '—'], ['Distance', p.d.km != null ? r0(p.d.km) + ' km' : '—']];
+        return `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${recent ? 4.5 : 3.5}" class="act-dot${recent ? ' recent' : ''}" tabindex="0" ${AD.viz.tipAttr(fmtDay(p.day), tipRows)}></circle>`;
+      }).join('');
+      const chart = `<svg class="act-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${cfg.label} per day over the last 30 days">
+        ${grid}${yTicks}
+        ${areaD ? `<path d="${areaD}" class="act-area" style="fill:url(#actgrad-${cfg.key})"></path>` : ''}
+        <defs><linearGradient id="actgrad-${cfg.key}" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="${cfg.color}" stop-opacity="0.34"></stop>
+          <stop offset="100%" stop-color="${cfg.color}" stop-opacity="0.02"></stop>
+        </linearGradient></defs>
+        ${lineD ? `<path d="${lineD}" class="act-line" style="stroke:${cfg.color}"></path>` : ''}
+        ${dots}
+      </svg>`;
+      return { tiles, chart };
+    }
+
+    const hours = build({ key: 'h', label: 'Engine hours', get: (d) => d.hours, min: 2, step: 2, fmt: (x) => `${r1(x)} hr`, axis: (x) => `${r1(x)}h` });
+    const km = build({ key: 'k', label: 'Distance', get: (d) => d.km, min: 50, step: 50, fmt: (x) => `${r0(x)} km`, axis: (x) => r0(x) });
+
+    const tableRows = days.map((d) => [fmtDay(d.day), d.hours != null ? r1(d.hours) + ' hr' : '—', d.km != null ? r0(d.km) + ' km' : '—']);
+    const first = fmtDay(days[0].day), lastDay = fmtDay(days[days.length - 1].day);
+
+    return `<section class="section act-panel" data-unit="h" style="--act-h:${'#5fe0b4'};--act-k:${'#5aa2f0'}">
+      <div class="act-head">
+        ${sectionHead({ title: 'Activity', meta: `last 30 days · ${daily.withData} days with data · from GPS`, level: 3 })}
+        <div class="act-toggle" role="group" aria-label="Metric">
+          <button type="button" data-act-chart="h" class="on">${I.gauge} Engine hours</button>
+          <button type="button" data-act-chart="k">${I.truck} Distance</button>
+        </div>
       </div>
-      <div class="eh-x"><span>${esc(fmtDay(first))}</span><span class="eh-key"><i class="eh-dot eh-dot-recent"></i>Last 7 days <i class="eh-dot"></i>Earlier <i class="eh-dot eh-dot-none"></i>No data</span><span>${esc(fmtDay(last))}</span></div>
-      <p class="help">Daily engine time reported by the vehicle’s GPS tracker. ${daily.withData} of 30 days had data.</p>
+      <div class="act-tiles act-when-h">${hours.tiles}</div>
+      <div class="act-tiles act-when-k">${km.tiles}</div>
+      <div class="act-chartwrap act-when-h">${hours.chart}</div>
+      <div class="act-chartwrap act-when-k">${km.chart}</div>
+      <div class="act-x"><span>${esc(first)}</span><span class="act-key"><i class="act-keydot recent"></i>Last 7 days <i class="act-keydot"></i>Earlier · gaps = no GPS data</span><span>${esc(lastDay)}</span></div>
+      ${AD.viz.table(['Date', 'Engine hours', 'Distance'], tableRows)}
     </section>`;
   }
 

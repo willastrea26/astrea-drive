@@ -2782,20 +2782,6 @@ h1, h2, h3 { letter-spacing: -0.02em; }
   .brand-road { display: none; }
 }
 
-/* ---- Vehicle profile: engine hours per day (from GPS) ---- */
-.eh-chart { display: flex; gap: 10px; align-items: stretch; height: 150px; margin-top: 6px; }
-.eh-y { display: flex; flex-direction: column; justify-content: space-between; font-size: 12px; color: var(--muted, #88a3bb); text-align: right; min-width: 28px; padding: 0 0 2px; }
-.eh-plot { flex: 1; display: flex; align-items: flex-end; gap: 3px; border-left: 1px solid var(--line, rgba(255,255,255,.12)); border-bottom: 1px solid var(--line, rgba(255,255,255,.12)); padding: 0 4px; background: repeating-linear-gradient(to top, transparent 0, transparent calc(50% - 1px), rgba(255,255,255,.06) calc(50% - 1px), rgba(255,255,255,.06) 50%); }
-.eh-col { flex: 1; height: 100%; display: flex; align-items: flex-end; justify-content: center; min-width: 0; }
-.eh-bar { display: block; width: 100%; max-width: 18px; border-radius: 4px 4px 0 0; background: rgba(95, 224, 180, .38); transition: filter .15s; }
-.eh-bar.eh-recent { background: var(--mint, #5fe0b4); }
-.eh-bar.eh-none { height: 3px; background: rgba(255,255,255,.14); border-radius: 2px; }
-.eh-col:hover .eh-bar { filter: brightness(1.25); }
-.eh-x { display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 12px; color: var(--muted, #88a3bb); margin: 6px 0 4px 38px; flex-wrap: wrap; }
-.eh-key { display: inline-flex; align-items: center; gap: 6px; }
-.eh-dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; background: rgba(95, 224, 180, .38); margin-left: 8px; }
-.eh-dot-recent { background: var(--mint, #5fe0b4); margin-left: 0; }
-.eh-dot-none { background: rgba(255,255,255,.18); }
 
 /* ---- Vehicle Trips tab (map-first) ---- */
 .trips-tab { margin-top: 4px; display: flex; flex-direction: column; gap: 12px; }
@@ -2832,3 +2818,42 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 .trip-dur button.on { background: var(--mint, #5fe0b4); color: #07202f; font-weight: 600; }
 .trip-source { position: absolute; left: 58px; top: 12px; z-index: 600; font-size: 12px; font-weight: 600; color: #07202f; background: var(--mint, #5fe0b4); padding: 5px 11px; border-radius: 999px; }
 .trip-source.is-approx { background: #f5b14c; }
+
+/* ---- Vehicle profile: Activity (engine hours + distance) ---- */
+.act-panel { --act-c: var(--act-h); }
+.act-panel[data-unit="k"] { --act-c: var(--act-k); }
+.act-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+.act-toggle { display: inline-flex; gap: 2px; padding: 3px; background: var(--paper-2, #102a42); border: 1px solid var(--line, rgba(255,255,255,.12)); border-radius: 10px; }
+.act-toggle button { display: inline-flex; align-items: center; gap: 6px; background: none; border: 0; color: var(--muted, #88a3bb); font: inherit; font-size: .86rem; font-weight: 600; padding: 6px 13px; border-radius: 7px; cursor: pointer; }
+.act-toggle button .ico { width: 16px; height: 16px; }
+.act-toggle button:hover { color: var(--ink, #eef5fb); }
+.act-toggle button.on { background: var(--act-c); color: #07202f; }
+
+.act-tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; margin: 14px 0 0; background: var(--line, rgba(255,255,255,.1)); border: 1px solid var(--line, rgba(255,255,255,.1)); border-radius: 12px; overflow: hidden; }
+.act-tile { background: var(--paper, #16314c); padding: 12px 15px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.act-tile-l { font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted, #88a3bb); }
+.act-tile b { font-size: 1.3rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.act-tile-s { font-size: .78rem; color: var(--muted, #88a3bb); }
+.act-trend { font-weight: 700; }
+.act-trend.up { color: var(--mint-strong, #34cd9b); }
+.act-trend.down { color: #f0675f; }
+.act-trend.muted { color: var(--muted, #88a3bb); }
+@media (max-width: 720px) { .act-tiles { grid-template-columns: repeat(2, 1fr); } }
+
+.act-chartwrap { margin-top: 12px; }
+.act-svg { width: 100%; height: auto; display: block; overflow: visible; }
+.act-grid { stroke: var(--line, rgba(255,255,255,.1)); stroke-width: 1; }
+.act-axis { fill: var(--muted, #88a3bb); font-size: 11px; font-family: inherit; }
+.act-area { stroke: none; }
+.act-line { fill: none; stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
+.act-dot { fill: var(--paper, #16314c); stroke: var(--act-c); stroke-width: 2; cursor: pointer; transition: r .1s; }
+.act-dot.recent { fill: var(--act-c); }
+.act-dot:hover, .act-dot:focus { r: 6; outline: none; }
+.act-x { display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 12px; color: var(--muted, #88a3bb); margin: 8px 2px 0; flex-wrap: wrap; }
+.act-key { display: inline-flex; align-items: center; gap: 6px; }
+.act-keydot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--act-c); margin-left: 8px; }
+.act-keydot.recent { background: var(--act-c); margin-left: 0; }
+
+/* toggle which unit is shown */
+.act-panel[data-unit="h"] .act-when-k, .act-panel[data-unit="k"] .act-when-h { display: none; }
+.act-panel .viz-table { margin-top: 10px; }
