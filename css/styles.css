@@ -2851,6 +2851,17 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 .act-dot-last { stroke: var(--paper, #16314c); stroke-width: 2.5; }
 .act-note { font-size: .78rem; color: var(--muted, #88a3bb); margin: 8px 2px 0; }
 
+/* draw-in animation when the panel opens */
+@keyframes act-draw { from { stroke-dashoffset: 2400; } to { stroke-dashoffset: 0; } }
+@keyframes act-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes act-pop { from { opacity: 0; transform: scale(0); } to { opacity: 1; transform: scale(1); } }
+.act-line { stroke-dasharray: 2400; animation: act-draw 1s cubic-bezier(.4,.1,.2,1) forwards; }
+.act-area { opacity: 0; animation: act-fade .8s .25s ease forwards; }
+.act-dot, .act-dot-last { opacity: 0; transform-box: fill-box; transform-origin: center; animation: act-pop .35s .7s cubic-bezier(.3,1.4,.5,1) forwards; }
+@media (prefers-reduced-motion: reduce) {
+  .act-line, .act-area, .act-dot, .act-dot-last { animation: none; stroke-dasharray: none; opacity: 1; transform: none; }
+}
+
 /* toggle which unit is shown */
 .act-panel[data-unit="h"] .act-when-k, .act-panel[data-unit="k"] .act-when-h { display: none; }
 .act-panel .viz-table { margin-top: 10px; }

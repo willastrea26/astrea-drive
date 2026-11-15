@@ -747,25 +747,29 @@ AD.views.vehicle = (function () {
       const chart = `<svg class="act-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${cfg.label} per day over the last 30 days">
         <defs>
           <linearGradient id="actgrad-${cfg.key}" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stop-color="${cfg.color}" stop-opacity="0.42"></stop>
-            <stop offset="55%" stop-color="${cfg.color}" stop-opacity="0.12"></stop>
+            <stop offset="0%" stop-color="${cfg.color}" stop-opacity="0.45"></stop>
+            <stop offset="55%" stop-color="${cfg.color}" stop-opacity="0.13"></stop>
             <stop offset="100%" stop-color="${cfg.color}" stop-opacity="0"></stop>
           </linearGradient>
-          <filter id="actglow-${cfg.key}" x="-20%" y="-40%" width="140%" height="180%">
-            <feDropShadow dx="0" dy="0" stdDeviation="4" flood-color="${cfg.color}" flood-opacity="0.55"></feDropShadow>
+          <linearGradient id="actline-${cfg.key}" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stop-color="${cfg.grad[0]}"></stop>
+            <stop offset="100%" stop-color="${cfg.grad[1]}"></stop>
+          </linearGradient>
+          <filter id="actglow-${cfg.key}" x="-20%" y="-50%" width="140%" height="200%">
+            <feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="${cfg.color}" flood-opacity="0.65"></feDropShadow>
           </filter>
         </defs>
         ${grid}${vgrid}${yTicks}${xTicks}
-        ${areaD ? `<path d="${areaD}" style="fill:url(#actgrad-${cfg.key})"></path>` : ''}
-        ${lineD ? `<path d="${lineD}" class="act-line" style="stroke:${cfg.color};filter:url(#actglow-${cfg.key})"></path>` : ''}
+        ${areaD ? `<path d="${areaD}" class="act-area" style="fill:url(#actgrad-${cfg.key})"></path>` : ''}
+        ${lineD ? `<path d="${lineD}" class="act-line" style="stroke:url(#actline-${cfg.key});filter:url(#actglow-${cfg.key})"></path>` : ''}
         ${last ? `<circle cx="${last.x.toFixed(1)}" cy="${last.y.toFixed(1)}" r="5" class="act-dot-last" style="fill:${cfg.color}"></circle>` : ''}
         ${dots}
       </svg>`;
       return { tiles, chart };
     }
 
-    const hours = build({ key: 'h', label: 'Engine hours', get: (d) => d.hours, min: 2, step: 2, fmt: (x) => `${r1(x)} hr`, axis: (x) => `${r1(x)}h` });
-    const km = build({ key: 'k', label: 'Distance', get: (d) => d.km, min: 50, step: 50, fmt: (x) => `${r0(x)} km`, axis: (x) => r0(x) });
+    const hours = build({ key: 'h', label: 'Engine hours', get: (d) => d.hours, min: 2, step: 2, color: '#5fe0b4', grad: ['#9ff3d6', '#34cd9b'], fmt: (x) => `${r1(x)} hr`, axis: (x) => `${r1(x)}h` });
+    const km = build({ key: 'k', label: 'Distance', get: (d) => d.km, min: 50, step: 50, color: '#5fe0b4', grad: ['#9ff3d6', '#2fb98c'], fmt: (x) => `${r0(x)} km`, axis: (x) => r0(x) });
 
     const tableRows = days.map((d) => [fmtDay(d.day), d.hours != null ? r1(d.hours) + ' hr' : '—', d.km != null ? r0(d.km) + ' km' : '—']);
     const first = fmtDay(days[0].day), lastDay = fmtDay(days[days.length - 1].day);
