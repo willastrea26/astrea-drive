@@ -886,14 +886,26 @@ AD.views.vehicle = (function () {
     }
     async function pathFor(date, day) {
       if (pathCache[date]) return pathCache[date];
-      let pts = [];
+      let pts = [], raw = null;
       try {
         const r = await AD.sb.functions.invoke('netstar', { body: { action: 'trip-path', rego: v.rego, netstarRego: v.netstarRego, date } });
         pts = normalise(((r.data && r.data.points) || []).slice());
+        raw = (r.data && r.data.raw) || null;
       } catch (e) { /* fall back */ }
       let approx = false;
       if (pts.length < 2) { pts = tripPoints(day); approx = true; }
-      const out = { points: pts, approx };
+      // How coarse is the tracker's reporting? Big gaps are why a route can
+      // cut across country instead of following streets.
+      let gapKm = 0, gapMin = 0;
+      for (let i = 1; i < pts.length; i++) { gapKm += km2(pts[i - 1], pts[i]); gapMin += Math.abs(pts[i].ms - pts[i - 1].ms) / 60000; }
+      const spans = Math.max(1, pts.length - 1);
+      const out = {
+        points: pts, approx, raw,
+        n: pts.length,
+        rows: raw && raw.count != null ? raw.count : null,
+        avgGapKm: gapKm / spans,
+        avgGapMin: gapMin / spans
+      };
       pathCache[date] = out;
       return out;
     }
@@ -939,7 +951,8 @@ AD.views.vehicle = (function () {
       playBtn.disabled = true; scrub.disabled = true;
       read.textContent = 'Loading route…';
 
-      const { points, approx } = await pathFor(date, day);
+      const info = await pathFor(date, day);
+      const { points, approx } = info;
       if (sel !== date || tripMap !== map) return; // switched away while loading
       clearLayers();
       if (points.length < 2) {
@@ -953,8 +966,17 @@ AD.views.vehicle = (function () {
       drawRoute(route);
       fitTo(route);
       sourceEl.hidden = false;
-      sourceEl.className = `trip-source${approx ? ' is-approx' : ''}`;
-      sourceEl.textContent = approx ? 'Straight-line estimate — no GPS breadcrumbs for this day' : 'GPS route';
+      // Coarse breadcrumbs can't follow streets, so say so rather than letting
+      // a straight line across country look like the road it took.
+      const coarse = !approx && info.avgGapKm > 0.35;
+      sourceEl.className = `trip-source${approx || coarse ? ' is-approx' : ''}`;
+      sourceEl.textContent = approx
+        ? 'Straight-line estimate — no GPS breadcrumbs'
+        : `GPS route · ${info.n} points${coarse ? ` · ${info.avgGapKm.toFixed(1)} km apart — too coarse for street detail` : ''}`;
+      sourceEl.title = `parsed points: ${info.n}`
+        + (info.rows != null ? ` · rows from Netstar: ${info.rows}` : '')
+        + ` · average gap: ${info.avgGapKm.toFixed(2)} km / ${info.avgGapMin.toFixed(1)} min`
+        + (info.raw && info.raw.keys ? ` · fields: ${info.raw.keys.join(', ')}` : '');
       setupReplay(route, approx);
     }
 
