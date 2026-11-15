@@ -2824,3 +2824,8 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 .replay-bar #rp-scrub { flex: 1; min-width: 160px; accent-color: var(--mint, #5fe0b4); }
 .replay-read { font-variant-numeric: tabular-nums; font-size: .9rem; color: var(--ink-2, #d2e0ec); min-width: 160px; }
 .replay-speed { background: var(--paper, #16314c); color: var(--ink, #eef5fb); border: 1px solid var(--line-2, rgba(255,255,255,.17)); border-radius: 8px; padding: 6px 8px; }
+
+/* Trip tab diagnostics (shown only when no trips came back) */
+.trip-diag { margin-top: 10px; font-size: .85rem; color: var(--muted, #88a3bb); }
+.trip-diag summary { cursor: pointer; }
+.trip-diag pre { white-space: pre-wrap; word-break: break-word; margin: 8px 0 0; padding: 10px 12px; background: var(--paper-2, #102a42); border: 1px solid var(--line, rgba(255,255,255,.1)); border-radius: 8px; font-size: .8rem; }

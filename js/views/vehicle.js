@@ -727,7 +727,9 @@ AD.views.vehicle = (function () {
   function renderTripDays(list, v, data) {
     const days = (data && data.days) || [];
     if (!days.length) {
-      list.innerHTML = `<div class="empty-tidy">${I.map} No trips recorded in the last 14 days.</div>`;
+      const raw = data && data.raw ? String(data.raw) : '';
+      list.innerHTML = `<div class="empty-tidy">${I.map} No trips recorded in the last 14 days.</div>
+        ${raw ? `<details class="trip-diag"><summary>What the tracker service replied</summary><pre>${esc(raw)}</pre></details>` : ''}`;
       return;
     }
     list.innerHTML = days.map((d, i) => dayCard(d, i)).join('');
