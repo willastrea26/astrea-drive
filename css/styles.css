@@ -2466,7 +2466,8 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 
 /* Tab bar with the period picker on the right */
 .veh-tabbar { display: flex; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; }
-.veh-tabbar .tabs { flex: 1; min-width: 0; }
+.veh-tabbar .tabs { flex: 1; min-width: 0; gap: 38px; }
+.veh-tabbar .tabs button { padding-top: 12px; }
 .range-pick {
   display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 10px 0 12px;
   background: var(--paper); border: 1px solid var(--rule-strong); border-radius: var(--r);
