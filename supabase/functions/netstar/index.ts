@@ -187,6 +187,96 @@ async function fetchTripSummaries(
   }
 }
 
+// "01-12-2025 03:16:07" -> { day:"2025-12-01", hm:"03:16", ms } | null.
+// ms is built from the local parts via Date.UTC, so it is consistent for
+// ordering and reads back the same HH:MM through toISOString on the client.
+function parseNsDate(s: unknown): { day: string; hm: string; ms: number } | null {
+  const m = /(\d{2})-(\d{2})-(\d{4})[ T](\d{2}):(\d{2})(?::(\d{2}))?/.exec(String(s ?? ""));
+  if (!m) return null;
+  return {
+    day: `${m[3]}-${m[2]}-${m[1]}`,
+    hm: `${m[4]}:${m[5]}`,
+    ms: Date.UTC(+m[3], +m[2] - 1, +m[1], +m[4], +m[5], +(m[6] || 0)),
+  };
+}
+
+// Find the tracker device for a fleet vehicle by its rego or Netstar alias.
+function matchDevice(devices: Device[], rego: unknown, netstarRego: unknown): Device | null {
+  const keys = [rego, netstarRego].map((x) => String(x ?? "").trim().toUpperCase()).filter(Boolean);
+  if (!keys.length) return null;
+  return devices.find((d) => keys.includes(String(d.rego ?? "").trim().toUpperCase())) ?? null;
+}
+
+// Trip-detail for one device over a window: one row per trip. Documented
+// fields (start/reach time + location + coordinate, travel_km, times, speeds,
+// odometer). Returns rows + Netstar's raw reply; never throws.
+async function fetchTripDetail(imei: string, from: string, to: string): Promise<{ rows: Record<string, unknown>[]; raw: string }> {
+  try {
+    const url = `${NETSTAR_BASE}/external/reports/trip-detail?imei=${encodeURIComponent(imei)}&start_date_time=${encodeURIComponent(from)}&end_date_time=${encodeURIComponent(to)}`;
+    const res = await nsFetch(url, { headers: netstarHeaders() });
+    const text = await res.text();
+    const raw = `${res.status} ${text.slice(0, 200)}`;
+    if (!res.ok) return { rows: [], raw };
+    let payload: { data?: Record<string, unknown>[] } = {};
+    try { payload = JSON.parse(text); } catch (_e) { /* not json */ }
+    return { rows: Array.isArray(payload?.data) ? payload.data : [], raw };
+  } catch (e) {
+    return { rows: [], raw: `error ${String((e as Error)?.message ?? e)}` };
+  }
+}
+
+// One trip-detail row -> the shape the app's Trips tab uses.
+function tripFromRow(d: Record<string, unknown>) {
+  const s = parseNsDate(d.start_time), e = parseNsDate(d.reach_time);
+  return {
+    day: s?.day ?? null,
+    startMs: s?.ms ?? null,
+    start: s?.hm ?? "", end: e?.hm ?? "",
+    startLoc: d.start_location ?? "", endLoc: d.reach_location ?? "",
+    startC: parseCoords(d.start_coordinate), endC: parseCoords(d.reach_coordinate),
+    km: num(d.travel_km), travelMin: durToMinutes(d.travel_time), idleMin: durToMinutes(d.idle_time),
+    parkMin: durToMinutes(d.park_duration), maxSpeed: num(d.max_speed), avgSpeed: num(d.avg_speed),
+    startOdom: num(d.day_start_odom), endOdom: num(d.end_odom_print),
+  };
+}
+
+// Travel-history (GPS breadcrumbs) for one device over a day. The report's
+// response schema isn't documented, so this parses flexibly across the likely
+// field names and returns a raw sample so the exact shape can be confirmed.
+async function fetchTravelPath(imei: string, from: string, to: string): Promise<{ points: Array<{ lat: number; lng: number; ms: number | null; speed: number | null }>; raw: Record<string, unknown> }> {
+  try {
+    const url = `${NETSTAR_BASE}/external/reports/travel-history-report?imei=${encodeURIComponent(imei)}&start_date_time=${encodeURIComponent(from)}&end_date_time=${encodeURIComponent(to)}`;
+    const res = await nsFetch(url, { headers: netstarHeaders() });
+    const text = await res.text();
+    if (!res.ok) return { points: [], raw: { status: res.status, body: text.slice(0, 200) } };
+    let payload: unknown = {};
+    try { payload = JSON.parse(text); } catch (_e) { return { points: [], raw: { status: res.status, body: text.slice(0, 200) } }; }
+    const p = payload as Record<string, unknown>;
+    const arr: Record<string, unknown>[] = Array.isArray(p?.data) ? p.data as Record<string, unknown>[]
+      : Array.isArray(payload) ? payload as Record<string, unknown>[] : [];
+    const pick = (o: Record<string, unknown>, keys: string[]) => {
+      for (const k of keys) { if (o[k] != null && o[k] !== "") return o[k]; }
+      return null;
+    };
+    const points: Array<{ lat: number; lng: number; ms: number | null; speed: number | null }> = [];
+    for (const it of arr) {
+      let c = parseCoords(pick(it, ["coordinate", "coordinates", "location_coordinate", "gps_coordinate", "latlng"]));
+      if (!c) {
+        const la = num(pick(it, ["latitude", "lat", "gps_lat"]));
+        const ln = num(pick(it, ["longitude", "lng", "lon", "gps_lng", "gps_lon"]));
+        if (la != null && ln != null && !(la === 0 && ln === 0)) c = { lat: la, lng: ln };
+      }
+      if (!c) continue;
+      const t = parseNsDate(pick(it, ["time", "datetime", "date_time", "gps_time", "timestamp", "event_time", "received_time", "location_time", "device_time"]));
+      points.push({ lat: c.lat, lng: c.lng, ms: t?.ms ?? null, speed: num(pick(it, ["speed", "gps_speed", "velocity"])) });
+    }
+    points.sort((a, b) => (a.ms ?? 0) - (b.ms ?? 0));
+    return { points, raw: { status: res.status, count: arr.length, keys: arr[0] ? Object.keys(arr[0]) : [], sample: arr[0] ? JSON.stringify(arr[0]).slice(0, 400) : "" } };
+  } catch (e) {
+    return { points: [], raw: { error: String((e as Error)?.message ?? e) } };
+  }
+}
+
 // Last `count` calendar days in Sydney time, newest first, each with the
 // day key (YYYY-MM-DD) and Netstar-formatted start/end of that day.
 function sydneyDays(count: number): Array<{ key: string; from: string; to: string }> {
@@ -500,6 +590,47 @@ Deno.serve(async (req: Request) => {
     }
 
     if (action === "sync-odometers") return await syncOdometers();
+
+    // Trips for one vehicle over the last N days, grouped by day (Trips tab).
+    if (action === "trips") {
+      const devices = await fetchVehicles();
+      const dev = matchDevice(devices, body.rego, body.netstarRego);
+      if (!dev) return json({ error: "No Netstar tracker for this vehicle", days: [] });
+      const daysBack = Math.min(Math.max(Number(body.days) || 14, 1), 31);
+      const now = Date.now();
+      const { rows, raw } = await fetchTripDetail(dev.imei, netstarDate(now - daysBack * 86400000), netstarDate(now));
+      const trips = rows.map(tripFromRow).filter((t) => t.day);
+      const byDay = new Map<string, ReturnType<typeof tripFromRow>[]>();
+      for (const t of trips) { const k = t.day as string; if (!byDay.has(k)) byDay.set(k, []); byDay.get(k)!.push(t); }
+      const days = [...byDay.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([day, ts]) => {
+        ts.sort((a, b) => (a.startMs ?? 0) - (b.startMs ?? 0));
+        const sum = (f: keyof ReturnType<typeof tripFromRow>) => ts.reduce((s, x) => s + (Number(x[f]) || 0), 0);
+        return {
+          date: day,
+          trips: ts,
+          totals: {
+            trips: ts.length,
+            km: Math.round(sum("km")),
+            driveMin: sum("travelMin"),
+            idleMin: sum("idleMin"),
+            maxSpeed: Math.max(0, ...ts.map((x) => x.maxSpeed || 0)),
+          },
+        };
+      });
+      return json({ imei: dev.imei, rego: dev.rego, days, raw });
+    }
+
+    // GPS breadcrumb path for one vehicle on one day (the replay map).
+    if (action === "trip-path") {
+      const devices = await fetchVehicles();
+      const dev = matchDevice(devices, body.rego, body.netstarRego);
+      if (!dev) return json({ error: "No Netstar tracker for this vehicle", points: [] });
+      const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(body.date || ""));
+      if (!m) return json({ error: "bad date", points: [] });
+      const from = `${m[3]}-${m[2]}-${m[1]} 00:00:00`, to = `${m[3]}-${m[2]}-${m[1]} 23:59:59`;
+      const { points, raw } = await fetchTravelPath(dev.imei, from, to);
+      return json({ points, source: points.length ? "travel-history" : "none", raw });
+    }
 
     // default: live — list + status joined, one row per device, keyed by rego
     const vehicles = await fetchVehicles();

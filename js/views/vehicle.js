@@ -7,6 +7,7 @@ AD.views.vehicle = (function () {
   const TABS = [
     { key: 'overview', label: 'Overview' },
     { key: 'bookings', label: 'Bookings', vacOnly: true },
+    { key: 'trips', label: 'Trips', trackedOnly: true },
     { key: 'service', label: 'Maintenance' },
     { key: 'defects', label: 'Defects' },
     { key: 'documents', label: 'Documents' },
@@ -20,6 +21,9 @@ AD.views.vehicle = (function () {
     { key: 'ytd', label: 'Year to date', short: 'YTD', ytd: true }
   ];
   let root = null, id = null, tab = 'overview', range = '12m';
+  // Trips are fetched live from Netstar; cache per-vehicle so a redraw (e.g.
+  // after saving the odometer) doesn't refetch.
+  let tripsData = null, tripsFor = null;
   // Charts animate in when a tab is opened, not on every redraw (saving the
   // odometer would otherwise replay every chart on the page).
   let fresh = true;
@@ -52,7 +56,9 @@ AD.views.vehicle = (function () {
       return;
     }
     const isVac = v.type === 'Vac truck';
+    const isTracked = v.odometerSource === 'telematics' || !!v.netstarRego;
     if (tab === 'bookings' && !isVac) tab = 'overview';
+    if (tab === 'trips' && !isTracked) tab = 'overview';
 
     const services = AD.store.all('services').filter((x) => x.vehicleId === v.id).sort((a, b) => b.date.localeCompare(a.date));
     const defects = AD.store.all('defects').filter((x) => x.vehicleId === v.id).sort((a, b) => (a.status === 'Resolved') - (b.status === 'Resolved') || b.reportedDate.localeCompare(a.reportedDate));
@@ -91,7 +97,7 @@ AD.views.vehicle = (function () {
 
       <div class="veh-tabbar">
         <div class="tabs" role="tablist">
-          ${TABS.filter((t) => !t.vacOnly || isVac).map((t) => `
+          ${TABS.filter((t) => (!t.vacOnly || isVac) && (!t.trackedOnly || isTracked)).map((t) => `
             <button role="tab" data-tab="${t.key}" class="${tab === t.key ? 'on' : ''}" aria-selected="${tab === t.key}">
               ${esc(t.label)}${counts[t.key] ? `<span class="n">${counts[t.key]}</span>` : ''}
             </button>`).join('')}
@@ -118,6 +124,9 @@ AD.views.vehicle = (function () {
     tb.querySelectorAll('[data-resolve]').forEach((b) => (b.onclick = () => AD.resolveDefect(b.dataset.resolve)));
     tb.querySelectorAll('[data-photos]').forEach((b) => (b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); AD.viewDefectPhotos(b.dataset.photos); }));
     tb.querySelectorAll('[data-booking]').forEach((b) => (b.onclick = () => AD.go('calendar', { view: 'day', date: T.dateKey(AD.store.get('bookings', b.dataset.booking).start), open: b.dataset.booking })));
+
+    // Trips tab
+    if (tab === 'trips') bindTrips(el, v);
 
     // Photos tab
     if (tab === 'photos') bindGallery(el, v);
@@ -495,6 +504,7 @@ AD.views.vehicle = (function () {
   // ---------- Tabs ----------
   function tabBody(v, services, defects, docs, upcoming) {
     if (tab === 'overview') return overview(v, services, defects);
+    if (tab === 'trips') return tripsTab(v);
     if (tab === 'photos') return photosTab(v);
     if (tab === 'revenue') return revenueTab(v);
 
@@ -675,6 +685,233 @@ AD.views.vehicle = (function () {
       <div class="eh-x"><span>${esc(fmtDay(first))}</span><span class="eh-key"><i class="eh-dot eh-dot-recent"></i>Last 7 days <i class="eh-dot"></i>Earlier <i class="eh-dot eh-dot-none"></i>No data</span><span>${esc(fmtDay(last))}</span></div>
       <p class="help">Daily engine time reported by the vehicle’s GPS tracker. ${daily.withData} of 30 days had data.</p>
     </section>`;
+  }
+
+  // ---- Trips tab -------------------------------------------------------
+  // A day-by-day record of where a trackered vehicle has been, with a map
+  // "replay" that drives a marker along the route, colouring the line by speed.
+
+  function tripsTab(v) {
+    return `<div class="trips-tab">
+      <div class="tab-tools"><span class="t2">Where ${esc(v.id)} has been — last 14 days, from its GPS tracker</span></div>
+      <div id="trips-list"><div class="empty-tidy">${I.gauge} Loading trips from GPS…</div></div>
+    </div>`;
+  }
+
+  const fmtMins = (m) => {
+    m = Math.round(Number(m) || 0);
+    if (!m) return '0m';
+    const h = Math.floor(m / 60), mm = m % 60;
+    return h ? `${h}h ${mm}m` : `${mm}m`;
+  };
+  const fmtTripDate = (key) => new Date(key + 'T12:00:00').toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'short' });
+
+  async function bindTrips(el, v) {
+    const list = el.querySelector('#trips-list');
+    if (!list) return;
+    if (tripsFor === v.id && tripsData) { renderTripDays(list, v, tripsData); return; }
+    try {
+      const { data, error } = await AD.sb.functions.invoke('netstar', { body: { action: 'trips', rego: v.rego, netstarRego: v.netstarRego, days: 14 } });
+      if (error) throw error;
+      if (data && data.error && !(data.days && data.days.length)) {
+        list.innerHTML = `<div class="empty-tidy">${I.map} ${esc(data.error)}.</div>`;
+        return;
+      }
+      tripsData = data; tripsFor = v.id;
+      renderTripDays(list, v, data);
+    } catch (e) {
+      list.innerHTML = `<div class="empty-tidy">${I.map} Couldn’t load trips: ${esc((e && e.message) || 'tracker service unavailable')}.</div>`;
+    }
+  }
+
+  function renderTripDays(list, v, data) {
+    const days = (data && data.days) || [];
+    if (!days.length) {
+      list.innerHTML = `<div class="empty-tidy">${I.map} No trips recorded in the last 14 days.</div>`;
+      return;
+    }
+    list.innerHTML = days.map((d, i) => dayCard(d, i)).join('');
+    list.querySelectorAll('[data-replay]').forEach((b) => (b.onclick = () => openReplay(v, b.dataset.replay, days[+b.dataset.di])));
+  }
+
+  function dayCard(d, di) {
+    const t = d.totals;
+    const canReplay = d.trips.some((x) => x.startC && x.endC);
+    return `<section class="trip-day">
+      <header class="trip-day-head">
+        <div>
+          <h3>${fmtTripDate(d.date)}</h3>
+          <span class="t2">${t.trips} trip${t.trips === 1 ? '' : 's'} · ${t.km.toLocaleString('en-AU')} km · ${fmtMins(t.driveMin)} driving${t.idleMin ? ` · ${fmtMins(t.idleMin)} idle` : ''}${t.maxSpeed ? ` · top ${t.maxSpeed} km/h` : ''}</span>
+        </div>
+        ${canReplay ? `<button class="btn btn-sm btn-primary" data-replay="${esc(d.date)}" data-di="${di}">${I.play} Replay day</button>` : ''}
+      </header>
+      <ul class="trip-rows">
+        ${d.trips.map((x) => `<li>
+          <span class="trip-time">${esc(x.start)}<span class="muted">–</span>${esc(x.end)}</span>
+          <span class="trip-route">${esc(shortLoc(x.startLoc))} <span class="muted">${I.chevR}</span> ${esc(shortLoc(x.endLoc))}</span>
+          <span class="trip-nums">${x.km != null ? `${x.km} km` : ''}${x.maxSpeed != null ? ` · ${x.maxSpeed} km/h` : ''}${x.idleMin ? ` · ${fmtMins(x.idleMin)} idle` : ''}</span>
+        </li>`).join('')}
+      </ul>
+    </section>`;
+  }
+
+  // Netstar locations are long ("R183, Tarime, Tarime, Mara, Tanzania"); keep
+  // the first couple of parts so the row stays readable.
+  function shortLoc(s) {
+    s = String(s || '').trim();
+    if (!s || s === '--') return 'Unknown';
+    return s.split(',').slice(0, 2).join(', ');
+  }
+
+  function mapStyle() {
+    const t = document.documentElement.getAttribute('data-theme');
+    if (t === 'dark') return 'dark';
+    if (t === 'light') return 'light';
+    return window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
+
+  // Green (slow) -> amber -> red (fast), 0..100 km/h.
+  function speedColor(s) {
+    if (s == null || !Number.isFinite(s)) return '#5aa2f0';
+    const stops = [[0, [70, 232, 171]], [0.5, [245, 177, 76]], [1, [240, 103, 95]]];
+    const x = Math.max(0, Math.min(1, s / 100));
+    let a = stops[0], b = stops[stops.length - 1];
+    for (let i = 0; i < stops.length - 1; i++) { if (x >= stops[i][0] && x <= stops[i + 1][0]) { a = stops[i]; b = stops[i + 1]; break; } }
+    const f = (b[0] - a[0]) ? (x - a[0]) / (b[0] - a[0]) : 0;
+    const c = a[1].map((v, i) => Math.round(v + (b[1][i] - v) * f));
+    return `rgb(${c[0]},${c[1]},${c[2]})`;
+  }
+
+  function openReplay(v, date, day) {
+    let map = null, raf = null;
+    AD.ui.modal({
+      title: `${v.id} · ${fmtTripDate(date)}`,
+      wide: true,
+      onClose: () => { if (raf) cancelAnimationFrame(raf); if (map) { try { map.remove(); } catch (e) { /* gone */ } } },
+      body: `<div class="replay">
+        <div class="replay-map-wrap" id="rp-wrap">
+          <div id="rp-map" class="replay-map"></div>
+          <div class="replay-legend">Slow<i class="replay-ramp"></i>Fast</div>
+        </div>
+        <div class="replay-bar">
+          <button class="btn btn-sm btn-primary" id="rp-play" disabled>${I.play} Play</button>
+          <input type="range" id="rp-scrub" min="0" max="1000" value="0" disabled aria-label="Scrub through the day">
+          <span class="replay-read" id="rp-read">Loading route…</span>
+          <select id="rp-speed" class="replay-speed" aria-label="Playback speed">
+            <option value="10">10 min/s</option>
+            <option value="30" selected>30 min/s</option>
+            <option value="60">1 hr/s</option>
+            <option value="120">2 hr/s</option>
+          </select>
+        </div>
+      </div>`,
+      onMount: (el) => { mountReplay(el, v, date, day, (m) => (map = m), (r) => (raf = r), () => raf, () => map); }
+    });
+  }
+
+  async function mountReplay(el, v, date, day, setMap, setRaf, getRaf, getMap) {
+    const read = el.querySelector('#rp-read');
+    const playBtn = el.querySelector('#rp-play');
+    const scrub = el.querySelector('#rp-scrub');
+    const speedSel = el.querySelector('#rp-speed');
+
+    const map = AD.maps.create(el.querySelector('#rp-map'), el.querySelector('#rp-wrap'), { style: mapStyle(), zoomControl: true, zoomSnap: 0.5 });
+    setMap(map);
+    if (!map) { read.textContent = 'Map unavailable — check your connection.'; return; }
+    setTimeout(() => map.invalidateSize(), 60);
+
+    let points = [];
+    let approx = false;
+    try {
+      const { data } = await AD.sb.functions.invoke('netstar', { body: { action: 'trip-path', rego: v.rego, netstarRego: v.netstarRego, date } });
+      points = ((data && data.points) || []).filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
+    } catch (e) { /* fall back below */ }
+
+    // Fallback: no breadcrumbs from travel-history — draw the trips' start/end
+    // points instead (straight lines between them), clearly flagged approximate.
+    if (points.length < 2) {
+      approx = true;
+      points = [];
+      day.trips.forEach((t) => {
+        if (t.startC) points.push({ lat: t.startC.lat, lng: t.startC.lng, ms: t.startMs, speed: t.avgSpeed });
+        if (t.endC) points.push({ lat: t.endC.lat, lng: t.endC.lng, ms: (t.startMs != null && t.travelMin != null) ? t.startMs + t.travelMin * 60000 : null, speed: t.avgSpeed });
+      });
+      points = points.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
+    }
+
+    if (points.length < 2) { read.textContent = 'No route available for this day.'; return; }
+
+    const haveMs = points.every((p) => Number.isFinite(p.ms)) && points[points.length - 1].ms > points[0].ms;
+    if (!haveMs) points.forEach((p, i) => (p.ms = i * 1000));
+    points.sort((a, b) => a.ms - b.ms);
+
+    // Faint full route first, so you can see where it will go.
+    L.polyline(points.map((p) => [p.lat, p.lng]), { color: '#8aa6bd', weight: 3, opacity: 0.35 }).addTo(map);
+    const bounds = L.latLngBounds(points.map((p) => [p.lat, p.lng]));
+    map.fitBounds(bounds, { padding: [30, 30] });
+
+    const marker = L.circleMarker([points[0].lat, points[0].lng], { radius: 7, color: '#0b1b2e', weight: 2, fillColor: '#5fe0b4', fillOpacity: 1 }).addTo(map);
+
+    const t0 = points[0].ms, t1 = points[points.length - 1].ms;
+    let simMs = t0, playing = false, lastReal = null, trail = [], lastSeg = -1;
+
+    const msToClock = (ms) => haveMs ? new Date(ms).toISOString().slice(11, 16) : `${Math.round((ms - t0) / 1000)}/${points.length - 1}`;
+
+    function posAt(ms) {
+      if (ms <= t0) return points[0];
+      if (ms >= t1) return points[points.length - 1];
+      for (let i = 0; i < points.length - 1; i++) {
+        const a = points[i], b = points[i + 1];
+        if (ms >= a.ms && ms <= b.ms) {
+          const f = (b.ms - a.ms) ? (ms - a.ms) / (b.ms - a.ms) : 0;
+          return { lat: a.lat + (b.lat - a.lat) * f, lng: a.lng + (b.lng - a.lng) * f, speed: a.speed != null ? a.speed : b.speed };
+        }
+      }
+      return points[points.length - 1];
+    }
+    function growTrail() {
+      while (lastSeg + 1 <= points.length - 2) {
+        const ni = lastSeg + 1;
+        if (points[ni + 1].ms <= simMs) {
+          const a = points[ni], b = points[ni + 1];
+          trail.push(L.polyline([[a.lat, a.lng], [b.lat, b.lng]], { color: speedColor(b.speed != null ? b.speed : a.speed), weight: 5, opacity: 0.95 }).addTo(map));
+          lastSeg = ni;
+        } else break;
+      }
+    }
+    function rebuildTrail() {
+      trail.forEach((l) => map.removeLayer(l));
+      trail = []; lastSeg = -1; growTrail();
+    }
+    function render() {
+      const p = posAt(simMs);
+      marker.setLatLng([p.lat, p.lng]);
+      growTrail();
+      read.textContent = `${msToClock(simMs)} · ${Math.round(p.speed || 0)} km/h${approx ? ' · approx route' : ''}`;
+      scrub.value = String(Math.round((simMs - t0) / (t1 - t0) * 1000));
+    }
+    function stop() { playing = false; lastReal = null; playBtn.innerHTML = `${I.play} Play`; if (getRaf()) cancelAnimationFrame(getRaf()); }
+    function frame(ts) {
+      if (!playing) return;
+      if (lastReal == null) lastReal = ts;
+      const dt = ts - lastReal; lastReal = ts;
+      simMs += dt * (Number(speedSel.value) * 60); // value = sim minutes per real second
+      if (simMs >= t1) { simMs = t1; render(); stop(); return; }
+      render();
+      setRaf(requestAnimationFrame(frame));
+    }
+
+    playBtn.disabled = false; scrub.disabled = false;
+    playBtn.onclick = () => {
+      if (playing) { stop(); return; }
+      if (simMs >= t1) { simMs = t0; rebuildTrail(); }
+      playing = true; lastReal = null; playBtn.innerHTML = `${I.pause} Pause`;
+      setRaf(requestAnimationFrame(frame));
+    };
+    scrub.oninput = () => { stop(); simMs = t0 + (Number(scrub.value) / 1000) * (t1 - t0); rebuildTrail(); render(); };
+
+    read.textContent = `${msToClock(t0)} · ready${approx ? ' · approx route (no GPS breadcrumbs)' : ''}`;
+    render();
   }
 
   function overview(v, services, defects) {

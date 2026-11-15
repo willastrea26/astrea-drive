@@ -2795,3 +2795,32 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 .eh-dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; background: rgba(95, 224, 180, .38); margin-left: 8px; }
 .eh-dot-recent { background: var(--mint, #5fe0b4); margin-left: 0; }
 .eh-dot-none { background: rgba(255,255,255,.18); }
+
+/* ---- Vehicle Trips tab ---- */
+.trips-tab { margin-top: 4px; }
+.trip-day { border: 1px solid var(--line, rgba(255,255,255,.1)); border-radius: 16px; margin-bottom: 16px; overflow: hidden; background: var(--paper, #16314c); }
+.trip-day-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 18px; border-bottom: 1px solid var(--line, rgba(255,255,255,.08)); }
+.trip-day-head h3 { margin: 0 0 3px; font-size: 1.02rem; }
+.trip-rows { list-style: none; margin: 0; padding: 4px 0; }
+.trip-rows li { display: grid; grid-template-columns: 110px 1fr auto; gap: 14px; align-items: baseline; padding: 9px 18px; font-size: .92rem; }
+.trip-rows li + li { border-top: 1px dashed var(--line, rgba(255,255,255,.07)); }
+.trip-time { font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+.trip-time .muted { margin: 0 2px; font-weight: 400; }
+.trip-route { color: var(--ink-2, #d2e0ec); min-width: 0; }
+.trip-route .ico { width: 15px; height: 15px; vertical-align: -2px; }
+.trip-nums { color: var(--muted, #88a3bb); white-space: nowrap; font-variant-numeric: tabular-nums; }
+@media (max-width: 640px) {
+  .trip-rows li { grid-template-columns: 1fr; gap: 2px; }
+  .trip-nums { grid-row: 2; }
+}
+
+/* ---- Trip replay modal ---- */
+.replay { display: flex; flex-direction: column; gap: 12px; }
+.replay-map-wrap { position: relative; }
+.replay-map { height: min(60vh, 520px); width: 100%; border-radius: 12px; overflow: hidden; background: var(--paper-2, #102a42); }
+.replay-legend { position: absolute; right: 12px; bottom: 12px; z-index: 500; display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink, #eef5fb); background: rgba(11,27,46,.72); padding: 5px 9px; border-radius: 999px; }
+.replay-ramp { display: inline-block; width: 64px; height: 8px; border-radius: 4px; background: linear-gradient(90deg, rgb(70,232,171), rgb(245,177,76), rgb(240,103,95)); }
+.replay-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.replay-bar #rp-scrub { flex: 1; min-width: 160px; accent-color: var(--mint, #5fe0b4); }
+.replay-read { font-variant-numeric: tabular-nums; font-size: .9rem; color: var(--ink-2, #d2e0ec); min-width: 160px; }
+.replay-speed { background: var(--paper, #16314c); color: var(--ink, #eef5fb); border: 1px solid var(--line-2, rgba(255,255,255,.17)); border-radius: 8px; padding: 6px 8px; }
