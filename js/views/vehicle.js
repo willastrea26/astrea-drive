@@ -24,6 +24,8 @@ AD.views.vehicle = (function () {
   // Trips are fetched live from Netstar; cache per-vehicle so a redraw (e.g.
   // after saving the odometer) doesn't refetch.
   let tripsData = null, tripsFor = null;
+  // Live Leaflet map + animation frame for the Trips tab, torn down on redraw.
+  let tripMap = null, tripRaf = null;
   // Charts animate in when a tab is opened, not on every redraw (saving the
   // odometer would otherwise replay every chart on the page).
   let fresh = true;
@@ -49,6 +51,7 @@ AD.views.vehicle = (function () {
 
   function draw() {
     const el = root;
+    killTripMap(); // the old map's DOM is about to be replaced
     const v = AD.store.get('vehicles', id);
     if (!v) {
       el.innerHTML = `<a class="back" href="#/fleet">${I.chevL} Fleet register</a>
@@ -688,15 +691,11 @@ AD.views.vehicle = (function () {
   }
 
   // ---- Trips tab -------------------------------------------------------
-  // A day-by-day record of where a trackered vehicle has been, with a map
-  // "replay" that drives a marker along the route, colouring the line by speed.
-
-  function tripsTab(v) {
-    return `<div class="trips-tab">
-      <div class="tab-tools"><span class="t2">Where ${esc(v.id)} has been — last 10 days, from its GPS tracker</span></div>
-      <div id="trips-list"><div class="empty-tidy">${I.gauge} Loading trips from GPS…</div></div>
-    </div>`;
-  }
+  // A map of where a trackered vehicle has been. Opens showing the last 10
+  // days' routes; pick a day to replay it, with the vehicle's own cartoon
+  // driving the route and the trail coloured by speed.
+  //
+  // NOTE: `L` in this file is AD.logic — Leaflet is always `window.L`.
 
   const fmtMins = (m) => {
     m = Math.round(Number(m) || 0);
@@ -704,65 +703,7 @@ AD.views.vehicle = (function () {
     const h = Math.floor(m / 60), mm = m % 60;
     return h ? `${h}h ${mm}m` : `${mm}m`;
   };
-  const fmtTripDate = (key) => new Date(key + 'T12:00:00').toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'short' });
-
-  async function bindTrips(el, v) {
-    const list = el.querySelector('#trips-list');
-    if (!list) return;
-    if (tripsFor === v.id && tripsData) { renderTripDays(list, v, tripsData); return; }
-    try {
-      const { data, error } = await AD.sb.functions.invoke('netstar', { body: { action: 'trips', rego: v.rego, netstarRego: v.netstarRego, days: 10 } });
-      if (error) throw error;
-      if (data && data.error && !(data.days && data.days.length)) {
-        list.innerHTML = `<div class="empty-tidy">${I.map} ${esc(data.error)}.</div>`;
-        return;
-      }
-      tripsData = data; tripsFor = v.id;
-      renderTripDays(list, v, data);
-    } catch (e) {
-      list.innerHTML = `<div class="empty-tidy">${I.map} Couldn’t load trips: ${esc((e && e.message) || 'tracker service unavailable')}.</div>`;
-    }
-  }
-
-  function renderTripDays(list, v, data) {
-    const days = (data && data.days) || [];
-    if (!days.length) {
-      const raw = data && data.raw ? String(data.raw) : '';
-      list.innerHTML = `<div class="empty-tidy">${I.map} No trips recorded in the last 10 days.</div>
-        ${raw ? `<details class="trip-diag"><summary>What the tracker service replied</summary><pre>${esc(raw)}</pre></details>` : ''}`;
-      return;
-    }
-    list.innerHTML = days.map((d, i) => dayCard(d, i)).join('');
-    list.querySelectorAll('[data-replay]').forEach((b) => (b.onclick = () => openReplay(v, b.dataset.replay, days[+b.dataset.di])));
-  }
-
-  function dayCard(d, di) {
-    const t = d.totals;
-    return `<section class="trip-day">
-      <header class="trip-day-head">
-        <div>
-          <h3>${fmtTripDate(d.date)}</h3>
-          <span class="t2">${t.trips} trip${t.trips === 1 ? '' : 's'} · ${t.km.toLocaleString('en-AU')} km · ${fmtMins(t.driveMin)} driving${t.idleMin ? ` · ${fmtMins(t.idleMin)} idle` : ''}${t.maxSpeed ? ` · top ${t.maxSpeed} km/h` : ''}</span>
-        </div>
-        <button class="btn btn-sm btn-primary" data-replay="${esc(d.date)}" data-di="${di}">${I.play} Replay day</button>
-      </header>
-      <ul class="trip-rows">
-        ${d.trips.map((x) => `<li>
-          <span class="trip-time">${esc(x.start)}<span class="muted">–</span>${esc(x.end)}</span>
-          <span class="trip-route">${esc(shortLoc(x.startLoc))} <span class="muted">${I.chevR}</span> ${esc(shortLoc(x.endLoc))}</span>
-          <span class="trip-nums">${x.km != null ? `${x.km} km` : ''}${x.maxSpeed != null ? ` · ${x.maxSpeed} km/h` : ''}${x.idleMin ? ` · ${fmtMins(x.idleMin)} idle` : ''}</span>
-        </li>`).join('')}
-      </ul>
-    </section>`;
-  }
-
-  // Netstar locations are long ("R183, Tarime, Tarime, Mara, Tanzania"); keep
-  // the first couple of parts so the row stays readable.
-  function shortLoc(s) {
-    s = String(s || '').trim();
-    if (!s || s === '--') return 'Unknown';
-    return s.split(',').slice(0, 2).join(', ');
-  }
+  const fmtDayShort = (k) => new Date(k + 'T12:00:00').toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short' });
 
   function mapStyle() {
     const t = document.documentElement.getAttribute('data-theme');
@@ -773,151 +714,262 @@ AD.views.vehicle = (function () {
 
   // Green (slow) -> amber -> red (fast), 0..100 km/h.
   function speedColor(s) {
-    if (s == null || !Number.isFinite(s)) return '#5aa2f0';
+    if (s == null || !Number.isFinite(Number(s))) return '#5aa2f0';
     const stops = [[0, [70, 232, 171]], [0.5, [245, 177, 76]], [1, [240, 103, 95]]];
-    const x = Math.max(0, Math.min(1, s / 100));
+    const x = Math.max(0, Math.min(1, Number(s) / 100));
     let a = stops[0], b = stops[stops.length - 1];
     for (let i = 0; i < stops.length - 1; i++) { if (x >= stops[i][0] && x <= stops[i + 1][0]) { a = stops[i]; b = stops[i + 1]; break; } }
     const f = (b[0] - a[0]) ? (x - a[0]) / (b[0] - a[0]) : 0;
-    const c = a[1].map((v, i) => Math.round(v + (b[1][i] - v) * f));
+    const c = a[1].map((val, i) => Math.round(val + (b[1][i] - val) * f));
     return `rgb(${c[0]},${c[1]},${c[2]})`;
   }
 
-  function openReplay(v, date, day) {
-    let map = null, raf = null;
-    AD.ui.modal({
-      title: `${v.id} · ${fmtTripDate(date)}`,
-      wide: true,
-      onClose: () => { if (raf) cancelAnimationFrame(raf); if (map) { try { map.remove(); } catch (e) { /* gone */ } } },
-      body: `<div class="replay">
-        <div class="replay-map-wrap" id="rp-wrap">
-          <div id="rp-map" class="replay-map"></div>
-          <div class="replay-legend">Slow<i class="replay-ramp"></i>Fast</div>
-        </div>
-        <div class="replay-bar">
-          <button class="btn btn-sm btn-primary" id="rp-play" disabled>${I.play} Play</button>
-          <input type="range" id="rp-scrub" min="0" max="1000" value="0" disabled aria-label="Scrub through the day">
-          <span class="replay-read" id="rp-read">Loading route…</span>
-          <select id="rp-speed" class="replay-speed" aria-label="Playback speed">
+  function statStrip(s) {
+    const cell = (label, val) => `<div><dt>${label}</dt><dd>${val}</dd></div>`;
+    if (!s) return `<dl class="trip-stat-row">${['Trips', 'Distance', 'Driving', 'Idle', 'Top speed', 'Engine hours'].map((l) => cell(l, '—')).join('')}</dl>`;
+    return `<dl class="trip-stat-row">
+      ${cell('Trips', s.trips)}
+      ${cell('Distance', `${Math.round(s.km).toLocaleString('en-AU')} km`)}
+      ${cell('Driving', fmtMins(s.driveMin))}
+      ${cell('Idle', fmtMins(s.idleMin))}
+      ${cell('Top speed', s.maxSpeed ? `${s.maxSpeed} km/h` : '—')}
+      ${cell('Engine hours', s.hours != null ? `${Math.round(s.hours * 10) / 10} hr` : '—')}
+    </dl>`;
+  }
+
+  function tripsTab(v) {
+    return `<div class="trips-tab">
+      <div id="tp-stats">${statStrip(null)}</div>
+      <div class="trip-days" id="tp-days"><span class="t2">Loading trips from GPS…</span></div>
+      <div class="trk-map-wrap trip-mapwrap" id="tp-wrap">
+        <div class="trk-map" id="tp-map" aria-label="Map of where ${esc(v.id)} has been"></div>
+        <div class="replay-legend">Slow<i class="replay-ramp"></i>Fast</div>
+        <div class="trip-play" id="tp-bar" hidden>
+          <button class="btn btn-sm btn-primary" id="tp-play">${I.play} Play</button>
+          <input type="range" id="tp-scrub" min="0" max="1000" value="0" aria-label="Scrub through the day">
+          <span class="replay-read" id="tp-read"></span>
+          <select id="tp-speed" class="replay-speed" aria-label="Playback speed">
             <option value="10">10 min/s</option>
             <option value="30" selected>30 min/s</option>
             <option value="60">1 hr/s</option>
             <option value="120">2 hr/s</option>
           </select>
         </div>
-      </div>`,
-      onMount: (el) => { mountReplay(el, v, date, day, (m) => (map = m), (r) => (raf = r), () => raf, () => map); }
-    });
+      </div>
+    </div>`;
   }
 
-  async function mountReplay(el, v, date, day, setMap, setRaf, getRaf, getMap) {
-    const read = el.querySelector('#rp-read');
-    const playBtn = el.querySelector('#rp-play');
-    const scrub = el.querySelector('#rp-scrub');
-    const speedSel = el.querySelector('#rp-speed');
+  /** Tear down the trips map when the view redraws or the tab changes. */
+  function killTripMap() {
+    if (tripRaf) { cancelAnimationFrame(tripRaf); tripRaf = null; }
+    if (tripMap) { try { tripMap.remove(); } catch (e) { /* already gone */ } tripMap = null; }
+  }
 
-    const map = AD.maps.create(el.querySelector('#rp-map'), el.querySelector('#rp-wrap'), { style: mapStyle(), zoomControl: true, zoomSnap: 0.5 });
-    setMap(map);
-    if (!map) { read.textContent = 'Map unavailable — check your connection.'; return; }
-    setTimeout(() => map.invalidateSize(), 60);
+  async function bindTrips(el, v) {
+    const LF = window.L;
+    const wrap = el.querySelector('#tp-wrap');
+    const daysEl = el.querySelector('#tp-days');
+    const statsEl = el.querySelector('#tp-stats');
+    const bar = el.querySelector('#tp-bar');
+    const playBtn = el.querySelector('#tp-play');
+    const scrub = el.querySelector('#tp-scrub');
+    const read = el.querySelector('#tp-read');
+    const speedSel = el.querySelector('#tp-speed');
+    if (!wrap || !LF) { if (daysEl) daysEl.innerHTML = '<span class="t2">Map library unavailable — check your connection.</span>'; return; }
 
-    let points = [];
-    let approx = false;
-    let pathDiag = '';
-    try {
-      const { data } = await AD.sb.functions.invoke('netstar', { body: { action: 'trip-path', rego: v.rego, netstarRego: v.netstarRego, date } });
-      points = ((data && data.points) || []).filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
-      if (data && data.raw) { try { pathDiag = JSON.stringify(data.raw); } catch (e) { pathDiag = String(data.raw); } }
-    } catch (e) { pathDiag = (e && e.message) || 'request failed'; }
+    const dark = mapStyle() === 'dark';
+    wrap.classList.toggle('is-dark', dark);
+    const map = AD.maps.create(el.querySelector('#tp-map'), wrap, { style: mapStyle(), zoomControl: true, zoomSnap: 0.5 });
+    tripMap = map;
+    if (!map) return;
+    setTimeout(() => { try { map.invalidateSize(); } catch (e) { /* removed */ } }, 60);
 
-    // Fallback: no breadcrumbs from travel-history — draw the trips' start/end
-    // points instead (straight lines between them), clearly flagged approximate.
-    if (points.length < 2) {
-      approx = true;
-      points = [];
-      day.trips.forEach((t) => {
-        if (t.startC) points.push({ lat: t.startC.lat, lng: t.startC.lng, ms: t.startMs, speed: t.avgSpeed });
-        if (t.endC) points.push({ lat: t.endC.lat, lng: t.endC.lng, ms: (t.startMs != null && t.travelMin != null) ? t.startMs + t.travelMin * 60000 : null, speed: t.avgSpeed });
-      });
-      points = points.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
+    // --- data -----------------------------------------------------------
+    let data = (tripsFor === v.id && tripsData) ? tripsData : null;
+    if (!data) {
+      try {
+        const r = await AD.sb.functions.invoke('netstar', { body: { action: 'trips', rego: v.rego, netstarRego: v.netstarRego, days: 10 } });
+        if (r.error) throw r.error;
+        data = r.data; tripsData = data; tripsFor = v.id;
+      } catch (e) {
+        daysEl.innerHTML = `<span class="t2">Couldn’t load trips: ${esc((e && e.message) || 'tracker service unavailable')}</span>`;
+        return;
+      }
     }
-
-    if (points.length < 2) {
-      read.innerHTML = `No route available for this day.${pathDiag ? ` <span class="muted" style="font-size:.8em">(${esc(pathDiag.slice(0, 160))})</span>` : ''}`;
+    if (tripMap !== map) return; // view redrew while we were loading
+    const days = (data && data.days) || [];
+    if (!days.length) {
+      daysEl.innerHTML = `<span class="t2">No trips in the last 10 days.${data && data.raw ? ` <span class="muted">${esc(String(data.raw).slice(0, 120))}</span>` : ''}</span>`;
       return;
     }
 
-    const haveMs = points.every((p) => Number.isFinite(p.ms)) && points[points.length - 1].ms > points[0].ms;
-    if (!haveMs) points.forEach((p, i) => (p.ms = i * 1000));
-    points.sort((a, b) => a.ms - b.ms);
+    // --- helpers ---------------------------------------------------------
+    let layers = [], marker = null, sel = null, playing = false;
+    const pathCache = {};
 
-    // Faint full route first, so you can see where it will go.
-    L.polyline(points.map((p) => [p.lat, p.lng]), { color: '#8aa6bd', weight: 3, opacity: 0.35 }).addTo(map);
-    const bounds = L.latLngBounds(points.map((p) => [p.lat, p.lng]));
-    map.fitBounds(bounds, { padding: [30, 30] });
+    const clearLayers = () => { layers.forEach((l) => map.removeLayer(l)); layers = []; if (marker) { map.removeLayer(marker); marker = null; } };
+    const stopPlay = () => { playing = false; if (tripRaf) { cancelAnimationFrame(tripRaf); tripRaf = null; } playBtn.innerHTML = `${I.play} Play`; };
 
-    const marker = L.circleMarker([points[0].lat, points[0].lng], { radius: 7, color: '#0b1b2e', weight: 2, fillColor: '#5fe0b4', fillOpacity: 1 }).addTo(map);
-
-    const t0 = points[0].ms, t1 = points[points.length - 1].ms;
-    let simMs = t0, playing = false, lastReal = null, trail = [], lastSeg = -1;
-
-    const msToClock = (ms) => haveMs ? new Date(ms).toISOString().slice(11, 16) : `${Math.round((ms - t0) / 1000)}/${points.length - 1}`;
-
-    function posAt(ms) {
-      if (ms <= t0) return points[0];
-      if (ms >= t1) return points[points.length - 1];
+    function normalise(pts) {
+      pts = (pts || []).filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
+      if (pts.length < 2) return pts;
+      if (!pts.every((p) => Number.isFinite(p.ms))) pts.forEach((p, i) => (p.ms = i * 60000));
+      pts.sort((a, b) => a.ms - b.ms);
+      return pts;
+    }
+    // Fallback when there are no GPS breadcrumbs: the trips' own start/end points.
+    function tripPoints(day) {
+      const pts = [];
+      day.trips.forEach((t) => {
+        if (t.startC) pts.push({ lat: t.startC.lat, lng: t.startC.lng, ms: t.startMs, speed: t.avgSpeed });
+        if (t.endC) pts.push({ lat: t.endC.lat, lng: t.endC.lng, ms: (t.startMs != null && t.travelMin != null) ? t.startMs + t.travelMin * 60000 : null, speed: t.avgSpeed });
+      });
+      return normalise(pts);
+    }
+    async function pathFor(date, day) {
+      if (pathCache[date]) return pathCache[date];
+      let pts = [];
+      try {
+        const r = await AD.sb.functions.invoke('netstar', { body: { action: 'trip-path', rego: v.rego, netstarRego: v.netstarRego, date } });
+        pts = normalise(((r.data && r.data.points) || []).slice());
+      } catch (e) { /* fall back */ }
+      let approx = false;
+      if (pts.length < 2) { pts = tripPoints(day); approx = true; }
+      const out = { points: pts, approx };
+      pathCache[date] = out;
+      return out;
+    }
+    function drawLine(points, dim) {
       for (let i = 0; i < points.length - 1; i++) {
         const a = points[i], b = points[i + 1];
-        if (ms >= a.ms && ms <= b.ms) {
-          const f = (b.ms - a.ms) ? (ms - a.ms) / (b.ms - a.ms) : 0;
-          return { lat: a.lat + (b.lat - a.lat) * f, lng: a.lng + (b.lng - a.lng) * f, speed: a.speed != null ? a.speed : b.speed };
+        layers.push(LF.polyline([[a.lat, a.lng], [b.lat, b.lng]], {
+          color: dim ? (dark ? '#7f9bb3' : '#51708c') : speedColor(b.speed != null ? b.speed : a.speed),
+          weight: dim ? 3 : 5, opacity: dim ? 0.55 : 0.95
+        }).addTo(map));
+      }
+    }
+    const fitTo = (pts) => { if (pts.length) map.fitBounds(LF.latLngBounds(pts.map((p) => [p.lat, p.lng])), { padding: [30, 30] }); };
+
+    function hoursFor(dates) {
+      const daily = L.workHoursDaily(v, 30);
+      if (!daily) return null;
+      const want = new Set(dates);
+      let h = 0, any = false;
+      daily.days.forEach((d) => { if (want.has(d.day) && d.hours != null) { h += d.hours; any = true; } });
+      return any ? h : null;
+    }
+    function statsFor(list) {
+      const s = { trips: 0, km: 0, driveMin: 0, idleMin: 0, maxSpeed: 0 };
+      list.forEach((d) => {
+        s.trips += d.totals.trips; s.km += d.totals.km;
+        s.driveMin += d.totals.driveMin; s.idleMin += d.totals.idleMin;
+        s.maxSpeed = Math.max(s.maxSpeed, d.totals.maxSpeed || 0);
+      });
+      s.hours = hoursFor(list.map((d) => d.date));
+      return s;
+    }
+    const markChips = () => daysEl.querySelectorAll('[data-day]').forEach((b) => b.classList.toggle('on', (b.dataset.day || '') === (sel || '')));
+
+    // --- views ------------------------------------------------------------
+    function showAll() {
+      stopPlay(); sel = null; bar.hidden = true; clearLayers(); markChips();
+      statsEl.innerHTML = statStrip(statsFor(days));
+      const all = [];
+      days.forEach((d) => {
+        const pts = (pathCache[d.date] && pathCache[d.date].points) || tripPoints(d);
+        if (pts.length > 1) { drawLine(pts, true); all.push(...pts); }
+      });
+      if (all.length) fitTo(all);
+      else read.textContent = '';
+    }
+
+    async function showDay(date) {
+      stopPlay(); sel = date; clearLayers(); markChips();
+      const day = days.find((d) => d.date === date);
+      statsEl.innerHTML = statStrip(statsFor([day]));
+      bar.hidden = false;
+      playBtn.disabled = true; scrub.disabled = true;
+      read.textContent = 'Loading route…';
+      const { points, approx } = await pathFor(date, day);
+      if (sel !== date || tripMap !== map) return; // switched away while loading
+      clearLayers();
+      if (points.length < 2) { read.textContent = 'No route recorded for this day.'; return; }
+      layers.push(LF.polyline(points.map((p) => [p.lat, p.lng]), { color: dark ? '#7f9bb3' : '#51708c', weight: 3, opacity: 0.35 }).addTo(map));
+      fitTo(points);
+      setupReplay(points, approx);
+    }
+
+    function setupReplay(points, approx) {
+      const t0 = points[0].ms, t1 = points[points.length - 1].ms;
+      const realTime = t1 - t0 > 120000; // index-based fallback has fake ms
+      let simMs = t0, lastSeg = -1, lastReal = null, trail = [];
+
+      marker = LF.marker([points[0].lat, points[0].lng], {
+        interactive: false,
+        icon: LF.divIcon({
+          className: 'trip-veh',
+          html: `<div class="trip-veh-in">${AD.art.forVehicle(v, 64, `${v.id}`) || AD.art.car(64, v.id)}</div>`,
+          iconSize: [64, 48], iconAnchor: [32, 38]
+        })
+      }).addTo(map);
+
+      const clock = (ms) => realTime ? new Date(ms).toISOString().slice(11, 16) : '';
+      function posAt(ms) {
+        if (ms <= t0) return points[0];
+        if (ms >= t1) return points[points.length - 1];
+        for (let i = 0; i < points.length - 1; i++) {
+          const a = points[i], b = points[i + 1];
+          if (ms >= a.ms && ms <= b.ms) {
+            const f = (b.ms - a.ms) ? (ms - a.ms) / (b.ms - a.ms) : 0;
+            return { lat: a.lat + (b.lat - a.lat) * f, lng: a.lng + (b.lng - a.lng) * f, speed: a.speed != null ? a.speed : b.speed };
+          }
+        }
+        return points[points.length - 1];
+      }
+      function growTrail() {
+        while (lastSeg + 1 <= points.length - 2 && points[lastSeg + 2].ms <= simMs) {
+          const a = points[lastSeg + 1], b = points[lastSeg + 2];
+          const line = LF.polyline([[a.lat, a.lng], [b.lat, b.lng]], { color: speedColor(b.speed != null ? b.speed : a.speed), weight: 5, opacity: 0.95 }).addTo(map);
+          trail.push(line); layers.push(line); lastSeg++;
         }
       }
-      return points[points.length - 1];
-    }
-    function growTrail() {
-      while (lastSeg + 1 <= points.length - 2) {
-        const ni = lastSeg + 1;
-        if (points[ni + 1].ms <= simMs) {
-          const a = points[ni], b = points[ni + 1];
-          trail.push(L.polyline([[a.lat, a.lng], [b.lat, b.lng]], { color: speedColor(b.speed != null ? b.speed : a.speed), weight: 5, opacity: 0.95 }).addTo(map));
-          lastSeg = ni;
-        } else break;
+      function rebuild() { trail.forEach((l) => { map.removeLayer(l); layers = layers.filter((x) => x !== l); }); trail = []; lastSeg = -1; growTrail(); }
+      function render() {
+        const p = posAt(simMs);
+        marker.setLatLng([p.lat, p.lng]);
+        growTrail();
+        const bits = [clock(simMs), `${Math.round(p.speed || 0)} km/h`];
+        if (approx) bits.push('approx route');
+        read.textContent = bits.filter(Boolean).join(' · ');
+        scrub.value = String(Math.round((simMs - t0) / (t1 - t0) * 1000));
       }
-    }
-    function rebuildTrail() {
-      trail.forEach((l) => map.removeLayer(l));
-      trail = []; lastSeg = -1; growTrail();
-    }
-    function render() {
-      const p = posAt(simMs);
-      marker.setLatLng([p.lat, p.lng]);
-      growTrail();
-      read.textContent = `${msToClock(simMs)} · ${Math.round(p.speed || 0)} km/h${approx ? ' · approx route' : ''}`;
-      scrub.value = String(Math.round((simMs - t0) / (t1 - t0) * 1000));
-    }
-    function stop() { playing = false; lastReal = null; playBtn.innerHTML = `${I.play} Play`; if (getRaf()) cancelAnimationFrame(getRaf()); }
-    function frame(ts) {
-      if (!playing) return;
-      if (lastReal == null) lastReal = ts;
-      const dt = ts - lastReal; lastReal = ts;
-      simMs += dt * (Number(speedSel.value) * 60); // value = sim minutes per real second
-      if (simMs >= t1) { simMs = t1; render(); stop(); return; }
+      function frame(ts) {
+        if (!playing) return;
+        if (lastReal == null) lastReal = ts;
+        const dt = ts - lastReal; lastReal = ts;
+        simMs += dt * (Number(speedSel.value) * 60); // value = simulated minutes per real second
+        if (simMs >= t1) { simMs = t1; render(); stopPlay(); return; }
+        render();
+        tripRaf = requestAnimationFrame(frame);
+      }
+
+      playBtn.disabled = false; scrub.disabled = false;
+      playBtn.onclick = () => {
+        if (playing) { stopPlay(); return; }
+        if (simMs >= t1) { simMs = t0; rebuild(); }
+        playing = true; lastReal = null; playBtn.innerHTML = `${I.pause} Pause`;
+        tripRaf = requestAnimationFrame(frame);
+      };
+      scrub.oninput = () => { stopPlay(); simMs = t0 + (Number(scrub.value) / 1000) * (t1 - t0); rebuild(); render(); };
       render();
-      setRaf(requestAnimationFrame(frame));
     }
 
-    playBtn.disabled = false; scrub.disabled = false;
-    playBtn.onclick = () => {
-      if (playing) { stop(); return; }
-      if (simMs >= t1) { simMs = t0; rebuildTrail(); }
-      playing = true; lastReal = null; playBtn.innerHTML = `${I.pause} Pause`;
-      setRaf(requestAnimationFrame(frame));
-    };
-    scrub.oninput = () => { stop(); simMs = t0 + (Number(scrub.value) / 1000) * (t1 - t0); rebuildTrail(); render(); };
+    // --- day chips --------------------------------------------------------
+    daysEl.innerHTML = `<button type="button" class="trip-chip" data-day="">All 10 days</button>`
+      + days.map((d) => `<button type="button" class="trip-chip" data-day="${esc(d.date)}">${fmtDayShort(d.date)}<span class="trip-chip-n">${d.totals.trips}</span></button>`).join('');
+    daysEl.querySelectorAll('[data-day]').forEach((b) => (b.onclick = () => (b.dataset.day ? showDay(b.dataset.day) : showAll())));
 
-    read.textContent = `${msToClock(t0)} · ready${approx ? ' · approx route (no GPS breadcrumbs)' : ''}`;
-    render();
+    showAll();
   }
 
   function overview(v, services, defects) {
