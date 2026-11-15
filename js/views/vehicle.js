@@ -738,14 +738,13 @@ AD.views.vehicle = (function () {
 
   function dayCard(d, di) {
     const t = d.totals;
-    const canReplay = d.trips.some((x) => x.startC && x.endC);
     return `<section class="trip-day">
       <header class="trip-day-head">
         <div>
           <h3>${fmtTripDate(d.date)}</h3>
           <span class="t2">${t.trips} trip${t.trips === 1 ? '' : 's'} · ${t.km.toLocaleString('en-AU')} km · ${fmtMins(t.driveMin)} driving${t.idleMin ? ` · ${fmtMins(t.idleMin)} idle` : ''}${t.maxSpeed ? ` · top ${t.maxSpeed} km/h` : ''}</span>
         </div>
-        ${canReplay ? `<button class="btn btn-sm btn-primary" data-replay="${esc(d.date)}" data-di="${di}">${I.play} Replay day</button>` : ''}
+        <button class="btn btn-sm btn-primary" data-replay="${esc(d.date)}" data-di="${di}">${I.play} Replay day</button>
       </header>
       <ul class="trip-rows">
         ${d.trips.map((x) => `<li>
@@ -824,10 +823,12 @@ AD.views.vehicle = (function () {
 
     let points = [];
     let approx = false;
+    let pathDiag = '';
     try {
       const { data } = await AD.sb.functions.invoke('netstar', { body: { action: 'trip-path', rego: v.rego, netstarRego: v.netstarRego, date } });
       points = ((data && data.points) || []).filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
-    } catch (e) { /* fall back below */ }
+      if (data && data.raw) { try { pathDiag = JSON.stringify(data.raw); } catch (e) { pathDiag = String(data.raw); } }
+    } catch (e) { pathDiag = (e && e.message) || 'request failed'; }
 
     // Fallback: no breadcrumbs from travel-history — draw the trips' start/end
     // points instead (straight lines between them), clearly flagged approximate.
@@ -841,7 +842,10 @@ AD.views.vehicle = (function () {
       points = points.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
     }
 
-    if (points.length < 2) { read.textContent = 'No route available for this day.'; return; }
+    if (points.length < 2) {
+      read.innerHTML = `No route available for this day.${pathDiag ? ` <span class="muted" style="font-size:.8em">(${esc(pathDiag.slice(0, 160))})</span>` : ''}`;
+      return;
+    }
 
     const haveMs = points.every((p) => Number.isFinite(p.ms)) && points[points.length - 1].ms > points[0].ms;
     if (!haveMs) points.forEach((p, i) => (p.ms = i * 1000));
