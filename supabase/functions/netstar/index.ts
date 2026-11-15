@@ -596,7 +596,8 @@ Deno.serve(async (req: Request) => {
       const devices = await fetchVehicles();
       const dev = matchDevice(devices, body.rego, body.netstarRego);
       if (!dev) return json({ error: "No Netstar tracker for this vehicle", days: [] });
-      const daysBack = Math.min(Math.max(Number(body.days) || 14, 1), 31);
+      // trip-detail is capped at a 10-day window by Netstar.
+      const daysBack = Math.min(Math.max(Number(body.days) || 10, 1), 10);
       const now = Date.now();
       const { rows, raw } = await fetchTripDetail(dev.imei, netstarDate(now - daysBack * 86400000), netstarDate(now));
       const trips = rows.map(tripFromRow).filter((t) => t.day);

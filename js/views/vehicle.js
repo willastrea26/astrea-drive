@@ -693,7 +693,7 @@ AD.views.vehicle = (function () {
 
   function tripsTab(v) {
     return `<div class="trips-tab">
-      <div class="tab-tools"><span class="t2">Where ${esc(v.id)} has been — last 14 days, from its GPS tracker</span></div>
+      <div class="tab-tools"><span class="t2">Where ${esc(v.id)} has been — last 10 days, from its GPS tracker</span></div>
       <div id="trips-list"><div class="empty-tidy">${I.gauge} Loading trips from GPS…</div></div>
     </div>`;
   }
@@ -711,7 +711,7 @@ AD.views.vehicle = (function () {
     if (!list) return;
     if (tripsFor === v.id && tripsData) { renderTripDays(list, v, tripsData); return; }
     try {
-      const { data, error } = await AD.sb.functions.invoke('netstar', { body: { action: 'trips', rego: v.rego, netstarRego: v.netstarRego, days: 14 } });
+      const { data, error } = await AD.sb.functions.invoke('netstar', { body: { action: 'trips', rego: v.rego, netstarRego: v.netstarRego, days: 10 } });
       if (error) throw error;
       if (data && data.error && !(data.days && data.days.length)) {
         list.innerHTML = `<div class="empty-tidy">${I.map} ${esc(data.error)}.</div>`;
@@ -728,7 +728,7 @@ AD.views.vehicle = (function () {
     const days = (data && data.days) || [];
     if (!days.length) {
       const raw = data && data.raw ? String(data.raw) : '';
-      list.innerHTML = `<div class="empty-tidy">${I.map} No trips recorded in the last 14 days.</div>
+      list.innerHTML = `<div class="empty-tidy">${I.map} No trips recorded in the last 10 days.</div>
         ${raw ? `<details class="trip-diag"><summary>What the tracker service replied</summary><pre>${esc(raw)}</pre></details>` : ''}`;
       return;
     }
