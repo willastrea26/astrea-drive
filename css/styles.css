@@ -2478,7 +2478,6 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 
 /* KPI strip variants used on the revenue tab / dashboard */
 .strip-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
-.strip-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .strip-item.is-static { cursor: default; }
 .strip-item.is-static:hover { transform: none; border-color: var(--rule); box-shadow: inset 0 1px 0 rgba(255,255,255,.06), var(--shadow-1); }
 .kpi-sub { font-weight: 500; color: var(--muted); }
@@ -2536,7 +2535,6 @@ h1, h2, h3 { letter-spacing: -0.02em; }
   .veh-facts { grid-column: 1 / -1; padding-left: 0; border-left: 0; padding-top: 16px; border-top: 1px solid var(--rule); }
   .veh-actions { grid-column: 2; justify-self: end; grid-row: 1; }
   .strip-5 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .strip-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .rev-grid { grid-template-columns: minmax(0, 1fr); }
   .rev-grid > .section:first-child { grid-row: auto; }
 }
@@ -2546,7 +2544,6 @@ h1, h2, h3 { letter-spacing: -0.02em; }
   .veh-actions { grid-column: 1; justify-self: start; grid-row: auto; }
   .veh-facts { flex-wrap: wrap; gap: 18px 28px; }
   .strip-5 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .strip-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .rev-split { flex-direction: column; align-items: stretch; }
   .rev-donut { align-self: center; }
   .pg-grid { grid-template-columns: repeat(2, 1fr); }

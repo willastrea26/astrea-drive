@@ -14,64 +14,6 @@ AD.views.dashboard = (function () {
   }
   const OWNED_SCHEDULE_VAC_IDS = new Set(Array.from({ length: 8 }, (_, i) => `AVT${String(i + 1).padStart(2, '0')}`));
   let root = null, day = '', schedFilter = 'all';
-  // Live GPS status KPI tile: cached across redraws and refreshed in the
-  // background so opening/switching the dashboard never waits on, or spams,
-  // the Netstar live call.
-  let liveKpi = null, liveKpiAt = 0;
-  const LIVE_KPI_REFRESH_MS = 120000;
-  const LIVE_STALE_HOURS = 24;
-  /** Netstar reports times as "DD-MM-YYYY HH:MM:SS" (Australia local). -> ms epoch | null */
-  function parseNsTime(s) {
-    const m = /^(\d{2})-(\d{2})-(\d{4})\s+(\d{2}):(\d{2}):(\d{2})/.exec(String(s || ''));
-    if (!m) return null;
-    const [, dd, mm, yyyy, hh, mi, ss] = m;
-    const t = Date.parse(`${yyyy}-${mm}-${dd}T${hh}:${mi}:${ss}+11:00`); // treat as Sydney; close enough here
-    return Number.isFinite(t) ? t : null;
-  }
-  /** Classify a live Netstar position — mirrors tracker.js's liveStatus() so the
-   *  wording stays consistent with the live Tracker page. */
-  function classifyLive(p) {
-    const seen = parseNsTime(p.lastData);
-    if (!p.hasFix || (seen != null && Date.now() - seen > LIVE_STALE_HOURS * 3600000)) return 'offline';
-    const on = String(p.ignition || '').toLowerCase() === 'on';
-    if (on && (p.speed || 0) > 0) return 'moving';
-    if (on) return 'idling';
-    return 'parked';
-  }
-  async function fetchLiveKpi() {
-    try {
-      const { data, error } = await AD.sb.functions.invoke('netstar', { body: { action: 'live' } });
-      if (error || !data || !Array.isArray(data.positions)) return null;
-      const counts = { moving: 0, idling: 0, parked: 0, offline: 0 };
-      data.positions.forEach((p) => counts[classifyLive(p)]++);
-      return { counts, total: data.positions.length };
-    } catch (e) { return null; }
-  }
-  const LIVE_KPI_WORD = { moving: 'moving', idling: 'idling', parked: 'parked', offline: 'no signal' };
-  function liveKpiTile() {
-    if (!liveKpi) {
-      return `<div class="strip-item is-static" id="live-kpi">
-        <div class="kpi-top">${kpiIco(I.map, 'blue')}<span class="kpi-title">Live GPS status</span></div>
-        <span class="v">—</span>
-        <span class="d">Loading from GPS…</span>
-      </div>`;
-    }
-    const { counts, total } = liveKpi;
-    if (!total) {
-      return `<div class="strip-item is-static" id="live-kpi">
-        <div class="kpi-top">${kpiIco(I.map, 'blue')}<span class="kpi-title">Live GPS status</span></div>
-        <span class="v">—</span>
-        <span class="d">No trackers reporting</span>
-      </div>`;
-    }
-    const active = counts.moving + counts.idling;
-    const parts = ['moving', 'idling', 'parked', 'offline'].filter((k) => counts[k]).map((k) => `${counts[k]} ${LIVE_KPI_WORD[k]}`);
-    return `<div class="strip-item is-static" id="live-kpi">
-      <div class="kpi-top">${kpiIco(I.map, 'blue')}<span class="kpi-title">Live GPS status</span></div>
-      <span class="v">${active} of ${total}</span>
-      <span class="d">${esc(parts.join(' · '))} <span class="t2">now</span></span>
-    </div>`;
-  }
   // Which insight is on screen. Held across redraws so a background refresh
   // doesn't yank the band back to the first card while it's being read.
   let insightIdx = 0, insightTimer = null;
@@ -565,7 +507,7 @@ AD.views.dashboard = (function () {
     el.innerHTML = `
       ${insightsBand(facts({ vehicles, vac, svc, rego, defects, today }))}
 
-      <div class="strip strip-4" role="group" aria-label="Fleet summary">
+      <div class="strip" role="group" aria-label="Fleet summary">
         ${donutCard({
           go: ['fleet', {}], icon: kpiIco(I.truck, 'blue'), label: 'Fleet availability',
           ring: donutRing(byStatus, `${Math.round((available.length / (vehicles.length || 1)) * 100)}%`, 'available'),
@@ -590,7 +532,6 @@ AD.views.dashboard = (function () {
           foot: regoHealth.overdue ? `<span class="flag flag-red">${regoHealth.overdue} expired</span>`
             : regoHealth.soon ? `<span class="flag flag-amber">${regoHealth.soon} within 2 weeks</span>` : 'All current'
         })}
-        ${liveKpiTile()}
       </div>
 
       ${insights(vehicles, vac, priParts)}
@@ -653,15 +594,6 @@ AD.views.dashboard = (function () {
     const todayBtn = el.querySelector('#sched-today');
     if (todayBtn) todayBtn.onclick = () => { day = today; AD.setParams({}); draw(); };
     el.querySelectorAll('.sched-tab').forEach(t => t.addEventListener('click', () => { schedFilter = t.dataset.scope; draw(); }));
-
-    if (!liveKpi || Date.now() - liveKpiAt > LIVE_KPI_REFRESH_MS) {
-      fetchLiveKpi().then((r) => {
-        if (!r) return;
-        liveKpi = r; liveKpiAt = Date.now();
-        const tile = document.getElementById('live-kpi');
-        if (tile && tile.parentNode) tile.outerHTML = liveKpiTile();
-      });
-    }
   }
 
   // ---------- Fleet insights (charts) ----------
