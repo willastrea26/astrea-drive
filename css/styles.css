@@ -40,6 +40,7 @@
   /* Signals (attention only) */
   --red: #c4242b;   --red-tint: #fdf2f2;
   --amber: #a85a06; --amber-tint: #fdf6ea;
+  --cs-amber: #e09a3e; --cs-blue: #4f8ef7; /* cost-sheet trend chart: softer, cohesive pair for the unplanned/fuel layers */
   --green: #147a55;
   --slate: #5f6b7d; --slate-tint: #eef0f3;
   --teal: #0e7285;  --teal-tint: #e7f4f6;
@@ -1465,11 +1466,11 @@ input[type=text], input[type=number], input[type=date], input[type=datetime-loca
 .cs-grid { stroke: var(--viz-grid); stroke-width: .5; opacity: .35; }
 .cs-grid-x { stroke-opacity: .22; }
 .cs-grid-minor { stroke-opacity: .18; }
-.cs-line-svg { --cs-line: var(--amber); }
+.cs-line-svg { --cs-line: var(--cs-amber); }
 .cs-area { fill: url(#cs-area-grad); stroke: none; }
 .cs-band { fill: url(#cs-band-grad); stroke: none; }
 .cs-band-fuel { fill: url(#cs-band-fuel-grad); stroke: none; }
-.cs-line-grand { fill: none; stroke: var(--blue); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; opacity: .9; }
+.cs-line-grand { fill: none; stroke: var(--cs-blue); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; opacity: .95; filter: url(#cs-glow-blue); }
 /* Lines — smooth, glowing, futuristic */
 .cs-line-planned { fill: none; stroke: var(--mint); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; filter: url(#cs-glow-mint); }
 .cs-line-path { fill: none; stroke: var(--cs-line); stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; filter: url(#cs-glow-amber); }
@@ -2014,6 +2015,7 @@ input[type=text], input[type=number], input[type=date], input[type=datetime-loca
   /* Signals */
   --red: #f87171;   --red-tint: rgba(239, 68, 68, .18);
   --amber: #fbbf24; --amber-tint: rgba(251, 191, 36, .16);
+  --cs-amber: #fbbf24; --cs-blue: #60a5fa;
   --green: #4ade80;
   --slate: #a7bccd; --slate-tint: rgba(167, 188, 205, .14);
   --teal: #2dd4bf;  --teal-tint: rgba(45, 212, 191, .16);

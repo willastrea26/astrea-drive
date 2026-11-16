@@ -49,7 +49,7 @@ AD.views['cost-sheet'] = (function () {
   // for opposite responses, so every figure that can carry the split, does.
   const PLANNED = 'Service', UNPLANNED = 'Defect';
   const sumKind = (rows, kind) => sum(rows.filter((r) => r.kind === kind));
-  const COLOR_PLANNED = 'var(--mint)', COLOR_UNPLANNED = 'var(--amber)', COLOR_FUEL = 'var(--blue)';
+  const COLOR_PLANNED = 'var(--mint)', COLOR_UNPLANNED = 'var(--cs-amber)', COLOR_FUEL = 'var(--cs-blue)';
 
   // Imported fuel-card spend, kept separate from maintenance rows so it never
   // skews the planned/unplanned maintenance figures — it rides on top as its
@@ -447,14 +447,14 @@ AD.views['cost-sheet'] = (function () {
               <stop offset="100%" style="stop-color:var(--mint);stop-opacity:0"></stop>
             </linearGradient>
             <linearGradient id="cs-band-grad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" style="stop-color:var(--amber);stop-opacity:.42"></stop>
-              <stop offset="50%" style="stop-color:var(--amber);stop-opacity:.20"></stop>
-              <stop offset="100%" style="stop-color:var(--amber);stop-opacity:.06"></stop>
+              <stop offset="0%" style="stop-color:var(--cs-amber);stop-opacity:.36"></stop>
+              <stop offset="50%" style="stop-color:var(--cs-amber);stop-opacity:.16"></stop>
+              <stop offset="100%" style="stop-color:var(--cs-amber);stop-opacity:.05"></stop>
             </linearGradient>
             <linearGradient id="cs-band-fuel-grad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" style="stop-color:var(--blue);stop-opacity:.40"></stop>
-              <stop offset="60%" style="stop-color:var(--blue);stop-opacity:.18"></stop>
-              <stop offset="100%" style="stop-color:var(--blue);stop-opacity:.05"></stop>
+              <stop offset="0%" style="stop-color:var(--cs-blue);stop-opacity:.32"></stop>
+              <stop offset="60%" style="stop-color:var(--cs-blue);stop-opacity:.14"></stop>
+              <stop offset="100%" style="stop-color:var(--cs-blue);stop-opacity:.04"></stop>
             </linearGradient>
             <linearGradient id="cs-proj-area-grad" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" style="stop-color:var(--violet);stop-opacity:.30"></stop>
@@ -469,7 +469,13 @@ AD.views['cost-sheet'] = (function () {
             </filter>
             <filter id="cs-glow-amber" x="-12%" y="-12%" width="124%" height="124%">
               <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="blur"/>
-              <feFlood flood-color="var(--amber)" flood-opacity=".4"/>
+              <feFlood flood-color="var(--cs-amber)" flood-opacity=".4"/>
+              <feComposite in2="blur" operator="in"/>
+              <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
+            <filter id="cs-glow-blue" x="-12%" y="-12%" width="124%" height="124%">
+              <feGaussianBlur in="SourceGraphic" stdDeviation="2.5" result="blur"/>
+              <feFlood flood-color="var(--cs-blue)" flood-opacity=".4"/>
               <feComposite in2="blur" operator="in"/>
               <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
             </filter>
