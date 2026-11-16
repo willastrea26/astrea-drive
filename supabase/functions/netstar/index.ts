@@ -406,9 +406,20 @@ async function mapLimit<T, R>(
  * readings to the sync_odometers_from_telematics() database function, which
  * applies them (only ever increasing) and logs a summary. That function is
  * SECURITY DEFINER, so no service-role key is needed here — this calls it
- * with the ordinary anon key.
+ * with the ordinary anon key. Also refreshes trip stats and engine hours.
+ *
+ * depth 'recent' (default): pulls only the last RECENT_DAYS days of daily
+ * engine hours — a handful of calls per vehicle, safely inside Netstar's rate
+ * limit even run back-to-back. Used for the nightly cron and the manual
+ * "Sync GPS data" button.
+ * depth 'full': pulls the full 30-day window (one call per device per day —
+ * a few hundred calls, ~60-90s paced). Used for the weekly deep-resync cron,
+ * or a manual full resync, to backfill any days a light run never reaches.
+ * Either way, the 30-day totals shown in the app come from everything ever
+ * stored in vehicle_work_hours_daily, not just what this run fetched — so a
+ * light run never makes the numbers look thinner than they really are.
  */
-async function syncOdometers() {
+async function syncOdometers(depth: "recent" | "full" = "recent") {
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ??
     "sb_publishable_hInlEU8CHjlKIiMtAz4t1g_qggctjTA";
@@ -479,12 +490,13 @@ async function syncOdometers() {
   // chart AND the 30-day total). One workhour-report call per device per day,
   // newest days first so a partial run still fills the most recent week. Calls
   // are paced and retried on 429 (see nsFetch) and stop at a time budget.
+  const RECENT_DAYS = 3, FULL_DAYS = 30;
   let dailyRecorded = 0;
   let workHoursRecorded = 0;
-  const dailyDebug: Record<string, unknown> = {};
+  const dailyDebug: Record<string, unknown> = { depth };
   const workHoursDebug: Record<string, unknown> = {};
   try {
-    const days = sydneyDays(30);
+    const days = sydneyDays(depth === "full" ? FULL_DAYS : RECENT_DAYS);
     const tasks: Array<{ rego: string; imei: string; day: { key: string; from: string; to: string } }> = [];
     for (const day of days) for (const v of devices) tasks.push({ rego: v.rego, imei: v.imei, day });
     dailyDebug.calls = tasks.length;
@@ -525,29 +537,12 @@ async function syncOdometers() {
       dailyRecorded += Number(dData) || 0;
     }
 
-    // 30-day total per vehicle = sum of the daily rows we got. windowDays is
-    // how many days we actually got through, so the per-week rate stays honest.
-    const daysDone = devices.length ? Math.max(1, Math.floor(started / devices.length)) : 1;
-    const sums = new Map<string, { hours: number; distance: number }>();
-    for (const r of dayRows) {
-      const s = sums.get(r.rego) ?? { hours: 0, distance: 0 };
-      s.hours += r.hours;
-      s.distance += r.distance ?? 0;
-      sums.set(r.rego, s);
-    }
-    const workRows = [...sums].filter(([, s]) => s.hours > 0).map(([rego, s]) => ({
-      rego,
-      hours: Math.round(s.hours * 100) / 100,
-      distance: Math.round(s.distance),
-      days: daysDone,
-    }));
-    workHoursDebug.rows = workRows.length;
-    workHoursDebug.daysCovered = daysDone;
-    if (workRows.length) {
-      const { data: whData, error: whErr } = await db.rpc("record_work_hours", { rows: workRows });
-      if (whErr) workHoursDebug.rpcError = whErr.message;
-      else workHoursRecorded = Number(whData) || workRows.length;
-    }
+    // Roll the 30-day "hrs/week" total up from EVERY day ever stored, not
+    // just what this run fetched — so a light 'recent' run never makes the
+    // total look thinner than it really is. See refresh-work-hours-totals.sql.
+    const { data: whData, error: whErr } = await db.rpc("refresh_work_hours_totals");
+    if (whErr) workHoursDebug.rpcError = whErr.message;
+    else workHoursRecorded = Number(whData) || 0;
   } catch (e) {
     dailyDebug.error = String((e as Error)?.message ?? e);
   }
@@ -589,7 +584,9 @@ Deno.serve(async (req: Request) => {
       return json({ positions });
     }
 
-    if (action === "sync-odometers") return await syncOdometers();
+    if (action === "sync-odometers") {
+      return await syncOdometers(body.depth === "full" ? "full" : "recent");
+    }
 
     // Trips for one vehicle over the last N days, grouped by day (Trips tab).
     if (action === "trips") {

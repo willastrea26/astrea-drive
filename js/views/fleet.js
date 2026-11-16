@@ -206,7 +206,7 @@ AD.views.fleet = (function () {
 
     const actions = isHired
       ? `<button class="btn btn-secondary" id="import-docs">${I.file} Import documents from folder</button><button class="btn btn-primary" id="add-veh">${I.plus} Add hired vehicle</button>`
-      : `<button class="btn btn-secondary" id="sync-odo">${I.gauge} Sync GPS data</button><button class="btn btn-primary" id="add-veh">${I.plus} Add vehicle</button>`;
+      : `<button class="btn btn-secondary" id="sync-odo">${I.gauge} Sync GPS data</button><button class="btn btn-link" id="sync-full" title="Pulls the full 30-day history instead of just the last few days — takes up to about a minute">${I.gauge} Full 30-day resync</button><button class="btn btn-primary" id="add-veh">${I.plus} Add vehicle</button>`;
 
     root.innerHTML = `
       ${AD.ui.pageHeader({ title, sub, actions })}
@@ -251,18 +251,29 @@ AD.views.fleet = (function () {
     const imp = root.querySelector('#import-docs');
     if (imp) imp.onclick = () => AD.importHiredDocs();
     const syncBtn = root.querySelector('#sync-odo');
-    if (syncBtn) syncBtn.onclick = () => syncOdometers(syncBtn);
+    if (syncBtn) syncBtn.onclick = () => syncOdometers(syncBtn, 'recent');
+    const fullBtn = root.querySelector('#sync-full');
+    if (fullBtn) fullBtn.onclick = async () => {
+      const ok = await AD.ui.confirm({
+        title: 'Full 30-day resync?',
+        message: 'Pulls the whole month of engine-hour data from the GPS trackers instead of just the last few days. Takes up to about a minute — only use this if the usual sync looks like it missed something.',
+        confirmText: 'Run full resync'
+      });
+      if (ok) syncOdometers(fullBtn, 'full');
+    };
     rows();
   }
 
   function sync() { AD.setParams(st); rows(); }
 
-  async function syncOdometers(btn) {
+  async function syncOdometers(btn, depth) {
     const label = btn.innerHTML;
+    const other = btn.id === 'sync-odo' ? document.getElementById('sync-full') : document.getElementById('sync-odo');
     btn.disabled = true;
-    btn.innerHTML = `${I.gauge} Syncing…`;
+    if (other) other.disabled = true;
+    btn.innerHTML = depth === 'full' ? `${I.gauge} Resyncing 30 days… (up to a minute)` : `${I.gauge} Syncing…`;
     try {
-      const { data, error } = await AD.sb.functions.invoke('netstar', { body: { action: 'sync-odometers' } });
+      const { data, error } = await AD.sb.functions.invoke('netstar', { body: { action: 'sync-odometers', depth } });
       if (error) throw error;
       if (data && data.error) throw new Error(data.error);
       await AD.store.load();
@@ -327,8 +338,12 @@ AD.views.fleet = (function () {
       };
       const needsDebug = extras.some((x) => x.rec !== undefined && !(Number(x.rec) > 0));
       const debugJson = JSON.stringify({ workHours: data.workHoursDebug, daily: data.dailyDebug, tripStats: data.tripStatsDebug }, null, 2);
+      const depthUsed = (data.dailyDebug && data.dailyDebug.depth) || 'recent';
+      const depthNote = depthUsed === 'full'
+        ? 'Full 30-day resync — pulled the whole month.'
+        : 'Light sync — pulled only the last few days (fast, safe to run anytime). The 30-day totals still cover the full month, rolled up from everything ever stored.';
       const extrasHtml = `
-        <h4 style="margin:18px 0 8px;font-size:.95em">Telematics data</h4>
+        <h4 style="margin:18px 0 8px;font-size:.95em">Telematics data <span class="muted" style="font-weight:400;font-size:.85em">— ${esc(depthNote)}</span></h4>
         <div class="odo-table">${extras.map(extraRow).join('')}</div>
         ${needsDebug ? `<details class="odo-untracked" open>
           <summary>Why nothing saved <span class="muted">— what Netstar replied</span></summary>
@@ -362,6 +377,7 @@ AD.views.fleet = (function () {
       AD.ui.toast('GPS sync failed: ' + ((e && e.message) || 'could not reach the tracker service'), 'error');
       btn.disabled = false;
       btn.innerHTML = label;
+      if (other) other.disabled = false;
     }
   }
 

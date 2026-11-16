@@ -2865,3 +2865,5 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 /* toggle which unit is shown */
 .act-panel[data-unit="h"] .act-when-k, .act-panel[data-unit="k"] .act-when-h { display: none; }
 .act-panel .viz-table { margin-top: 10px; }
+
+#sync-full { margin: 0 4px 0 14px; }

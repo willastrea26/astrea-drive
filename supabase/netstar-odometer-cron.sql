@@ -1,8 +1,18 @@
 -- =====================================================================
--- Astrea Drive — nightly odometer sync (scheduled job)
+-- Astrea Drive — nightly odometer sync (scheduled job) — LIGHT pass
 --
 -- Runs the netstar edge function's "sync-odometers" action once a night so
--- vehicle odometers stay current without anyone pressing the button.
+-- vehicle odometers stay current without anyone pressing the button. With
+-- no "depth" in the body it defaults to depth "recent" — only the last 3
+-- days of engine-hour data per vehicle (a few dozen calls, done in seconds),
+-- which stays comfortably clear of Netstar's rate limit every single night.
+--
+-- The 30-day totals shown in the app ("4 hrs/week" etc) still cover the full
+-- month — they're rolled up from everything ever stored, not just what a
+-- given run fetched. See refresh-work-hours-totals.sql.
+--
+-- Pair this with netstar-deep-resync-cron.sql (once a week), which pulls the
+-- full 30-day window to backfill any days this light nightly pass missed.
 --
 -- EASIEST WAY (recommended): use the dashboard, no SQL needed.
 --   Dashboard > Integrations > Cron  (or Database > Cron Jobs)
