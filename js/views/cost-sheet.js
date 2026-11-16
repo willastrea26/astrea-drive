@@ -5,6 +5,14 @@ AD.views['cost-sheet'] = (function () {
   const { esc, pageHeader, sectionHead } = AD.ui;
   const L = AD.logic, T = AD.time, I = AD.icons, V = AD.viz;
   const AVG_WEEKS = 4; // same trailing window the dashboard uses for its utilisation trend
+  // How many trailing periods the headline KPIs and "What moved" compare the
+  // period on screen against, per scope — a week against its last 4 weeks, a
+  // month against its last 3, a year against the one before it.
+  const SCOPE_CFG = {
+    week: { label: 'week', plural: 'weeks', baselineN: AVG_WEEKS },
+    month: { label: 'month', plural: 'months', baselineN: 3 },
+    year: { label: 'year', plural: 'years', baselineN: 1 }
+  };
   const RUN_WEEKS = 52; // running-cost window: a year of weeks, ending with the week on screen
   const RUN_PER_GROUP = 8; // running-cost rows per vehicle type; the rest live in the table view
   const MOVERS_MAX = 8; // vehicles shown in "What moved"; the rest live in the table view
@@ -13,7 +21,7 @@ AD.views['cost-sheet'] = (function () {
   const PROJ_MONTHS = 6;  // months to project forward from current
   const MIN_USAGE_SPAN_DAYS = 28;      // below this, a vehicle's own measurement window is too noisy to trust a per-km rate
   const THIN_USAGE_SPAN_DAYS = 12 * 7; // below this, the rate is shown but flagged "Thin data"
-  let root = null, start = '', period = 'month';
+  let root = null, start = '', end = '', scope = 'week', period = 'month';
   const PROJ_STORE_KEY = 'ad-cost-proj-overrides';
   let projOverrides = (() => { try { const v = JSON.parse(localStorage.getItem(PROJ_STORE_KEY)) || {}; /* migrate old {planned,unplanned} format */ for (const k of Object.keys(v)) { if (typeof v[k] === 'object') v[k] = (v[k].planned || 0) + (v[k].unplanned || 0); } return v; } catch { return {}; } })();
   function saveOverrides() { try { localStorage.setItem(PROJ_STORE_KEY, JSON.stringify(projOverrides)); } catch {} }
@@ -23,6 +31,38 @@ AD.views['cost-sheet'] = (function () {
   let fresh = true;
 
   const mondayOf = (key) => T.addDays(key, -T.dayOfWeek(key));
+
+  /** The start of the week/month/year containing `key`, for whichever scope is on screen. */
+  function periodStart(sc, key) {
+    if (sc === 'week') return mondayOf(key);
+    const { y, m } = T.parseKey(key);
+    return sc === 'month' ? `${y}-${T.pad(m)}-01` : `${y}-01-01`;
+  }
+  /** The last day of the week/month/year that starts at `s`. */
+  function periodEnd(sc, s) {
+    const { y, m } = T.parseKey(s);
+    if (sc === 'week') return T.addDays(s, 6);
+    if (sc === 'month') {
+      const dt = new Date(Date.UTC(y, m, 0)); // day 0 of next month = last day of this one
+      return `${dt.getUTCFullYear()}-${T.pad(dt.getUTCMonth() + 1)}-${T.pad(dt.getUTCDate())}`;
+    }
+    return `${y}-12-31`;
+  }
+  /** One period forward/back (dir = ±1) from a period start `s`. */
+  function stepPeriod(sc, s, dir) {
+    const { y, m } = T.parseKey(s);
+    if (sc === 'week') return T.addDays(s, dir * 7);
+    if (sc === 'month') {
+      const dt = new Date(Date.UTC(y, m - 1 + dir, 1));
+      return `${dt.getUTCFullYear()}-${T.pad(dt.getUTCMonth() + 1)}-01`;
+    }
+    return `${y + dir}-01-01`;
+  }
+  function fmtPeriodLabel(sc, s) {
+    if (sc === 'week') return `${T.fmtKey(s)} – ${T.fmtKey(periodEnd(sc, s))}`;
+    const { y, m } = T.parseKey(s);
+    return sc === 'month' ? `${T.MONTHS[m - 1]} ${y}` : String(y);
+  }
 
   /**
    * Every service and resolved defect the fleet has ever been charged for, as
@@ -40,7 +80,6 @@ AD.views['cost-sheet'] = (function () {
   }
 
   const rowsBetween = (from, to) => allRows().filter((r) => r.date >= from && r.date <= to);
-  const rowsFor = (from) => rowsBetween(from, T.addDays(from, 6));
   const rowsForMonth = (key) => allRows().filter((r) => r.date.slice(0, 7) === key);
 
   const sum = (rows) => rows.reduce((n, r) => n + r.cost, 0);
@@ -62,11 +101,12 @@ AD.views['cost-sheet'] = (function () {
   const fuelBetween = (from, to) => fuelRows().filter((r) => r.date >= from && r.date <= to).reduce((n, r) => n + r.cost, 0);
   const fuelForMonth = (key) => fuelRows().filter((r) => r.date.slice(0, 7) === key).reduce((n, r) => n + r.cost, 0);
 
-  /** The AVG_WEEKS weeks immediately before `before` — the baseline "an average week" is measured against. */
-  function baseline(before) {
-    return Array.from({ length: AVG_WEEKS }, (_, i) => {
-      const from = T.addDays(before, -7 * (i + 1));
-      return { from, rows: rowsFor(from) };
+  /** The scope's own trailing baseline — the N periods (weeks/months/years) immediately before `curStart`. */
+  function baseline(curStart) {
+    let cursor = curStart;
+    return Array.from({ length: SCOPE_CFG[scope].baselineN }, () => {
+      cursor = stepPeriod(scope, cursor, -1);
+      return { from: cursor, to: periodEnd(scope, cursor), rows: rowsBetween(cursor, periodEnd(scope, cursor)) };
     });
   }
 
@@ -77,10 +117,11 @@ AD.views['cost-sheet'] = (function () {
     return pct > 0 ? 'worse' : pct < 0 ? 'better' : null;
   }
 
-  /** Change line under a figure, against the AVG_WEEKS average. `toned` marks a rise as worse — only money is judged. */
+  /** Change line under a figure, against the scope's trailing average. `toned` marks a rise as worse — only money is judged. */
   function delta(now, avg, haveBaseline, fmt, toned) {
-    if (!haveBaseline) return `<small class="cs-delta">${now ? `No weeks before this one yet` : 'Nothing recorded'}</small>`;
-    if (!avg) return `<small class="cs-delta">${now ? `Nothing in the ${AVG_WEEKS}-week average` : 'Nothing either way'}</small>`;
+    const cfg = SCOPE_CFG[scope];
+    if (!haveBaseline) return `<small class="cs-delta">${now ? `No ${cfg.plural} before this one yet` : 'Nothing recorded'}</small>`;
+    if (!avg) return `<small class="cs-delta">${now ? `Nothing in the ${cfg.baselineN}-${cfg.label} average` : 'Nothing either way'}</small>`;
     const pct = Math.round(((now - avg) / avg) * 100);
     const arrow = pct > 0 ? '↑' : pct < 0 ? '↓' : '—';
     const tone = trendTone(now, avg, haveBaseline, toned) || 'flat';
@@ -102,7 +143,9 @@ AD.views['cost-sheet'] = (function () {
 
   function render(el, params) {
     root = el;
-    start = /^\d{4}-\d{2}-\d{2}$/.test(params.week || '') ? mondayOf(params.week) : mondayOf(T.todayKey());
+    scope = params.scope === 'month' || params.scope === 'year' ? params.scope : 'week';
+    const anchor = /^\d{4}-\d{2}-\d{2}$/.test(params.week || '') ? params.week : T.todayKey();
+    start = periodStart(scope, anchor);
     period = params.period === 'week' ? 'week' : 'month';
     fresh = true;
     draw();
@@ -110,15 +153,17 @@ AD.views['cost-sheet'] = (function () {
 
   function draw() {
     const el = root;
-    const thisWeek = mondayOf(T.todayKey());
-    const end = T.addDays(start, 6);
-    const now = rowsFor(start);
+    const cfg = SCOPE_CFG[scope];
+    end = periodEnd(scope, start);
+    const thisStart = periodStart(scope, T.todayKey());
+    const isCurrent = start === thisStart;
+    const now = rowsBetween(start, end);
     const base = baseline(start);
-    const haveBaseline = base.some((w) => w.rows.length || fuelBetween(w.from, T.addDays(w.from, 6)) > 0);
+    const haveBaseline = base.some((w) => w.rows.length || fuelBetween(w.from, w.to) > 0);
 
-    const spend = sum(now) + fuelBetween(start, end), avgSpend = avgOf(base.map((w) => sum(w.rows) + fuelBetween(w.from, T.addDays(w.from, 6))));
+    const spend = sum(now) + fuelBetween(start, end), avgSpend = avgOf(base.map((w) => sum(w.rows) + fuelBetween(w.from, w.to)));
 
-    // Share rather than dollars: unplanned spend rises with a heavy week either way,
+    // Share rather than dollars: unplanned spend rises with a heavy period either way,
     // but the proportion is what says whether maintenance is keeping ahead of failure.
     const unplanned = sumKind(now, UNPLANNED);
     const share = spend ? (unplanned / spend) * 100 : 0;
@@ -129,8 +174,9 @@ AD.views['cost-sheet'] = (function () {
     const shareFoot = !spend ? '<small class="cs-delta">Nothing recorded</small>'
       : `<small class="cs-delta${shareTone ? ' cs-delta-' + shareTone : ''}">${L.fmtAUD(unplanned)} of ${L.fmtAUD(spend)}${haveBaseline && avgSpend ? ` · ${Math.round(avgShare)}% avg` : ''}</small>`;
 
-    // Projected rest-of-year spend for the KPI
-    const projForKpi = projectedMonths(end);
+    // Projected rest-of-year spend for the KPI — not meaningful once you're
+    // already looking at a whole year, so it only appears in week/month view.
+    const projForKpi = scope === 'year' ? [] : projectedMonths(end);
     const curYear = T.parseKey(end).y;
     const restOfYearMonths = projForKpi.filter(p => { const yr = parseInt(p.key.split(' ')[1]); return yr === curYear; });
     const projRestTotal = restOfYearMonths.reduce((n, p) => n + p.total, 0);
@@ -142,17 +188,22 @@ AD.views['cost-sheet'] = (function () {
     el.innerHTML = `
       ${pageHeader({
         title: 'Cost sheet',
-        sub: `${T.fmtKey(start)} – ${T.fmtKey(end)}${start === thisWeek ? ' · this week' : ''} · against the average of the ${AVG_WEEKS} weeks before`,
+        sub: `${fmtPeriodLabel(scope, start)}${isCurrent ? ` · this ${cfg.label}` : ''} · against the average of the ${cfg.baselineN} ${cfg.baselineN === 1 ? cfg.label : cfg.plural} before`,
         actions: `<button type="button" class="btn btn-primary" id="cs-import">${I.file} Import cost data</button>
-          <div class="seg" role="group" aria-label="Week">
-            <button type="button" id="w-prev" aria-label="Previous week">${I.chevL}</button>
-            <button type="button" id="w-this"${start === thisWeek ? ' class="on"' : ''}>This week</button>
-            <button type="button" id="w-next" aria-label="Next week">${I.chevR}</button>
+          <div class="seg" role="group" aria-label="View by">
+            <button type="button" data-scope="week"${scope === 'week' ? ' class="on"' : ''}>Week</button>
+            <button type="button" data-scope="month"${scope === 'month' ? ' class="on"' : ''}>Month</button>
+            <button type="button" data-scope="year"${scope === 'year' ? ' class="on"' : ''}>Year</button>
           </div>
-          <input type="date" id="w-jump" class="cs-jump" value="${start}" aria-label="Go to week">`
+          <div class="seg" role="group" aria-label="${esc(cfg.label)}">
+            <button type="button" id="w-prev" aria-label="Previous ${cfg.label}">${I.chevL}</button>
+            <button type="button" id="w-this"${isCurrent ? ' class="on"' : ''}>This ${cfg.label}</button>
+            <button type="button" id="w-next" aria-label="Next ${cfg.label}">${I.chevR}</button>
+          </div>
+          <input type="date" id="w-jump" class="cs-jump" value="${start}" aria-label="Go to ${cfg.label}">`
       })}
 
-      <div class="cs-kpis" role="group" aria-label="This week against the average week">
+      <div class="cs-kpis" role="group" aria-label="This ${cfg.label} against the average ${cfg.label}">
         ${kpi('Total spend', L.fmtAUD(spend), delta(spend, avgSpend, haveBaseline, L.fmtAUD, true), trendTone(spend, avgSpend, haveBaseline, true))}
         ${kpi('Unplanned share', `${Math.round(share)}%`, shareFoot, shareTone)}
         ${restOfYearMonths.length ? kpi('Projected to year-end', L.fmtAUD(projRestTotal), `<small class="cs-delta">${restOfYearMonths.length} month${restOfYearMonths.length === 1 ? '' : 's'} remaining · ${L.fmtAUD(projMonthAvg)}/mo avg</small>`) : ''}
@@ -174,21 +225,31 @@ AD.views['cost-sheet'] = (function () {
 
       ${fuelEconomy(end)}
 
-      <p class="section-foot muted small">Spend is recorded services plus resolved defects, counted on the day the service was recorded or the defect was resolved; imported fuel-card spend is shown as its own band on Spend over time, folded into Cost vs usage, and broken out on its own in Fuel cost per km. Planned is scheduled servicing; unplanned is a defect repair. The weekly KPIs above cover maintenance only. The average is the ${AVG_WEEKS} weeks before this one. Running cost divides a vehicle's spend by the distance or hours covered between its first and last service in the window, so it needs at least two services to show a rate.</p>
+      <p class="section-foot muted small">Spend is recorded services plus resolved defects, counted on the day the service was recorded or the defect was resolved; imported fuel-card spend is shown as its own band on Spend over time, folded into Cost vs usage, and broken out on its own in Fuel cost per km. Planned is scheduled servicing; unplanned is a defect repair. The KPIs above cover maintenance only, for the ${cfg.label} on screen, against the average of the ${cfg.baselineN} ${cfg.baselineN === 1 ? cfg.label : cfg.plural} before. Running cost divides a vehicle's spend by the distance or hours covered between its first and last service in the window, so it needs at least two services to show a rate.</p>
 
       ${projection(end)}`;
 
     el.querySelector('#cs-import').onclick = () => AD.importFuelData(() => draw());
-    el.querySelector('#w-prev').onclick = () => go(T.addDays(start, -7));
-    el.querySelector('#w-next').onclick = () => go(T.addDays(start, 7));
-    el.querySelector('#w-this').onclick = () => go(thisWeek);
-    el.querySelector('#w-jump').onchange = (e) => { if (e.target.value) go(mondayOf(e.target.value)); };
+    el.querySelector('#w-prev').onclick = () => go(stepPeriod(scope, start, -1));
+    el.querySelector('#w-next').onclick = () => go(stepPeriod(scope, start, 1));
+    el.querySelector('#w-this').onclick = () => go(thisStart);
+    el.querySelector('#w-jump').onchange = (e) => { if (e.target.value) go(periodStart(scope, e.target.value)); };
+    el.querySelectorAll('[data-scope]').forEach((b) => (b.onclick = () => setScope(b.dataset.scope)));
     el.querySelectorAll('[data-period]').forEach((b) => (b.onclick = () => setPeriod(b.dataset.period)));
     bindProjectionInputs();
   }
 
-  function go(week) {
-    start = week;
+  function go(key) {
+    start = key;
+    fresh = true;
+    setParams();
+    draw();
+  }
+
+  function setScope(s) {
+    if (s === scope) return;
+    scope = s;
+    start = periodStart(s, start); // land on the period that contains where we were
     fresh = true;
     setParams();
     draw();
@@ -203,7 +264,7 @@ AD.views['cost-sheet'] = (function () {
   }
 
   function setParams() {
-    AD.setParams({ week: start === mondayOf(T.todayKey()) ? '' : start, period: period === 'month' ? '' : period });
+    AD.setParams({ week: start === periodStart(scope, T.todayKey()) ? '' : start, period: period === 'month' ? '' : period, scope: scope === 'week' ? '' : scope });
   }
 
   /** One row per calendar month over the trailing year, each bar split planned against unplanned. */
@@ -539,7 +600,6 @@ AD.views['cost-sheet'] = (function () {
   function bindProjectionInputs() {
     const section = root.querySelector('#cs-proj-section');
     if (!section) return;
-    const end = T.addDays(start, 6);
     const proj = projectedMonths(end);
     section.querySelectorAll('.cs-proj-input').forEach((inp) => {
       inp.addEventListener('change', () => {
@@ -563,6 +623,8 @@ AD.views['cost-sheet'] = (function () {
    * nothing, so it stays out of the chart and only appears in the table view.
    */
   function movers(now, base) {
+    const cfg = SCOPE_CFG[scope];
+    const avgLabel = `${cfg.baselineN}-${cfg.label} average`;
     const baseIds = base.flatMap((w) => w.rows.map((r) => r.vehicleId));
     const ids = [...new Set(now.map((r) => r.vehicleId).concat(baseIds))];
     const lines = ids.map((id) => {
@@ -581,21 +643,21 @@ AD.views['cost-sheet'] = (function () {
       const up = r.change > 0;
       const pct = (Math.abs(r.change) / maxChange) * 50;
       return `<a class="cs-row" href="${vehHref(r.id)}" style="--i:${i}" ${V.tipAttr(r.id, [
-        ['This week', L.fmtAUD(r.a), up ? 'var(--red)' : 'var(--green)'],
-        [`${AVG_WEEKS}-week average`, L.fmtAUD(r.b), 'var(--muted)']
+        [`This ${cfg.label}`, L.fmtAUD(r.a), up ? 'var(--red)' : 'var(--green)'],
+        [avgLabel, L.fmtAUD(r.b), 'var(--muted)']
       ])}>
         <span class="id">${esc(r.id)}</span>
         <span class="cs-hbar cs-diverge"><i class="${up ? 'cs-up' : 'cs-down'}" style="${up ? 'left' : 'right'}:50%;width:${pct}%"></i></span>
         <span class="cs-row-val ${changeTone(r.change)}">${fmtChange(r.change)}</span>
-        <span class="cs-row-meta">${L.fmtAUD(r.a)} this week · ${L.fmtAUD(r.b)} average${r.jobs ? ` · ${r.jobs} job${r.jobs === 1 ? '' : 's'}` : ''}</span>
+        <span class="cs-row-meta">${L.fmtAUD(r.a)} this ${cfg.label} · ${L.fmtAUD(r.b)} average${r.jobs ? ` · ${r.jobs} job${r.jobs === 1 ? '' : 's'}` : ''}</span>
       </a>`;
     }).join('');
 
     return `<figure class="viz-card">
-      <figcaption><h3>What moved this week</h3><span class="viz-sub">Each vehicle against its own ${AVG_WEEKS}-week average · fleet ${Math.abs(net) < 0.005 ? 'unchanged' : fmtChange(net)} overall</span></figcaption>
-      ${rows ? `<div class="cs-rows">${rows}</div>` : '<p class="empty">No vehicle’s spend moved against its average this week.</p>'}
+      <figcaption><h3>What moved this ${cfg.label}</h3><span class="viz-sub">Each vehicle against its own ${avgLabel} · fleet ${Math.abs(net) < 0.005 ? 'unchanged' : fmtChange(net)} overall</span></figcaption>
+      ${rows ? `<div class="cs-rows">${rows}</div>` : `<p class="empty">No vehicle’s spend moved against its average this ${cfg.label}.</p>`}
       ${movedAll.length > moved.length ? `<p class="cs-more">${movedAll.length - moved.length} more moved by less — open the table to see them.</p>` : ''}
-      ${lines.length ? V.table(['Vehicle', 'Jobs', 'This week', `${AVG_WEEKS}-week average`, 'Change'],
+      ${lines.length ? V.table(['Vehicle', 'Jobs', `This ${cfg.label}`, avgLabel, 'Change'],
         lines.map((r) => [r.id, String(r.jobs), L.fmtAUD(r.a), L.fmtAUD(r.b), fmtChange(r.change)])) : ''}
     </figure>`;
   }
