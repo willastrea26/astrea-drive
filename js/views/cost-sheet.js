@@ -605,77 +605,113 @@ AD.views['cost-sheet'] = (function () {
    * (i.e. GPS-tracked with enough history); the rest have nothing to divide by.
    */
   function costVsUsage(end) {
-    const from = T.addDays(end, -(7 * RUN_WEEKS - 1));
-    const windowDays = RUN_WEEKS * 7;
-    // Spend = maintenance (services + defects) + imported fuel, so cost per km
-    // reflects the true running cost, not just the workshop bills.
-    const spendByVeh = new Map();
-    rowsBetween(from, end).forEach((r) => spendByVeh.set(r.vehicleId, (spendByVeh.get(r.vehicleId) || 0) + r.cost));
-    const fuelByVeh = new Map();
-    fuelRows().filter((r) => r.date >= from && r.date <= end).forEach((r) => {
-      fuelByVeh.set(r.vehicleId, (fuelByVeh.get(r.vehicleId) || 0) + r.cost);
-      spendByVeh.set(r.vehicleId, (spendByVeh.get(r.vehicleId) || 0) + r.cost);
-    });
-    const unplannedByVeh = new Map();
-    rowsBetween(from, end).filter((r) => r.kind === UNPLANNED).forEach((r) => unplannedByVeh.set(r.vehicleId, (unplannedByVeh.get(r.vehicleId) || 0) + r.cost));
+    const MIN_SPAN_DAYS = 28;         // < 4 weeks of measurement is too noisy for a per-km figure
+    const THIN_SPAN_DAYS = 12 * 7;    // < 12 weeks gets a "thin data" caveat
+    const maxWindowDays = RUN_WEEKS * 7;
+    const fmtKmRate = (n) => '$' + (n >= 10 ? Math.round(n).toLocaleString('en-AU') : n.toFixed(2));
 
+    // Per vehicle, measure over its OWN honest window — the span we actually
+    // have data for — rather than extrapolating a short GPS sample out to 52
+    // fake weeks. When both km and hours data exist, use the SHORTER of the
+    // two spans so spend, km, and hours all cover the same real period and
+    // the rates are comparable.
     const lines = AD.store.all('vehicles').filter((v) => !v.hired).map((v) => {
-      const u = L.usageRate(v);
-      if (!u) return null;
-      const windowKm = u.perDay * windowDays;
-      if (!(windowKm > 0)) return null;
-      const spend = spendByVeh.get(v.id) || 0;
-      const wh = L.workHours(v);                                  // engine hours from telematics
-      const hoursYear = wh ? wh.perWeek * 52 : null;
-      return { v, spend, fuel: fuelByVeh.get(v.id) || 0, unplanned: unplannedByVeh.get(v.id) || 0, perDay: u.perDay, perWeek: u.perWeek,
-               windowKm, perKm: spend / windowKm,
-               hrsWeek: wh ? wh.perWeek : null, perHour: hoursYear && hoursYear > 0 ? spend / hoursYear : null };
-    }).filter(Boolean).sort((a, b) => b.perKm - a.perKm);
+      const u = L.usageRate(v);                                     // km rate from odometer history
+      const wh = L.workHours(v);                                    // engine hours from telematics
+      if (!u && !wh) return null;
+
+      const kmSpan = u ? Math.min(maxWindowDays, u.days) : 0;
+      const hrSpan = wh ? Math.min(maxWindowDays, wh.days) : 0;
+      // When we have both, use the shorter — both rates then share one honest window.
+      const span = u && wh ? Math.min(kmSpan, hrSpan)
+        : u ? kmSpan : hrSpan;
+      if (span < MIN_SPAN_DAYS) return null;                        // not enough data to trust a rate
+
+      const from = T.addDays(end, -(span - 1));
+      const maintRows = rowsBetween(from, end).filter((r) => r.vehicleId === v.id);
+      const maintSpend = maintRows.reduce((n, r) => n + r.cost, 0);
+      const unplanned = maintRows.filter((r) => r.kind === UNPLANNED).reduce((n, r) => n + r.cost, 0);
+      const fuel = fuelRows().filter((r) => r.vehicleId === v.id && r.date >= from && r.date <= end).reduce((n, r) => n + r.cost, 0);
+      const spend = maintSpend + fuel;
+
+      let perKm = null, windowKm = null;
+      if (u) {
+        windowKm = u.perDay * span;
+        if (windowKm > 0) perKm = spend / windowKm;
+      }
+      let perHour = null, windowHrs = null;
+      if (wh) {
+        windowHrs = wh.perDay * span;
+        if (windowHrs > 0) perHour = spend / windowHrs;
+      }
+      if (perKm == null && perHour == null) return null;
+
+      return { v, spend, fuel, unplanned,
+               span, kmSpan, hrSpan,
+               perDay: u ? u.perDay : null, perWeek: u ? u.perWeek : null,
+               windowKm, perKm,
+               hrsWeek: wh ? wh.perWeek : null, windowHrs, perHour,
+               thin: span < THIN_SPAN_DAYS };
+    }).filter(Boolean).sort((a, b) => (b.perKm || 0) - (a.perKm || 0));
     const anyHours = lines.some((l) => l.perHour != null);
 
     if (!lines.length) {
       return `<section class="section">
         ${sectionHead({ title: 'Cost vs usage', meta: 'Spend per kilometre actually driven' })}
-        <figure class="viz-card"><p class="empty">No usage data yet. Once vehicles have GPS-synced odometers with a week of history, their cost per kilometre appears here.</p></figure>
+        <figure class="viz-card"><p class="empty">No usage data yet. Once vehicles have at least ${MIN_SPAN_DAYS} days of GPS-synced odometer or engine-hour history, their cost per kilometre or hour appears here.</p></figure>
       </section>`;
     }
 
-    const medKm = median(lines.map((l) => l.perKm));
-    const medUse = median(lines.map((l) => l.perDay));
-    const top = Math.max(...lines.map((l) => l.perKm), 0.0001);
-    const fmtKmRate = (n) => '$' + (n >= 10 ? Math.round(n).toLocaleString('en-AU') : n.toFixed(2));
+    const medKm = median(lines.filter((l) => l.perKm != null).map((l) => l.perKm));
+    const medUse = median(lines.filter((l) => l.perDay != null).map((l) => l.perDay));
+    const top = Math.max(...lines.map((l) => l.perKm || 0), 0.0001);
+
+    const fmtSpan = (days) => days >= 49 ? `${Math.round(days / 7)} weeks` : `${days} days`;
 
     const rows = lines.map((l, i) => {
-      const costly = medKm > 0 && l.perKm > medKm * 1.3;
-      const lowUse = medUse > 0 && l.perDay < medUse * 0.6;
-      const flag = costly && lowUse ? '<span class="cs-flag">Low use · high cost</span>'
+      const costly = l.perKm != null && medKm > 0 && l.perKm > medKm * 1.3;
+      const lowUse = l.perDay != null && medUse > 0 && l.perDay < medUse * 0.6;
+      const flag = l.thin ? '<span class="cs-flag cs-flag-soft">Thin data</span>'
+        : costly && lowUse ? '<span class="cs-flag">Low use · high cost</span>'
         : costly ? '<span class="cs-flag">Costly per km</span>'
         : lowUse ? '<span class="cs-flag cs-flag-soft">Low use</span>' : '';
-      return `<a class="cs-row" href="${vehHref(l.v.id)}" style="--i:${i}" ${V.tipAttr(l.v.id, [
-        ['Cost per km', fmtKmRate(l.perKm), 'var(--amber)'],
-        ['Spend (year)', L.fmtAUD(l.spend), 'var(--muted)'],
+      const tipRows = [
+        ...(l.perKm != null ? [['Cost per km', fmtKmRate(l.perKm), 'var(--cs-amber)']] : []),
+        ...(l.perHour != null ? [['Cost per hour', fmtKmRate(l.perHour), 'var(--cs-amber)']] : []),
+        [`Spend (${fmtSpan(l.span)})`, L.fmtAUD(l.spend), 'var(--muted)'],
         ...(l.fuel ? [['of which fuel', L.fmtAUD(l.fuel), COLOR_FUEL]] : []),
-        ['Driven', `${Math.round(l.windowKm).toLocaleString('en-AU')} km`, 'var(--mint)']
-      ])}>
+        ...(l.windowKm != null ? [['Driven', `${Math.round(l.windowKm).toLocaleString('en-AU')} km`, 'var(--mint)']] : []),
+        ...(l.windowHrs != null ? [['Engine hours', `${Math.round(l.windowHrs).toLocaleString('en-AU')} hrs`, 'var(--mint)']] : [])
+      ];
+      const barPct = l.perKm != null ? (l.perKm / top) * 100 : 0;
+      const val = l.perKm != null ? `${fmtKmRate(l.perKm)}<small>/km</small>` : `${fmtKmRate(l.perHour)}<small>/hr</small>`;
+      return `<a class="cs-row" href="${vehHref(l.v.id)}" style="--i:${i}" ${V.tipAttr(l.v.id, tipRows)}>
         <span class="id">${esc(l.v.id)}</span>
-        <span class="cs-hbar"><i${costly ? ' class="cs-high"' : ''} style="width:${(l.perKm / top) * 100}%"></i><b class="cs-median" style="left:${(medKm / top) * 100}%"></b></span>
-        <span class="cs-row-val">${fmtKmRate(l.perKm)}<small>/km</small></span>
-        <span class="cs-row-meta">${flag ? flag + ' · ' : ''}${L.fmtAUD(l.spend)} over the year · ~${Math.round(l.perWeek).toLocaleString('en-AU')} km/week${l.perHour != null ? ` · ${fmtKmRate(l.perHour)}/hr · ~${Math.round(l.hrsWeek).toLocaleString('en-AU')} hrs/week` : ''}</span>
+        <span class="cs-hbar"><i${costly ? ' class="cs-high"' : ''} style="width:${barPct}%"></i>${medKm > 0 ? `<b class="cs-median" style="left:${(medKm / top) * 100}%"></b>` : ''}</span>
+        <span class="cs-row-val">${val}</span>
+        <span class="cs-row-meta">${flag ? flag + ' · ' : ''}${L.fmtAUD(l.spend)} over ${fmtSpan(l.span)}${l.perWeek != null ? ` · ~${Math.round(l.perWeek).toLocaleString('en-AU')} km/week` : ''}${l.perHour != null ? ` · ${fmtKmRate(l.perHour)}/hr · ~${Math.round(l.hrsWeek).toLocaleString('en-AU')} hrs/week` : ''}</span>
       </a>`;
     }).join('');
 
     const anyFuel = lines.some((l) => l.fuel > 0);
-    const tableHead = ['Vehicle', 'Cost / km', anyHours ? 'Cost / hr' : null, 'Spend (year)', anyFuel ? 'Fuel' : null, 'Unplanned', 'Driven (year)', 'Per week', anyHours ? 'Hrs / week' : null].filter(Boolean);
-    const tableRows = lines.map((l) => [l.v.id, fmtKmRate(l.perKm),
+    const tableHead = ['Vehicle', 'Cost / km', anyHours ? 'Cost / hr' : null, 'Window', 'Spend', anyFuel ? 'Fuel' : null, 'Unplanned', 'Driven', 'Per week', anyHours ? 'Hrs / week' : null].filter(Boolean);
+    const tableRows = lines.map((l) => [l.v.id,
+      l.perKm != null ? fmtKmRate(l.perKm) : '—',
       anyHours ? (l.perHour != null ? fmtKmRate(l.perHour) : '—') : null,
-      L.fmtAUD(l.spend), anyFuel ? L.fmtAUD(l.fuel) : null, L.fmtAUD(l.unplanned), `${Math.round(l.windowKm).toLocaleString('en-AU')} km`,
-      `${Math.round(l.perWeek).toLocaleString('en-AU')} km`,
+      fmtSpan(l.span),
+      L.fmtAUD(l.spend), anyFuel ? L.fmtAUD(l.fuel) : null, L.fmtAUD(l.unplanned),
+      l.windowKm != null ? `${Math.round(l.windowKm).toLocaleString('en-AU')} km` : '—',
+      l.perWeek != null ? `${Math.round(l.perWeek).toLocaleString('en-AU')} km` : '—',
       anyHours ? (l.hrsWeek != null ? Math.round(l.hrsWeek).toLocaleString('en-AU') : '—') : null].filter((x) => x !== null));
 
+    const spans = lines.map((l) => l.span);
+    const spanMin = Math.min(...spans), spanMax = Math.max(...spans);
+    const spanLabel = spanMin === spanMax ? fmtSpan(spanMin) : `${fmtSpan(spanMin)}–${fmtSpan(spanMax)}`;
+
     return `<section class="section">
-      ${sectionHead({ title: 'Cost vs usage', meta: `${lines.length} GPS-tracked vehicle${lines.length === 1 ? '' : 's'} · spend (incl. fuel) over ${RUN_WEEKS} weeks ÷ distance driven${anyHours ? ' / engine hours' : ''} · the tick marks the median` })}
+      ${sectionHead({ title: 'Cost vs usage', meta: `${lines.length} GPS-tracked vehicle${lines.length === 1 ? '' : 's'} · spend (incl. fuel) ÷ distance driven${anyHours ? ' / engine hours' : ''} over each vehicle's measurement window (${spanLabel}) · the tick marks the median` })}
       <figure class="viz-card">
-        <figcaption><span class="viz-sub">A high cost per kilometre or hour, or a vehicle that barely moves yet still costs money, is a candidate to question, service, or replace.${anyHours ? ' Cost per hour counts stationary work, so it is the fairer measure for vac trucks.' : ''}</span></figcaption>
+        <figcaption><span class="viz-sub">A high cost per kilometre or hour, or a vehicle that barely moves yet still costs money, is a candidate to question, service, or replace. Each vehicle is measured only over the period we actually have GPS or engine-hour data for — no extrapolation.${anyHours ? ' Cost per hour counts stationary work, so it is the fairer measure for vac trucks.' : ''}</span></figcaption>
         <div class="cs-rows">${rows}</div>
         ${V.table(tableHead, tableRows)}
       </figure>
