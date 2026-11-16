@@ -1468,6 +1468,8 @@ input[type=text], input[type=number], input[type=date], input[type=datetime-loca
 .cs-line-svg { --cs-line: var(--amber); }
 .cs-area { fill: url(#cs-area-grad); stroke: none; }
 .cs-band { fill: url(#cs-band-grad); stroke: none; }
+.cs-band-fuel { fill: url(#cs-band-fuel-grad); stroke: none; }
+.cs-line-grand { fill: none; stroke: var(--blue); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; opacity: .9; }
 /* Lines — smooth, glowing, futuristic */
 .cs-line-planned { fill: none; stroke: var(--mint); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; filter: url(#cs-glow-mint); }
 .cs-line-path { fill: none; stroke: var(--cs-line); stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; filter: url(#cs-glow-amber); }
@@ -2689,6 +2691,8 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 .anim-in .cs-line-path, .anim-in .cs-line-planned { stroke-dasharray: 1; animation: draw-line 1.2s cubic-bezier(.22,.61,.36,1) backwards; }
 .anim-in .cs-area { animation: fade .8s cubic-bezier(.22,.61,.36,1) .3s backwards; }
 .anim-in .cs-band { animation: fade .8s cubic-bezier(.22,.61,.36,1) .4s backwards; }
+.anim-in .cs-band-fuel { animation: fade .8s cubic-bezier(.22,.61,.36,1) .45s backwards; }
+.anim-in .cs-line-grand { stroke-dasharray: 1; animation: draw-line 1.2s cubic-bezier(.22,.61,.36,1) backwards; }
 .anim-in .cs-mark { animation: fade .35s ease backwards; animation-delay: calc(.2s + var(--i, 0) * .05s); }
 /* Projected segment reveals left-to-right after actuals finish — clip-path keeps the dashes intact */
 .anim-in .cs-proj-g { animation: reveal-right .9s cubic-bezier(.22,.61,.36,1) 1.1s backwards; }
