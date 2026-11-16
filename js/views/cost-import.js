@@ -187,6 +187,14 @@ AD.importFuelData = (function () {
       let blankRows = 0, unmatchedRows = 0, fuzzyRows = 0, totalCost = 0, totalLitres = 0;
       let minDate = '', maxDate = '';
       const vehicles = new Set();
+      // Some rows are genuinely identical on every exported field — e.g. two
+      // separate fill-ups the same vehicle made on the same day each trigger
+      // their own $0.83 "TRANSACTION FEE" line, with nothing else to tell them
+      // apart. A bare content hash would collapse those into one id, and
+      // Postgres refuses to upsert the same id twice in one batch. So: the
+      // first row with a given content hash keeps that id untouched; the 2nd,
+      // 3rd... get a numbered suffix, so each stays its own saved row.
+      const seenIds = new Map();
       parsed.rows.forEach((r) => {
         const rego = normRego(r[m.rego]);
         const cost = toNum(r[m.cost]) || 0;
@@ -202,7 +210,10 @@ AD.importFuelData = (function () {
         const product = m.product >= 0 ? String(r[m.product] || '').trim() : '';
         const brand = m.brand >= 0 ? String(r[m.brand] || '').trim() : '';
         const docket = '';
-        const id = hashId([rego, date, cost, litres || '', product].join('|'));
+        const baseId = hashId([rego, date, cost, litres || '', product].join('|'));
+        const n = (seenIds.get(baseId) || 0) + 1;
+        seenIds.set(baseId, n);
+        const id = n === 1 ? baseId : `${baseId}-${n}`;
         rows.push({ id, vehicleId: v.id, rego: String(r[m.rego] || '').trim(), date: date || null, litres: litres != null ? litres : null, cost, product, brand, docket, source: fileName });
         totalCost += cost; totalLitres += litres || 0; vehicles.add(v.id);
         if (date) { if (!minDate || date < minDate) minDate = date; if (!maxDate || date > maxDate) maxDate = date; }
@@ -257,7 +268,12 @@ AD.importFuelData = (function () {
         btn.disabled = false; btn.textContent = 'Import';
         const box = container.querySelector('#fi-preview');
         const msg = (e && (e.message || e.details)) || 'Import failed.';
-        box.innerHTML = `<p class="fi-err">${esc(/relation .*fuel_entries.* does not exist|could not find the table/i.test(msg) ? 'The fuel table hasn’t been created yet — run create-fuel-entries.sql in Supabase first.' : msg)}</p>` + box.innerHTML;
+        const friendly = /relation .*fuel_entries.* does not exist|could not find the table/i.test(msg)
+          ? 'The fuel table hasn’t been created yet — run create-fuel-entries.sql in Supabase first.'
+          : /ON CONFLICT DO UPDATE command cannot affect row a second time/i.test(msg)
+          ? 'Two rows in this file matched to the same saved record — please try again (if it keeps happening, tell your developer).'
+          : msg;
+        box.innerHTML = `<p class="fi-err">${esc(friendly)}</p>` + box.innerHTML;
       }
     }
   }
