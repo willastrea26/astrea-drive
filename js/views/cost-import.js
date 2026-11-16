@@ -12,6 +12,7 @@
  */
 AD.importFuelData = (function () {
   const esc = AD.ui.esc;
+  const fmtDate = (k) => k ? new Date(k + 'T12:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
 
   const XLSX_SRC = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
   function loadXLSX() {
@@ -184,6 +185,7 @@ AD.importFuelData = (function () {
       const { exact, canon } = regoMaps();
       const rows = [], unmatched = new Set(), fuzzy = new Set();
       let blankRows = 0, unmatchedRows = 0, fuzzyRows = 0, totalCost = 0, totalLitres = 0;
+      let minDate = '', maxDate = '';
       const vehicles = new Set();
       parsed.rows.forEach((r) => {
         const rego = normRego(r[m.rego]);
@@ -203,8 +205,15 @@ AD.importFuelData = (function () {
         const id = hashId([rego, date, cost, litres || '', product].join('|'));
         rows.push({ id, vehicleId: v.id, rego: String(r[m.rego] || '').trim(), date: date || null, litres: litres != null ? litres : null, cost, product, brand, docket, source: fileName });
         totalCost += cost; totalLitres += litres || 0; vehicles.add(v.id);
+        if (date) { if (!minDate || date < minDate) minDate = date; if (!maxDate || date > maxDate) maxDate = date; }
       });
-      return { rows, stats: { unmatched: [...unmatched], unmatchedRows, blankRows, fuzzy: [...fuzzy], fuzzyRows, totalCost, totalLitres, vehicles: vehicles.size, totalRows: parsed.rows.length } };
+      // Every active, owned vehicle that never appears in this file at all —
+      // not just the ones it couldn't match, but ones it never even tried.
+      const seenVehicles = vehicles;
+      const noFuel = AD.store.all('vehicles')
+        .filter((x) => !x.hired && !seenVehicles.has(x.id))
+        .map((x) => x.id).sort();
+      return { rows, stats: { unmatched: [...unmatched], unmatchedRows, blankRows, fuzzy: [...fuzzy], fuzzyRows, totalCost, totalLitres, vehicles: vehicles.size, totalRows: parsed.rows.length, minDate, maxDate, noFuel } };
     }
 
     function renderPreview(container) {
@@ -226,9 +235,11 @@ AD.importFuelData = (function () {
           <div class="fi-stat"><b>${stats.vehicles}</b><span>vehicles matched</span></div>
           <div class="fi-stat fi-stat-muted"><b>${stats.unmatchedRows + stats.blankRows}</b><span>rows skipped</span></div>
         </div>
+        ${stats.minDate ? `<p class="fi-note-skip">Covers <b>${esc(fmtDate(stats.minDate))}</b> to <b>${esc(fmtDate(stats.maxDate))}</b>.</p>` : ''}
         ${stats.fuzzyRows ? `<p class="fi-note-skip">${stats.fuzzyRows} row${stats.fuzzyRows === 1 ? '' : 's'} matched past a look-alike typo (O/0, I/1): <span class="muted">${esc(stats.fuzzy.slice(0, 8).join(', '))}${stats.fuzzy.length > 8 ? ` +${stats.fuzzy.length - 8} more` : ''}</span></p>` : ''}
         ${stats.unmatchedRows ? `<p class="fi-note-skip">${stats.unmatchedRows} row${stats.unmatchedRows === 1 ? '' : 's'} for ${stats.unmatched.length} rego${stats.unmatched.length === 1 ? '' : 's'} not in the fleet: <span class="muted">${esc(stats.unmatched.slice(0, 12).join(', '))}${stats.unmatched.length > 12 ? ` +${stats.unmatched.length - 12} more` : ''}</span></p>` : ''}
         ${stats.blankRows ? `<p class="fi-note-skip muted">${stats.blankRows} row${stats.blankRows === 1 ? '' : 's'} with no fuel or cost (e.g. $0 lines) skipped.</p>` : ''}
+        ${stats.noFuel.length ? `<details class="fi-no-fuel"><summary>${stats.noFuel.length} fleet vehicle${stats.noFuel.length === 1 ? '' : 's'} with no fuel in this file</summary><p class="muted">${esc(stats.noFuel.join(', '))}</p></details>` : ''}
         ${rows.length ? `<p class="fi-note-skip muted">Re-importing the same file is safe — it updates existing rows instead of adding duplicates.</p>` : '<p class="fi-warn">Nothing to import with these columns — check the mapping above.</p>'}`;
     }
 

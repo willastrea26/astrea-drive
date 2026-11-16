@@ -2892,3 +2892,8 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 @media (max-width: 640px) { .fi-stats { grid-template-columns: repeat(2, 1fr); } }
 .fi-note-skip { font-size: .84rem; margin: 10px 0 0; color: var(--body, #b4cadd); }
 .fi-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+
+.fi-no-fuel { margin-top: 10px; font-size: .84rem; }
+.fi-no-fuel summary { cursor: pointer; color: var(--body, #b4cadd); }
+.fi-no-fuel summary:hover { color: var(--ink, #eef5fb); }
+.fi-no-fuel p { margin: 8px 0 0; }
