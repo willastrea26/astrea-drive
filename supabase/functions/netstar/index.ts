@@ -106,6 +106,14 @@ interface Device {
   branch: string;
 }
 
+// These two Netstar records currently report their Streamax hardware ID in
+// vehicle_no instead of the fleet registration. Normalising here keeps live
+// positions, trips and odometer sync tied to the correct Astrea vehicle.
+const NETSTAR_REGO_OVERRIDES: Record<string, string> = {
+  "00D2087143": "XP58JN", // AVT05
+  "00D208715E": "XS34KN", // AVT06
+};
+
 async function fetchVehicles(): Promise<Device[]> {
   const res = await fetch(`${NETSTAR_BASE}/external/company-vehicles`, {
     method: "POST",
@@ -117,9 +125,10 @@ async function fetchVehicles(): Promise<Device[]> {
   const out: Device[] = [];
   for (const branch of payload?.data?.branch ?? []) {
     for (const v of branch.vehicles ?? []) {
+      const reportedRego = String(v.vehicle_no ?? "").trim();
       out.push({
         imei: String(v.imei_no ?? "").trim(),
-        rego: String(v.vehicle_no ?? "").trim(),
+        rego: NETSTAR_REGO_OVERRIDES[reportedRego.toUpperCase()] ?? reportedRego,
         deviceName: v.device_name ?? "",
         deviceModel: v.device_model ?? "",
         branch: branch.branch_name ?? "",

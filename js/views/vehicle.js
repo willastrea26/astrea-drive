@@ -31,6 +31,10 @@ AD.views.vehicle = (function () {
   // odometer would otherwise replay every chart on the page).
   let fresh = true;
 
+  function netstarAlias(v) {
+    return AD.netstarAliases.aliasForVehicle(v);
+  }
+
   function render(el, params, arg) {
     root = el; id = arg;
     tab = TABS.some((t) => t.key === params.tab) ? params.tab : 'overview';
@@ -60,7 +64,7 @@ AD.views.vehicle = (function () {
       return;
     }
     const isVac = v.type === 'Vac truck';
-    const isTracked = v.odometerSource === 'telematics' || !!v.netstarRego;
+    const isTracked = v.odometerSource === 'telematics' || !!netstarAlias(v);
     if (tab === 'bookings' && !isVac) tab = 'overview';
     if (tab === 'trips' && !isTracked) tab = 'overview';
 
@@ -668,7 +672,7 @@ AD.views.vehicle = (function () {
    */
   function engineHoursChart(v) {
     const daily = L.workHoursDaily(v, 30);
-    const tracked = v.odometerSource === 'telematics' || !!v.netstarRego;
+    const tracked = v.odometerSource === 'telematics' || !!netstarAlias(v);
     if (!daily && !tracked) return '';
     if (!daily || !daily.withData) {
       return `<section class="section">
@@ -898,7 +902,7 @@ AD.views.vehicle = (function () {
     let data = (tripsFor === v.id && tripsData) ? tripsData : null;
     if (!data) {
       try {
-        const r = await AD.sb.functions.invoke('netstar', { body: { action: 'trips', rego: v.rego, netstarRego: v.netstarRego, days: 10 } });
+        const r = await AD.sb.functions.invoke('netstar', { body: { action: 'trips', rego: v.rego, netstarRego: netstarAlias(v), days: 10 } });
         if (r.error) throw r.error;
         data = r.data; tripsData = data; tripsFor = v.id;
       } catch (e) {
@@ -992,7 +996,7 @@ AD.views.vehicle = (function () {
       if (pathCache[date]) return pathCache[date];
       let pts = [], raw = null;
       try {
-        const r = await AD.sb.functions.invoke('netstar', { body: { action: 'trip-path', rego: v.rego, netstarRego: v.netstarRego, date } });
+        const r = await AD.sb.functions.invoke('netstar', { body: { action: 'trip-path', rego: v.rego, netstarRego: netstarAlias(v), date } });
         pts = normalise(((r.data && r.data.points) || []).slice());
         raw = (r.data && r.data.raw) || null;
       } catch (e) { /* fall back */ }

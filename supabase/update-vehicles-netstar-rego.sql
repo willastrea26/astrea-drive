@@ -13,3 +13,8 @@ alter table public.vehicles
 -- AVT03: register plate is XW52IY; Netstar reports it as XW52YI (last two
 -- letters transposed). Link them without changing the real plate.
 update public.vehicles set "netstarRego" = 'XW52YI' where id = 'AVT03';
+
+-- AVT05 and AVT06: Netstar currently reports the Streamax device IDs below
+-- instead of the vehicles' registration plates.
+update public.vehicles set "netstarRego" = '00D2087143' where id = 'AVT05';
+update public.vehicles set "netstarRego" = '00D208715E' where id = 'AVT06';

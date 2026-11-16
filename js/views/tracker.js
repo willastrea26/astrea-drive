@@ -530,10 +530,13 @@ AD.views.tracker = (function () {
     const byRego = new Map();
     AD.store.all('vehicles').forEach((v) => {
       byRego.set(String(v.rego || '').toUpperCase(), v);
-      if (v.netstarRego) byRego.set(String(v.netstarRego).toUpperCase(), v); // Netstar's spelling of the plate
+      const alias = AD.netstarAliases.aliasForVehicle(v);
+      if (alias) byRego.set(alias, v); // Netstar's spelling of the plate/device ID
     });
     return positions.map((p) => {
-      const v = byRego.get(String(p.rego || '').toUpperCase()) || null;
+      const reportedRego = AD.netstarAliases.normalise(p.rego);
+      const fleetRego = AD.netstarAliases.fleetRegoForDevice(reportedRego);
+      const v = byRego.get(reportedRego) || byRego.get(fleetRego) || null;
       const cat = liveStatus(p);
       return {
         truckId: v ? v.id : `dev-${p.imei}`,
