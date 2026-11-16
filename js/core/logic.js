@@ -186,6 +186,30 @@ AD.logic = (function () {
     };
   }
 
+  /**
+   * Imported fuel-card spend for a vehicle. Optional fromKey/toKey (YYYY-MM-DD,
+   * inclusive) limit the window; omit for all-time. Returns total cost, litres
+   * and the transaction count, or null if nothing imported for the vehicle.
+   */
+  function fuelFor(v, fromKey, toKey) {
+    const rows = (S().all('fuel_entries') || []).filter((r) => {
+      if (r.vehicleId !== v.id) return false;
+      const d = r.date ? String(r.date).slice(0, 10) : '';
+      if (fromKey && d && d < fromKey) return false;
+      if (toKey && d && d > toKey) return false;
+      return true;
+    });
+    if (!rows.length) return null;
+    let cost = 0, litres = 0, lastDate = '';
+    rows.forEach((r) => {
+      cost += Number(r.cost) || 0;
+      litres += Number(r.litres) || 0;
+      const d = r.date ? String(r.date).slice(0, 10) : '';
+      if (d > lastDate) lastDate = d;
+    });
+    return { cost, litres, count: rows.length, lastDate };
+  }
+
   function regoState(v) {
     const d = T.daysBetween(T.todayKey(), v.regoExpiry);
     if (d < 0) return { state: 'overdue', days: d, label: 'Expired', why: `Expired ${-d} day${d === -1 ? '' : 's'} ago` };
@@ -456,7 +480,7 @@ AD.logic = (function () {
   }
 
   return {
-    serviceState, serviceTriggers, usageRate, workHours, workHoursDaily, tripStats, HOURS_TYPES,
+    serviceState, serviceTriggers, usageRate, workHours, workHoursDaily, tripStats, fuelFor, HOURS_TYPES,
     regoState, attentionTone, openDefects, fmtKm, fmtHours, fmtAUD, driverName, userName,
     vacTrucks, schedulableVehicles, bookingsFor, activeAt, overlaps, conflictIds, driverConflictIds, nextBooking, locate, hasCoords,
     bookingCategory, bookingTitle, SOON_DAYS, SOON_KM, SOON_HOURS, URGENT_HOURS,

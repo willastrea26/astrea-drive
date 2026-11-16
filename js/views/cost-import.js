@@ -1,0 +1,236 @@
+/*
+ * Fuel-cost import — manual stopgap before the WEX / BP API.
+ *
+ * Reads a fuel-card spreadsheet (.xlsx / .csv), lets the user confirm which
+ * columns are the rego and cost (auto-detected for the WEX export, editable
+ * for any other layout), matches each row to a vehicle by rego, and saves the
+ * transactions into fuel_entries. Re-importing the same file upserts on a
+ * deterministic row id, so nothing double-counts.
+ *
+ * The spreadsheet reader (SheetJS) is loaded from a CDN only when the importer
+ * is first opened, so it adds no weight to normal page loads.
+ */
+AD.importFuelData = (function () {
+  const esc = AD.ui.esc;
+
+  const XLSX_SRC = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+  function loadXLSX() {
+    if (window.XLSX) return Promise.resolve(window.XLSX);
+    return new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = XLSX_SRC;
+      s.onload = () => resolve(window.XLSX);
+      s.onerror = () => reject(new Error('Could not load the spreadsheet reader — check your internet connection.'));
+      document.head.appendChild(s);
+    });
+  }
+
+  // --- small parsers ---------------------------------------------------
+  const toNum = (cell) => {
+    const n = parseFloat(String(cell == null ? '' : cell).replace(/[^0-9.\-]/g, ''));
+    return Number.isFinite(n) ? n : null;
+  };
+  // Fuel-card dates are Australian dd/mm/yyyy; also accept yyyy-mm-dd and Date.
+  const toKey = (cell) => {
+    if (cell instanceof Date && !isNaN(cell)) return cell.toISOString().slice(0, 10);
+    const s = String(cell == null ? '' : cell).trim();
+    let m = /^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/.exec(s);
+    if (m) { let [, d, mo, y] = m; if (y.length === 2) y = '20' + y; return `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`; }
+    m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+    return m ? m[0] : '';
+  };
+  const normRego = (r) => String(r || '').toUpperCase().replace(/\s+/g, '');
+  function hashId(str) {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+    return 'fuel-' + (h >>> 0).toString(36) + '-' + (str.length.toString(36));
+  }
+  function regoMap() {
+    const m = new Map();
+    AD.store.all('vehicles').forEach((v) => {
+      [v.rego, v.netstarRego].forEach((r) => { const k = normRego(r); if (k) m.set(k, v); });
+    });
+    return m;
+  }
+
+  // Auto-pick a column index whose header matches one of `pats`, else -1.
+  function guess(headers, pats) {
+    for (const p of pats) {
+      const i = headers.findIndex((h) => p.test(String(h || '')));
+      if (i >= 0) return i;
+    }
+    return -1;
+  }
+
+  // --- the modal -------------------------------------------------------
+  function open(onDone) {
+    let parsed = null; // { headers, rows }
+    let fileName = '';
+
+    const close = AD.ui.modal({
+      title: 'Import fuel-card data',
+      wide: true,
+      body: `<div id="fi-body">${dropStep()}</div>`,
+      onMount: (el) => wireDrop(el.querySelector('#fi-body'))
+    });
+
+    function dropStep(err) {
+      return `
+        <p class="note">Drop your fuel-card spreadsheet here (WEX, BP or Ampol export — <b>.xlsx</b> or <b>.csv</b>). Each row is matched to a vehicle by its registration; rows for regos not in the fleet are skipped.</p>
+        <label class="fi-drop" id="fi-drop">
+          <input type="file" id="fi-file" accept=".xlsx,.xls,.csv" hidden>
+          <span class="fi-drop-ico">${AD.icons.file}</span>
+          <span class="fi-drop-main">Drop a file here, or <b>browse</b></span>
+          <span class="fi-drop-sub">Nothing is sent anywhere until you press Import.</span>
+        </label>
+        ${err ? `<p class="fi-err">${esc(err)}</p>` : ''}`;
+    }
+
+    function wireDrop(container) {
+      const drop = container.querySelector('#fi-drop');
+      const input = container.querySelector('#fi-file');
+      if (!drop) return;
+      input.addEventListener('change', () => input.files[0] && handleFile(input.files[0], container));
+      ['dragenter', 'dragover'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('is-over'); }));
+      ['dragleave', 'drop'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove('is-over'); }));
+      drop.addEventListener('drop', (e) => { const f = e.dataTransfer.files[0]; if (f) handleFile(f, container); });
+    }
+
+    async function handleFile(file, container) {
+      fileName = file.name;
+      container.innerHTML = `<p class="note">Reading <b>${esc(file.name)}</b>…</p>`;
+      try {
+        const XLSX = await loadXLSX();
+        const buf = await file.arrayBuffer();
+        const wb = XLSX.read(buf, { type: 'array' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });
+        // Find the header row — the first row mentioning a registration column.
+        let hi = aoa.findIndex((row) => row.some((c) => /regist|rego|plate/i.test(String(c || ''))));
+        if (hi < 0) hi = 0;
+        const headers = (aoa[hi] || []).map((h, i) => String(h || '').trim() || `Column ${i + 1}`);
+        const rows = aoa.slice(hi + 1).filter((r) => r.some((c) => String(c || '').trim() !== ''));
+        if (!rows.length) throw new Error('No data rows found under the header.');
+        parsed = { headers, rows };
+        renderMapStep(container);
+      } catch (e) {
+        container.innerHTML = dropStep((e && e.message) || 'Could not read that file.');
+        wireDrop(container);
+      }
+    }
+
+    function colSelect(id, label, required, defIdx) {
+      const opts = [`<option value="-1">${required ? '— choose —' : '— none —'}</option>`]
+        .concat(parsed.headers.map((h, i) => `<option value="${i}"${i === defIdx ? ' selected' : ''}>${esc(h)}</option>`));
+      return `<label class="fi-map-field"><span>${esc(label)}${required ? ' *' : ''}</span>
+        <select data-map="${id}">${opts.join('')}</select></label>`;
+    }
+
+    function renderMapStep(container) {
+      const H = parsed.headers;
+      const def = {
+        rego: guess(H, [/regist/i, /rego/i, /plate/i]),
+        cost: guess(H, [/total incl/i, /including gst/i, /amount/i, /^total$/i, /cost/i]),
+        date: guess(H, [/^date$/i, /date/i]),
+        litres: guess(H, [/lit/i, /qty/i, /quantity/i]),
+        product: guess(H, [/product/i]),
+        brand: guess(H, [/fuel brand/i, /brand/i])
+      };
+      container.innerHTML = `
+        <p class="note">Found <b>${parsed.rows.length}</b> rows in <b>${esc(fileName)}</b>. Check the columns below — the <b>registration</b> and <b>cost</b> are required.</p>
+        <div class="fi-map">
+          ${colSelect('rego', 'Registration', true, def.rego)}
+          ${colSelect('cost', 'Cost (incl. GST)', true, def.cost)}
+          ${colSelect('date', 'Date', false, def.date)}
+          ${colSelect('litres', 'Litres', false, def.litres)}
+          ${colSelect('product', 'Product', false, def.product)}
+          ${colSelect('brand', 'Brand', false, def.brand)}
+        </div>
+        <div id="fi-preview"></div>
+        <div class="fi-actions">
+          <button class="btn btn-secondary" id="fi-back" type="button">Choose a different file</button>
+          <button class="btn btn-primary" id="fi-import" type="button">Import</button>
+        </div>`;
+      const refresh = () => renderPreview(container);
+      container.querySelectorAll('[data-map]').forEach((s) => s.addEventListener('change', refresh));
+      container.querySelector('#fi-back').onclick = () => { container.innerHTML = dropStep(); wireDrop(container); };
+      container.querySelector('#fi-import').onclick = () => doImport(container);
+      refresh();
+    }
+
+    function readMapping(container) {
+      const m = {};
+      container.querySelectorAll('[data-map]').forEach((s) => { m[s.dataset.map] = Number(s.value); });
+      return m;
+    }
+
+    // Turn the sheet + mapping into { importable rows, stats } — shared by
+    // the preview and the actual import so what you see is what you save.
+    function build(container) {
+      const m = readMapping(container);
+      const vmap = regoMap();
+      const rows = [], unmatched = new Set();
+      let blank = 0, totalCost = 0, totalLitres = 0;
+      const vehicles = new Set();
+      parsed.rows.forEach((r) => {
+        const rego = normRego(r[m.rego]);
+        const cost = toNum(r[m.cost]) || 0;
+        const litres = m.litres >= 0 ? toNum(r[m.litres]) : null;
+        if (!rego || (cost <= 0 && !(litres > 0))) { blank++; return; }
+        const v = vmap.get(rego);
+        if (!v) { unmatched.add(rego); return; }
+        const date = m.date >= 0 ? toKey(r[m.date]) : '';
+        const product = m.product >= 0 ? String(r[m.product] || '').trim() : '';
+        const brand = m.brand >= 0 ? String(r[m.brand] || '').trim() : '';
+        const docket = '';
+        const id = hashId([rego, date, cost, litres || '', product].join('|'));
+        rows.push({ id, vehicleId: v.id, rego: String(r[m.rego] || '').trim(), date: date || null, litres: litres != null ? litres : null, cost, product, brand, docket, source: fileName });
+        totalCost += cost; totalLitres += litres || 0; vehicles.add(v.id);
+      });
+      return { rows, stats: { unmatched: [...unmatched], blank, totalCost, totalLitres, vehicles: vehicles.size } };
+    }
+
+    function renderPreview(container) {
+      const box = container.querySelector('#fi-preview');
+      const btn = container.querySelector('#fi-import');
+      const m = readMapping(container);
+      if (!(m.rego >= 0) || !(m.cost >= 0)) {
+        box.innerHTML = `<p class="fi-warn">Pick the registration and cost columns to continue.</p>`;
+        btn.disabled = true;
+        return;
+      }
+      const { rows, stats } = build(container);
+      btn.disabled = rows.length === 0;
+      const aud = (n) => n.toLocaleString('en-AU', { style: 'currency', currency: 'AUD', maximumFractionDigits: 0 });
+      box.innerHTML = `
+        <div class="fi-stats">
+          <div class="fi-stat fi-stat-good"><b>${rows.length}</b><span>transactions to import</span></div>
+          <div class="fi-stat fi-stat-mint"><b>${aud(stats.totalCost)}</b><span>total spend</span></div>
+          <div class="fi-stat"><b>${stats.vehicles}</b><span>vehicles matched</span></div>
+          <div class="fi-stat fi-stat-muted"><b>${stats.unmatched.length + stats.blank}</b><span>rows skipped</span></div>
+        </div>
+        ${stats.unmatched.length ? `<p class="fi-note-skip">${stats.unmatched.length} rego${stats.unmatched.length === 1 ? '' : 's'} not in the fleet, skipped: <span class="muted">${esc(stats.unmatched.slice(0, 12).join(', '))}${stats.unmatched.length > 12 ? ` +${stats.unmatched.length - 12} more` : ''}</span></p>` : ''}
+        ${rows.length ? `<p class="fi-note-skip muted">Re-importing the same file is safe — it updates existing rows instead of adding duplicates.</p>` : '<p class="fi-warn">Nothing to import with these columns — check the mapping above.</p>'}`;
+    }
+
+    async function doImport(container) {
+      const { rows, stats } = build(container);
+      if (!rows.length) return;
+      const btn = container.querySelector('#fi-import');
+      btn.disabled = true; btn.textContent = 'Importing…';
+      try {
+        await AD.store.importFuel(rows);
+        AD.ui.toast(`Imported ${rows.length} fuel transaction${rows.length === 1 ? '' : 's'} across ${stats.vehicles} vehicle${stats.vehicles === 1 ? '' : 's'}.`, 'ok');
+        close();
+        if (onDone) onDone();
+      } catch (e) {
+        btn.disabled = false; btn.textContent = 'Import';
+        const box = container.querySelector('#fi-preview');
+        const msg = (e && (e.message || e.details)) || 'Import failed.';
+        box.innerHTML = `<p class="fi-err">${esc(/relation .*fuel_entries.* does not exist|could not find the table/i.test(msg) ? 'The fuel table hasn’t been created yet — run create-fuel-entries.sql in Supabase first.' : msg)}</p>` + box.innerHTML;
+      }
+    }
+  }
+
+  return open;
+})();

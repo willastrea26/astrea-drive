@@ -56,12 +56,13 @@ AD.store = (function () {
   async function load() {
     const since = new Date(Date.now() - ODO_READING_DAYS * 86400000).toISOString().slice(0, 10);
     const dailySince = new Date(Date.now() - 40 * 86400000).toISOString().slice(0, 10);
-    const [results, readings, workHours, tripStats, workDaily] = await Promise.all([
+    const [results, readings, workHours, tripStats, workDaily, fuel] = await Promise.all([
       Promise.all(TABLES.map(query)),
       loadOptional('odometer_readings', (q) => q.gte('readDate', since)),
       loadOptional('vehicle_work_hours', (q) => q),
       loadOptional('vehicle_trip_stats', (q) => q),
-      loadOptional('vehicle_work_hours_daily', (q) => q.gte('day', dailySince))
+      loadOptional('vehicle_work_hours_daily', (q) => q.gte('day', dailySince)),
+      loadOptional('fuel_entries', (q) => q)
     ]);
     const next = {};
     results.forEach((r, i) => {
@@ -72,8 +73,26 @@ AD.store = (function () {
     next.vehicle_work_hours = workHours;
     next.vehicle_trip_stats = tripStats;
     next.vehicle_work_hours_daily = workDaily;
+    next.fuel_entries = fuel;
     db = next;
     emit('*');
+  }
+
+  /** Bulk-import fuel-card rows (WEX/BP export). Upserts on the row id so
+   *  re-importing the same file doesn't double-count. Returns the saved rows. */
+  async function importFuel(rows) {
+    if (!rows || !rows.length) return [];
+    const saved = [];
+    // Chunk to keep each request small.
+    for (let i = 0; i < rows.length; i += 500) {
+      const chunk = rows.slice(i, i + 500);
+      const { data, error } = await sb().from('fuel_entries').upsert(chunk, { onConflict: 'id' }).select();
+      if (error) throw error;
+      saved.push(...(data || []));
+    }
+    db.fuel_entries = (db.fuel_entries || []).filter((r) => !saved.some((s) => s.id === r.id)).concat(saved);
+    emit('fuel_entries');
+    return saved;
   }
 
   function all(coll) { return db[coll] || []; }
@@ -231,5 +250,5 @@ AD.store = (function () {
     await update('vehicles', vehicleId, { photos });
   }
 
-  return { load, all, get, insert, update, remove, log, on, uid, uploadDocument, signDocumentUrl, removeDocument, renameDocumentCategory, reorderDocuments, uploadVehiclePhoto, removeVehiclePhoto };
+  return { load, all, get, insert, update, remove, log, on, uid, importFuel, uploadDocument, signDocumentUrl, removeDocument, renameDocumentCategory, reorderDocuments, uploadVehiclePhoto, removeVehiclePhoto };
 })();

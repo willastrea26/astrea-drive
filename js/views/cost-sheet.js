@@ -134,7 +134,8 @@ AD.views['cost-sheet'] = (function () {
       ${pageHeader({
         title: 'Cost sheet',
         sub: `${T.fmtKey(start)} – ${T.fmtKey(end)}${start === thisWeek ? ' · this week' : ''} · against the average of the ${AVG_WEEKS} weeks before`,
-        actions: `<div class="seg" role="group" aria-label="Week">
+        actions: `<button type="button" class="btn btn-primary" id="cs-import">${I.file} Import cost data</button>
+          <div class="seg" role="group" aria-label="Week">
             <button type="button" id="w-prev" aria-label="Previous week">${I.chevL}</button>
             <button type="button" id="w-this"${start === thisWeek ? ' class="on"' : ''}>This week</button>
             <button type="button" id="w-next" aria-label="Next week">${I.chevR}</button>
@@ -162,12 +163,15 @@ AD.views['cost-sheet'] = (function () {
         ${running(end)}
       </section>
 
+      ${fuelSection(end)}
+
       ${costVsUsage(end)}
 
       <p class="section-foot muted small">Spend is recorded services plus resolved defects, counted on the day the service was recorded or the defect was resolved. Planned is scheduled servicing; unplanned is a defect repair. The average is the ${AVG_WEEKS} weeks before this one. Running cost divides a vehicle's spend by the distance or hours covered between its first and last service in the window, so it needs at least two services to show a rate.</p>
 
       ${projection(end)}`;
 
+    el.querySelector('#cs-import').onclick = () => AD.importFuelData(() => draw());
     el.querySelector('#w-prev').onclick = () => go(T.addDays(start, -7));
     el.querySelector('#w-next').onclick = () => go(T.addDays(start, 7));
     el.querySelector('#w-this').onclick = () => go(thisWeek);
@@ -550,6 +554,40 @@ AD.views['cost-sheet'] = (function () {
    * barely move yet still cost money. Only covers vehicles with a usage rate
    * (i.e. GPS-tracked with enough history); the rest have nothing to divide by.
    */
+  /**
+   * Imported fuel-card spend per vehicle over the running-cost window. Fed by
+   * the "Import cost data" button (a manual stopgap before the WEX/BP API).
+   */
+  function fuelSection(end) {
+    const from = T.addDays(end, -(7 * RUN_WEEKS - 1));
+    const aud = L.fmtAUD;
+    const km0 = (n) => Math.round(n).toLocaleString('en-AU');
+    const list = AD.store.all('vehicles').filter((v) => !v.hired)
+      .map((v) => ({ v, f: L.fuelFor(v, from, end) })).filter((x) => x.f)
+      .sort((a, b) => b.f.cost - a.f.cost);
+    if (!list.length) {
+      return `<section class="section">
+        ${sectionHead({ title: 'Fuel (imported)', meta: 'From fuel-card spreadsheets · a stopgap before the WEX/BP feed' })}
+        <div class="empty-tidy">${I.file}No fuel data imported yet. Use “Import cost data” (top right) to add a WEX, BP or Ampol export.</div>
+      </section>`;
+    }
+    const totalCost = list.reduce((n, x) => n + x.f.cost, 0);
+    const totalL = list.reduce((n, x) => n + x.f.litres, 0);
+    const max = Math.max(...list.map((x) => x.f.cost), 1);
+    const perL = totalL > 0 ? totalCost / totalL : null;
+    const rows = list.map(({ v, f }) => `
+      <a class="hb-row" href="#/vehicle/${v.id}" ${V.tipAttr(v.id, [['Fuel spend', aud(f.cost), 'var(--mint)'], ['Litres', km0(f.litres) + ' L', 'var(--muted)'], ['Transactions', String(f.count), 'var(--muted)']])} aria-label="${esc(v.id)}: ${aud(f.cost)} fuel">
+        <span class="hb-label">${esc(v.id)}</span>
+        <span class="hb-track"><i style="width:${(f.cost / max) * 100}%;background:var(--mint)"></i></span>
+        <span class="hb-val">${aud(f.cost)}${f.litres ? `<small> · ${km0(f.litres)} L</small>` : ''}</span>
+      </a>`).join('');
+    return `<section class="section">
+      ${sectionHead({ title: 'Fuel (imported)', meta: `${RUN_WEEKS} weeks to ${T.fmtKey(end)} · ${list.length} vehicle${list.length === 1 ? '' : 's'} · ${aud(totalCost)} total${perL ? ` · ~$${perL.toFixed(2)}/L` : ''}` })}
+      <div class="hb">${rows}</div>
+      ${V.table(['Vehicle', 'Fuel spend', 'Litres', 'Transactions'], list.map(({ v, f }) => [v.id, aud(f.cost), km0(f.litres) + ' L', String(f.count)]))}
+    </section>`;
+  }
+
   function costVsUsage(end) {
     const from = T.addDays(end, -(7 * RUN_WEEKS - 1));
     const windowDays = RUN_WEEKS * 7;

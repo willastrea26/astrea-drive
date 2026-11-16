@@ -1188,6 +1188,10 @@ AD.views.vehicle = (function () {
     const tripFact = ts && (ts.trips != null || ts.runningKm != null || ts.idlePct != null)
       ? `<div><dt>GPS activity</dt><dd>${ts.trips != null ? `${ts.trips.toLocaleString('en-AU')} trip${ts.trips === 1 ? '' : 's'}` : '—'}${ts.runningKm != null ? ` · ${L.fmtKm(ts.runningKm)}` : ''}<span class="sub sub-gps">${tripSub ? tripSub + ' · ' : ''}over ${ts.days} days · from GPS</span></dd></div>`
       : '';
+    const fuel = L.fuelFor(v);
+    const fuelFact = fuel
+      ? `<div><dt>Fuel (imported)</dt><dd>${L.fmtAUD(fuel.cost)}<span class="sub">${fuel.litres ? Math.round(fuel.litres).toLocaleString('en-AU') + ' L · ' : ''}${fuel.count} transaction${fuel.count === 1 ? '' : 's'} from fuel-card data</span></dd></div>`
+      : '';
     const openDefs = defects.filter((d) => d.status !== 'Resolved');
     const engineChart = engineHoursChart(v);
     return `
@@ -1200,6 +1204,7 @@ AD.views.vehicle = (function () {
             ${usageFact}
             ${workHoursFact}
             ${tripFact}
+            ${fuelFact}
             <div><dt>Registration expiry</dt><dd>${T.fmtKey(v.regoExpiry)}<span class="sub ${flagTone(L.attentionTone(r.state, r.days))}">${esc(r.state === 'ok' ? 'Current — ' + r.why : r.why)}</span></dd></div>
             <div><dt>Last service</dt><dd>${lastServiceCell}</dd></div>
             <div><dt>Next service</dt><dd>${nextServiceLabel(v, s)}<span class="sub ${flagTone(L.attentionTone(s.state, s.daysLeft, s.kmLeft, s.hoursLeft))}">${esc(s.why.charAt(0).toUpperCase() + s.why.slice(1))}</span>${projService ? `<span class="sub">${esc(projService)}</span>` : ''}</dd></div>
