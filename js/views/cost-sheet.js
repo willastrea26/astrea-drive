@@ -112,11 +112,9 @@ AD.views['cost-sheet'] = (function () {
     const end = T.addDays(start, 6);
     const now = rowsFor(start);
     const base = baseline(start);
-    const haveBaseline = base.some((w) => w.rows.length);
+    const haveBaseline = base.some((w) => w.rows.length || fuelBetween(w.from, T.addDays(w.from, 6)) > 0);
 
-    const spend = sum(now), avgSpend = avgOf(base.map((w) => sum(w.rows)));
-    const jobs = now.length, avgJobs = avgOf(base.map((w) => w.rows.length));
-    const perJob = jobs ? spend / jobs : 0, avgPerJob = avgJobs ? avgSpend / avgJobs : 0;
+    const spend = sum(now) + fuelBetween(start, end), avgSpend = avgOf(base.map((w) => sum(w.rows) + fuelBetween(w.from, T.addDays(w.from, 6))));
 
     // Share rather than dollars: unplanned spend rises with a heavy week either way,
     // but the proportion is what says whether maintenance is keeping ahead of failure.
@@ -154,8 +152,6 @@ AD.views['cost-sheet'] = (function () {
 
       <div class="cs-kpis" role="group" aria-label="This week against the average week">
         ${kpi('Total spend', L.fmtAUD(spend), delta(spend, avgSpend, haveBaseline, L.fmtAUD, true), trendTone(spend, avgSpend, haveBaseline, true))}
-        ${kpi('Jobs recorded', String(jobs), delta(jobs, avgJobs, haveBaseline, (n) => n.toFixed(1), false))}
-        ${kpi('Average per job', L.fmtAUD(perJob), delta(perJob, avgPerJob, haveBaseline, L.fmtAUD, true), trendTone(perJob, avgPerJob, haveBaseline, true))}
         ${kpi('Unplanned share', `${Math.round(share)}%`, shareFoot, shareTone)}
         ${restOfYearMonths.length ? kpi('Projected to year-end', L.fmtAUD(projRestTotal), `<small class="cs-delta">${restOfYearMonths.length} month${restOfYearMonths.length === 1 ? '' : 's'} remaining · ${L.fmtAUD(projMonthAvg)}/mo avg</small>`) : ''}
       </div>
