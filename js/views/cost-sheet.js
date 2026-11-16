@@ -374,22 +374,31 @@ AD.views['cost-sheet'] = (function () {
       ? `<line x1="${nowX}" y1="${padT}" x2="${nowX}" y2="${padT + plotH}" class="cs-now-line"></line>
          <text class="cs-now-label" x="${nowX}" y="${padT - 4}" text-anchor="middle">Now</text>` : '';
 
-    const marks = points.map((p, i) => {
-      const cx = x(i).toFixed(1), cy = y(p.grand).toFixed(1);
+    // Each stacked line gets its own hover dot, in its own color, at its own
+    // height — showing what that line is made of plus the running total,
+    // rather than one ball on the top (grand) line standing in for all three.
+    const seriesDots = (seriesCoords, colorVar, tipRow) => seriesCoords.map((c, i) => {
+      const p = points[i];
       const isLast = i === splitIdx;
-      const isProj = !!p.projected;
-      return `<g class="cs-mark${isLast ? ' cs-current' : ''}${isProj ? ' cs-proj-mark' : ''}" style="--i:${i}">
+      const cx = c.x.toFixed(1), cy = c.y.toFixed(1);
+      return `<g class="cs-mark${isLast ? ' cs-current' : ''}" style="--i:${i};--cs-line:${colorVar}">
         ${isLast ? `<circle cx="${cx}" cy="${cy}" r="9" class="cs-halo"></circle>` : ''}
         <circle cx="${cx}" cy="${cy}" r="4" class="cs-dot"></circle>
-        <circle cx="${cx}" cy="${cy}" r="16" class="cs-hit" ${V.tipAttr(p.full, isProj
-          ? [['Forecast', L.fmtAUD(p.total), 'var(--violet)']]
-          : [['Planned', L.fmtAUD(p.planned), COLOR_PLANNED],
-             ['Unplanned', L.fmtAUD(p.unplanned), COLOR_UNPLANNED],
-             ...(p.fuel ? [['Fuel', L.fmtAUD(p.fuel), COLOR_FUEL]] : []),
-             ['Total', L.fmtAUD(p.grand), 'var(--ink)']]
-        )}></circle>
+        <circle cx="${cx}" cy="${cy}" r="10" class="cs-hit" ${V.tipAttr(p.full, [tipRow(p), ['Total', L.fmtAUD(p.grand), 'var(--ink)']])}></circle>
       </g>`;
     }).join('');
+    const plannedDots = seriesDots(histPlanned, COLOR_PLANNED, (p) => ['Planned servicing', L.fmtAUD(p.planned), COLOR_PLANNED]);
+    const maintDots = seriesDots(histMaint, COLOR_UNPLANNED, (p) => ['Unplanned repairs', L.fmtAUD(p.unplanned), COLOR_UNPLANNED]);
+    const grandDots = anyFuel ? seriesDots(histCoords, COLOR_FUEL, (p) => ['Fuel', L.fmtAUD(p.fuel), COLOR_FUEL]) : '';
+    const projMarks = projCoords.map((c, j) => {
+      const p = points[splitIdx + 1 + j];
+      const cx = c.x.toFixed(1), cy = c.y.toFixed(1);
+      return `<g class="cs-mark cs-proj-mark" style="--i:${splitIdx + 1 + j}">
+        <circle cx="${cx}" cy="${cy}" r="4" class="cs-dot"></circle>
+        <circle cx="${cx}" cy="${cy}" r="16" class="cs-hit" ${V.tipAttr(p.full, [['Forecast', L.fmtAUD(p.total), 'var(--violet)']])}></circle>
+      </g>`;
+    }).join('');
+    const marks = plannedDots + maintDots + grandDots + projMarks;
     const ariaDesc = points.map((p) => `${p.full}: ${L.fmtAUD(p.grand)} total, ${L.fmtAUD(p.fuel)} fuel, ${L.fmtAUD(p.unplanned)} unplanned`).join(', ');
 
     const fuelLayer = fuelBandD
