@@ -2476,6 +2476,58 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 .range-pick .ico { width: 15px; height: 15px; }
 .range-pick select { border: 0; background: none; height: 100%; padding: 0 2px; font-weight: 600; color: var(--ink); }
 
+/* Vehicle Costs tab: one source of truth for imported fuel and manually
+   recorded ownership / operating expenses. */
+.cost-tab-tools { align-items: center; }
+.tab-tool-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cost-kpis {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px;
+  margin-bottom: 18px;
+}
+.cost-kpi {
+  min-width: 0; padding: 15px 16px; border-radius: var(--r-lg);
+  background: var(--paper); border: 1px solid var(--rule); box-shadow: var(--shadow-1);
+  display: flex; flex-direction: column; gap: 4px;
+}
+.cost-kpi > span { color: var(--muted); font-size: 12.5px; font-weight: 600; }
+.cost-kpi strong { color: var(--ink); font-family: var(--font-display); font-size: 23px; letter-spacing: -.02em; }
+.cost-kpi small { color: var(--muted); font-size: 11.5px; line-height: 1.35; }
+.vehicle-cost-card { margin-top: 0; }
+.vehicle-cost-chart { min-width: 0; padding-top: 8px; }
+.vehicle-cost-bars {
+  display: grid; grid-template-columns: repeat(12, minmax(38px, 1fr)); align-items: end;
+  gap: 8px; min-width: 650px; height: 242px; padding: 8px 2px 0;
+  border-bottom: 1px solid var(--rule-strong);
+}
+.vehicle-cost-month {
+  min-width: 0; height: 100%; display: grid; grid-template-rows: 25px minmax(0, 1fr) 23px;
+  gap: 5px; align-items: end; outline: none;
+}
+.vehicle-cost-value {
+  color: var(--muted); font-size: 10.5px; font-weight: 600; text-align: center;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.vehicle-cost-track {
+  width: min(100%, 46px); height: 100%; justify-self: center; align-self: end;
+  display: flex; flex-direction: column-reverse; justify-content: flex-start;
+  border-radius: 5px 5px 0 0; overflow: hidden; background: var(--viz-free);
+  box-shadow: inset 0 0 0 1px rgba(128,144,164,.08);
+}
+.vehicle-cost-track i { display: block; width: 100%; min-height: 1px; flex: none; transition: filter .15s; }
+.vehicle-cost-month:hover .vehicle-cost-track i,
+.vehicle-cost-month:focus-visible .vehicle-cost-track i { filter: brightness(1.12); }
+.vehicle-cost-label { color: var(--ink-2); font-size: 11.5px; font-weight: 600; text-align: center; }
+.vehicle-cost-legend {
+  list-style: none; margin: 18px 0 0; padding: 14px 0 0; border-top: 1px solid var(--rule);
+  display: grid; grid-template-columns: repeat(3, minmax(150px, 1fr)); gap: 9px 18px;
+}
+.vehicle-cost-legend li { min-width: 0; display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: 8px; align-items: center; font-size: 13px; }
+.vehicle-cost-legend li > i { width: 10px; height: 10px; border-radius: 3px; }
+.vehicle-cost-legend li > span { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vehicle-cost-legend li > b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.cost-type { display: inline-flex; align-items: center; gap: 7px; font-weight: 600; }
+.cost-type > i { width: 9px; height: 9px; border-radius: 3px; flex: none; }
+
 /* KPI strip variants used on the revenue tab / dashboard */
 .strip-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .strip-item.is-static { cursor: default; }
@@ -2537,6 +2589,8 @@ h1, h2, h3 { letter-spacing: -0.02em; }
   .strip-5 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .rev-grid { grid-template-columns: minmax(0, 1fr); }
   .rev-grid > .section:first-child { grid-row: auto; }
+  .cost-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .vehicle-cost-card { overflow-x: auto; }
 }
 @media (max-width: 720px) {
   .veh-hero { grid-template-columns: minmax(0, 1fr); }
@@ -2548,6 +2602,9 @@ h1, h2, h3 { letter-spacing: -0.02em; }
   .rev-donut { align-self: center; }
   .pg-grid { grid-template-columns: repeat(2, 1fr); }
   .pg-grid.pg-1 { grid-template-columns: 1fr; }
+  .cost-kpis { grid-template-columns: minmax(0, 1fr); }
+  .cost-tab-tools { align-items: flex-start; }
+  .vehicle-cost-legend { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* =====================================================================

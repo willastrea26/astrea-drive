@@ -56,13 +56,18 @@ AD.store = (function () {
   async function load() {
     const since = new Date(Date.now() - ODO_READING_DAYS * 86400000).toISOString().slice(0, 10);
     const dailySince = new Date(Date.now() - 40 * 86400000).toISOString().slice(0, 10);
-    const [results, readings, workHours, tripStats, workDaily, fuel] = await Promise.all([
+    const [results, readings, workHours, tripStats, workDaily, fuel, vehicleCosts] = await Promise.all([
       Promise.all(TABLES.map(query)),
       loadOptional('odometer_readings', (q) => q.gte('readDate', since)),
       loadOptional('vehicle_work_hours', (q) => q),
       loadOptional('vehicle_trip_stats', (q) => q),
       loadOptional('vehicle_work_hours_daily', (q) => q.gte('day', dailySince)),
-      loadOptional('fuel_entries', (q) => q)
+      loadOptional('fuel_entries', (q) => q),
+      // Kept optional so the app still loads before the vehicle-costs migration
+      // has been applied. The Costs tab can already show fuel, services and
+      // repairs, while manual rego / insurance entries become available as soon
+      // as the table exists.
+      loadOptional('vehicle_costs', (q) => q)
     ]);
     const next = {};
     results.forEach((r, i) => {
@@ -74,6 +79,7 @@ AD.store = (function () {
     next.vehicle_trip_stats = tripStats;
     next.vehicle_work_hours_daily = workDaily;
     next.fuel_entries = fuel;
+    next.vehicle_costs = vehicleCosts;
     db = next;
     emit('*');
   }

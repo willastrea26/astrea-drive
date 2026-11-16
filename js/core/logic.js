@@ -210,6 +210,54 @@ AD.logic = (function () {
     return { cost, litres, count: rows.length, lastDate };
   }
 
+  /**
+   * Every real cost recorded against one vehicle, normalised into the shape the
+   * profile Costs tab uses. Fuel imports, completed services, resolved defect
+   * repairs and manually entered ownership costs all land in the same list.
+   * Optional YYYY-MM-DD bounds are inclusive.
+   */
+  function vehicleCostsFor(v, fromKey, toKey) {
+    const rows = [];
+    const inRange = (date) => {
+      const d = date ? String(date).slice(0, 10) : '';
+      if (!d) return !fromKey && !toKey;
+      if (fromKey && d < fromKey) return false;
+      if (toKey && d > toKey) return false;
+      return true;
+    };
+    const add = (r) => {
+      const amount = Number(r.amount);
+      if (!(amount > 0) || !inRange(r.date)) return;
+      rows.push(Object.assign({}, r, { amount }));
+    };
+
+    (S().all('fuel_entries') || []).filter((r) => r.vehicleId === v.id).forEach((r) => add({
+      id: r.id, vehicleId: v.id, date: r.date, category: 'Fuel', amount: r.cost,
+      supplier: r.brand || '', description: r.product || 'Fuel-card transaction',
+      reference: r.docket || '', source: 'Fuel import', litres: Number(r.litres) || 0
+    }));
+
+    (S().all('services') || []).filter((r) => r.vehicleId === v.id).forEach((r) => {
+      const type = String(r.type || 'Service');
+      const category = /tyre/i.test(type) ? 'Tyres' : /repair|overhaul/i.test(type) ? 'Repairs' : 'Servicing';
+      add({ id: r.id, vehicleId: v.id, date: r.date, category, amount: r.cost,
+        supplier: r.workshop || '', description: type, reference: '', source: 'Maintenance' });
+    });
+
+    (S().all('defects') || []).filter((r) => r.vehicleId === v.id && r.status === 'Resolved').forEach((r) => add({
+      id: r.id, vehicleId: v.id, date: r.resolvedDate, category: 'Repairs', amount: r.cost,
+      supplier: '', description: r.description || 'Defect repair', reference: '', source: 'Defect'
+    }));
+
+    (S().all('vehicle_costs') || []).filter((r) => r.vehicleId === v.id).forEach((r) => add({
+      id: r.id, vehicleId: v.id, date: r.date, category: r.category || 'Other',
+      amount: r.amount, supplier: r.supplier || '', description: r.description || '',
+      reference: r.reference || '', renewalDate: r.renewalDate || null, source: r.source || 'Manual'
+    }));
+
+    return rows.sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || String(b.id).localeCompare(String(a.id)));
+  }
+
   function regoState(v) {
     const d = T.daysBetween(T.todayKey(), v.regoExpiry);
     if (d < 0) return { state: 'overdue', days: d, label: 'Expired', why: `Expired ${-d} day${d === -1 ? '' : 's'} ago` };
@@ -480,7 +528,7 @@ AD.logic = (function () {
   }
 
   return {
-    serviceState, serviceTriggers, usageRate, workHours, workHoursDaily, tripStats, fuelFor, HOURS_TYPES,
+    serviceState, serviceTriggers, usageRate, workHours, workHoursDaily, tripStats, fuelFor, vehicleCostsFor, HOURS_TYPES,
     regoState, attentionTone, openDefects, fmtKm, fmtHours, fmtAUD, driverName, userName,
     vacTrucks, schedulableVehicles, bookingsFor, activeAt, overlaps, conflictIds, driverConflictIds, nextBooking, locate, hasCoords,
     bookingCategory, bookingTitle, SOON_DAYS, SOON_KM, SOON_HOURS, URGENT_HOURS,

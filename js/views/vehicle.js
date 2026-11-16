@@ -12,6 +12,7 @@ AD.views.vehicle = (function () {
     { key: 'defects', label: 'Defects' },
     { key: 'documents', label: 'Documents' },
     { key: 'photos', label: 'Photos' },
+    { key: 'costs', label: 'Costs' },
     { key: 'revenue', label: 'Revenue' }
   ];
   const RANGES = [
@@ -68,7 +69,7 @@ AD.views.vehicle = (function () {
     const docs = AD.store.all('documents').filter((x) => x.vehicleId === v.id);
     const upcoming = isVac ? L.bookingsFor(v.id).filter((b) => Date.parse(b.end) > Date.now()) : [];
     const openCount = defects.filter((d) => d.status !== 'Resolved').length;
-    const counts = { service: services.length, defects: openCount, documents: docs.length, photos: (v.photos || []).length, bookings: upcoming.filter((b) => b.status !== 'cancelled').length };
+    const counts = { service: services.length, defects: openCount, documents: docs.length, photos: (v.photos || []).length, bookings: upcoming.filter((b) => b.status !== 'cancelled').length, costs: L.vehicleCostsFor(v).length };
 
     el.classList.toggle('anim-in', fresh);
     fresh = false;
@@ -124,6 +125,7 @@ AD.views.vehicle = (function () {
     const tb = el.querySelector('#tab-body');
     tb.querySelector('[data-record]') && (tb.querySelector('[data-record]').onclick = () => AD.serviceForm(v.id));
     tb.querySelector('[data-report]') && (tb.querySelector('[data-report]').onclick = () => AD.defectForm(v.id));
+    tb.querySelector('[data-add-cost]') && (tb.querySelector('[data-add-cost]').onclick = () => AD.vehicleCostForm(v.id, () => draw()));
     tb.querySelectorAll('[data-resolve]').forEach((b) => (b.onclick = () => AD.resolveDefect(b.dataset.resolve)));
     tb.querySelectorAll('[data-photos]').forEach((b) => (b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); AD.viewDefectPhotos(b.dataset.photos); }));
     tb.querySelectorAll('[data-booking]').forEach((b) => (b.onclick = () => AD.go('calendar', { view: 'day', date: T.dateKey(AD.store.get('bookings', b.dataset.booking).start), open: b.dataset.booking })));
@@ -515,6 +517,7 @@ AD.views.vehicle = (function () {
     if (tab === 'overview') return overview(v, services, defects);
     if (tab === 'trips') return tripsTab(v);
     if (tab === 'photos') return photosTab(v);
+    if (tab === 'costs') return costsTab(v);
     if (tab === 'revenue') return revenueTab(v);
 
     if (tab === 'service') {
@@ -1248,6 +1251,114 @@ AD.views.vehicle = (function () {
           ${v.notes ? `<section class="section">${sectionHead({ title: 'Notes', level: 3 })}<p style="padding-top:10px">${esc(v.notes)}</p></section>` : ''}
         </aside>
       </div>`;
+  }
+
+  // ---------- Costs ----------
+  const COST_COLORS = {
+    Fuel: '#2463eb',
+    Registration: '#4a3aa7',
+    Insurance: '#1baf7a',
+    Servicing: '#34b58e',
+    Repairs: '#d03b3b',
+    Tyres: '#d9902a',
+    Tolls: '#5598e7',
+    Finance: '#7a5af8',
+    Other: '#98a2b3'
+  };
+
+  function lastTwelveMonths() {
+    const p = T.parts(Date.now());
+    return Array.from({ length: 12 }, (_, i) => {
+      const offset = i - 11;
+      const d = new Date(Date.UTC(p.year, p.month - 1 + offset, 1));
+      const key = d.toISOString().slice(0, 7);
+      return {
+        key,
+        label: d.toLocaleString('en-AU', { month: 'short', timeZone: 'UTC' }),
+        full: d.toLocaleString('en-AU', { month: 'long', year: 'numeric', timeZone: 'UTC' }),
+        total: 0,
+        byCategory: {}
+      };
+    });
+  }
+
+  function costsTab(v) {
+    const months = lastTwelveMonths();
+    const from = months[0].key + '-01';
+    const to = T.todayKey();
+    const rows = L.vehicleCostsFor(v, from, to);
+    const totals = {};
+    rows.forEach((r) => {
+      const category = COST_COLORS[r.category] ? r.category : 'Other';
+      const amount = Number(r.amount) || 0;
+      totals[category] = (totals[category] || 0) + amount;
+      const month = months.find((m) => m.key === String(r.date || '').slice(0, 7));
+      if (!month) return;
+      month.total += amount;
+      month.byCategory[category] = (month.byCategory[category] || 0) + amount;
+    });
+    const total = rows.reduce((n, r) => n + (Number(r.amount) || 0), 0);
+    const fuel = totals.Fuel || 0;
+    const maintenance = (totals.Servicing || 0) + (totals.Repairs || 0) + (totals.Tyres || 0);
+    const ownership = (totals.Registration || 0) + (totals.Insurance || 0) + (totals.Finance || 0);
+    const used = Object.keys(totals).sort((a, b) => totals[b] - totals[a]);
+    const latest = rows.slice(0, 50);
+
+    const kpi = (label, value, sub) => `<div class="cost-kpi"><span>${esc(label)}</span><strong>${L.fmtAUD(value)}</strong><small>${esc(sub)}</small></div>`;
+    return `
+      <div class="tab-tools cost-tab-tools">
+        <span class="t2">Actual recorded costs · ${esc(months[0].full)} to ${esc(months[11].full)}</span>
+        <div class="tab-tool-actions">
+          <a class="btn btn-sm btn-secondary" href="#/cost-sheet">${I.file} Fleet cost sheet</a>
+          <button class="btn btn-sm btn-primary" data-add-cost>${I.plus} Add cost</button>
+        </div>
+      </div>
+
+      <div class="cost-kpis" role="group" aria-label="Vehicle cost summary">
+        ${kpi('Total cost', total, `${rows.length} transaction${rows.length === 1 ? '' : 's'}`)}
+        ${kpi('Fuel', fuel, 'Imported automatically')}
+        ${kpi('Maintenance', maintenance, 'Service, repairs and tyres')}
+        ${kpi('Ownership', ownership, 'Rego, insurance and finance')}
+      </div>
+
+      <section class="section viz-card vehicle-cost-card">
+        ${sectionHead({ title: 'Costs over the last 12 months', meta: 'Each colour is a cost type', level: 3 })}
+        ${vehicleCostChart(months, used, totals)}
+      </section>
+
+      <section class="section">
+        ${sectionHead({ title: 'Cost history', meta: rows.length ? `${rows.length} records · newest first` : 'No costs recorded', level: 3 })}
+        <div class="table-wrap"><table class="data"><thead><tr><th>Date</th><th>Type</th><th>Details</th><th class="col-opt">Supplier</th><th class="num">Amount</th></tr></thead><tbody>
+          ${latest.map((r) => {
+            const detail = r.description || r.source || r.category;
+            const fuelMeta = r.category === 'Fuel' && r.litres ? ` · ${Math.round(r.litres).toLocaleString('en-AU')} L` : '';
+            const renew = r.renewalDate ? `<span class="t2">Renews ${T.fmtKey(r.renewalDate)}</span>` : '';
+            return `<tr><td class="nowrap">${T.fmtKey(r.date)}</td><td><span class="cost-type"><i style="background:${COST_COLORS[r.category] || COST_COLORS.Other}"></i>${esc(r.category)}</span></td><td>${esc(detail)}${fuelMeta ? `<span class="t2">${esc(fuelMeta.slice(3))}</span>` : ''}${r.reference ? `<span class="t2">Ref ${esc(r.reference)}</span>` : ''}${renew}</td><td class="col-opt">${r.supplier ? esc(r.supplier) : dash}</td><td class="num"><b>${L.fmtAUD(r.amount)}</b></td></tr>`;
+          }).join('') || '<tr><td colspan="5" class="empty">No costs recorded for this vehicle in the last 12 months.</td></tr>'}
+        </tbody></table></div>
+        ${rows.length > latest.length ? `<p class="section-foot muted small">Showing the latest ${latest.length} of ${rows.length} records.</p>` : ''}
+      </section>`;
+  }
+
+  function vehicleCostChart(months, used, totals) {
+    const max = Math.max(...months.map((m) => m.total), 1);
+    const categoryOrder = Object.keys(COST_COLORS);
+    const aria = months.map((m) => `${m.full}: ${L.fmtAUD(m.total)}`).join(', ');
+    const bars = months.map((m) => {
+      const segments = categoryOrder.filter((c) => m.byCategory[c] > 0).map((c) => {
+        const amount = m.byCategory[c];
+        return `<i style="height:${Math.max((amount / max) * 100, 0.8)}%;background:${COST_COLORS[c]}" title="${esc(`${m.full} · ${c}: ${L.fmtAUD(amount)}`)}"></i>`;
+      }).join('');
+      return `<div class="vehicle-cost-month" tabindex="0" title="${esc(`${m.full}: ${L.fmtAUD(m.total)}`)}">
+        <span class="vehicle-cost-value">${m.total ? audK(m.total) : '—'}</span>
+        <span class="vehicle-cost-track">${segments}</span>
+        <span class="vehicle-cost-label">${esc(m.label)}</span>
+      </div>`;
+    }).join('');
+    const legend = used.length ? `<ul class="vehicle-cost-legend" aria-label="Cost types">
+      ${used.map((c) => `<li><i style="background:${COST_COLORS[c] || COST_COLORS.Other}"></i><span>${esc(c)}</span><b>${L.fmtAUD(totals[c])}</b></li>`).join('')}
+    </ul>` : '<p class="empty-tidy">No costs recorded yet. Imported fuel and costs you add will appear here automatically.</p>';
+    return `<div class="vehicle-cost-chart" role="img" aria-label="${esc(aria)}"><div class="vehicle-cost-bars">${bars}</div>${legend}</div>`;
   }
 
   // ---------- Revenue ----------
