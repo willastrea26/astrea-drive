@@ -170,15 +170,15 @@ AD.importFuelData = (function () {
       const m = readMapping(container);
       const vmap = regoMap();
       const rows = [], unmatched = new Set();
-      let blank = 0, totalCost = 0, totalLitres = 0;
+      let blankRows = 0, unmatchedRows = 0, totalCost = 0, totalLitres = 0;
       const vehicles = new Set();
       parsed.rows.forEach((r) => {
         const rego = normRego(r[m.rego]);
         const cost = toNum(r[m.cost]) || 0;
         const litres = m.litres >= 0 ? toNum(r[m.litres]) : null;
-        if (!rego || (cost <= 0 && !(litres > 0))) { blank++; return; }
+        if (!rego || (cost <= 0 && !(litres > 0))) { blankRows++; return; }
         const v = vmap.get(rego);
-        if (!v) { unmatched.add(rego); return; }
+        if (!v) { unmatched.add(rego); unmatchedRows++; return; }
         const date = m.date >= 0 ? toKey(r[m.date]) : '';
         const product = m.product >= 0 ? String(r[m.product] || '').trim() : '';
         const brand = m.brand >= 0 ? String(r[m.brand] || '').trim() : '';
@@ -187,7 +187,7 @@ AD.importFuelData = (function () {
         rows.push({ id, vehicleId: v.id, rego: String(r[m.rego] || '').trim(), date: date || null, litres: litres != null ? litres : null, cost, product, brand, docket, source: fileName });
         totalCost += cost; totalLitres += litres || 0; vehicles.add(v.id);
       });
-      return { rows, stats: { unmatched: [...unmatched], blank, totalCost, totalLitres, vehicles: vehicles.size } };
+      return { rows, stats: { unmatched: [...unmatched], unmatchedRows, blankRows, totalCost, totalLitres, vehicles: vehicles.size, totalRows: parsed.rows.length } };
     }
 
     function renderPreview(container) {
@@ -207,9 +207,10 @@ AD.importFuelData = (function () {
           <div class="fi-stat fi-stat-good"><b>${rows.length}</b><span>transactions to import</span></div>
           <div class="fi-stat fi-stat-mint"><b>${aud(stats.totalCost)}</b><span>total spend</span></div>
           <div class="fi-stat"><b>${stats.vehicles}</b><span>vehicles matched</span></div>
-          <div class="fi-stat fi-stat-muted"><b>${stats.unmatched.length + stats.blank}</b><span>rows skipped</span></div>
+          <div class="fi-stat fi-stat-muted"><b>${stats.unmatchedRows + stats.blankRows}</b><span>rows skipped</span></div>
         </div>
-        ${stats.unmatched.length ? `<p class="fi-note-skip">${stats.unmatched.length} rego${stats.unmatched.length === 1 ? '' : 's'} not in the fleet, skipped: <span class="muted">${esc(stats.unmatched.slice(0, 12).join(', '))}${stats.unmatched.length > 12 ? ` +${stats.unmatched.length - 12} more` : ''}</span></p>` : ''}
+        ${stats.unmatchedRows ? `<p class="fi-note-skip">${stats.unmatchedRows} row${stats.unmatchedRows === 1 ? '' : 's'} for ${stats.unmatched.length} rego${stats.unmatched.length === 1 ? '' : 's'} not in the fleet: <span class="muted">${esc(stats.unmatched.slice(0, 12).join(', '))}${stats.unmatched.length > 12 ? ` +${stats.unmatched.length - 12} more` : ''}</span></p>` : ''}
+        ${stats.blankRows ? `<p class="fi-note-skip muted">${stats.blankRows} row${stats.blankRows === 1 ? '' : 's'} with no fuel or cost (e.g. $0 lines) skipped.</p>` : ''}
         ${rows.length ? `<p class="fi-note-skip muted">Re-importing the same file is safe — it updates existing rows instead of adding duplicates.</p>` : '<p class="fi-warn">Nothing to import with these columns — check the mapping above.</p>'}`;
     }
 
