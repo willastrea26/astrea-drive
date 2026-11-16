@@ -1349,11 +1349,14 @@ AD.views.vehicle = (function () {
     const categoryOrder = Object.keys(COST_COLORS);
     const aria = months.map((m) => `${m.full}: ${L.fmtAUD(m.total)}`).join(', ');
     const bars = months.map((m) => {
-      const segments = categoryOrder.filter((c) => m.byCategory[c] > 0).map((c) => {
+      const present = categoryOrder.filter((c) => m.byCategory[c] > 0);
+      const segments = present.map((c) => {
         const amount = m.byCategory[c];
-        return `<i style="height:${Math.max((amount / max) * 100, 0.8)}%;background:${COST_COLORS[c]}" title="${esc(`${m.full} · ${c}: ${L.fmtAUD(amount)}`)}"></i>`;
+        return `<i style="height:${Math.max((amount / max) * 100, 0.8)}%;background:${COST_COLORS[c]}"></i>`;
       }).join('');
-      return `<div class="vehicle-cost-month" tabindex="0" title="${esc(`${m.full}: ${L.fmtAUD(m.total)}`)}">
+      const tipRows = present.map((c) => [c, L.fmtAUD(m.byCategory[c]), COST_COLORS[c]]);
+      if (tipRows.length > 1) tipRows.push(['Total', L.fmtAUD(m.total), 'var(--ink)']);
+      return `<div class="vehicle-cost-month" tabindex="0" ${tipRows.length ? AD.viz.tipAttr(m.full, tipRows) : ''} aria-label="${esc(`${m.full}: ${L.fmtAUD(m.total)}`)}">
         <span class="vehicle-cost-value">${m.total ? audK(m.total) : '—'}</span>
         <span class="vehicle-cost-track">${segments}</span>
         <span class="vehicle-cost-label">${esc(m.label)}</span>
