@@ -251,7 +251,7 @@ AD.views.fleet = (function () {
     const imp = root.querySelector('#import-docs');
     if (imp) imp.onclick = () => AD.importHiredDocs();
     const syncBtn = root.querySelector('#sync-odo');
-    if (syncBtn) syncBtn.onclick = () => syncOdometers(syncBtn, 'recent');
+    if (syncBtn) syncBtn.onclick = () => syncOdometers(syncBtn, 'recent', true);
     const fullBtn = root.querySelector('#sync-full');
     if (fullBtn) fullBtn.onclick = async () => {
       const ok = await AD.ui.confirm({
@@ -266,14 +266,14 @@ AD.views.fleet = (function () {
 
   function sync() { AD.setParams(st); rows(); }
 
-  async function syncOdometers(btn, depth) {
+  async function syncOdometers(btn, depth, quick) {
     const label = btn.innerHTML;
     const other = btn.id === 'sync-odo' ? document.getElementById('sync-full') : document.getElementById('sync-odo');
     btn.disabled = true;
     if (other) other.disabled = true;
     btn.innerHTML = depth === 'full' ? `${I.gauge} Resyncing 30 days… (up to a minute)` : `${I.gauge} Syncing…`;
     try {
-      const { data, error } = await AD.sb.functions.invoke('netstar', { body: { action: 'sync-odometers', depth } });
+      const { data, error } = await AD.sb.functions.invoke('netstar', { body: { action: 'sync-odometers', depth, quick: !!quick } });
       if (error) throw error;
       if (data && data.error) throw new Error(data.error);
       await AD.store.load();
@@ -318,33 +318,38 @@ AD.views.fleet = (function () {
         : (r.gpsKm != null ? `<span class="odo-sub">GPS ${esc(L.fmtKm(r.gpsKm))}</span>` : '');
 
       // Telematics extras: did engine hours / daily hours / trip stats actually
-      // save? Shows "not deployed" for an older server function, and the raw
-      // diagnostics when nothing was saved, so empty charts can be explained.
+      // save? Shows "not deployed" for an older server function, "skipped" for
+      // a quick odometers-only run, and the raw diagnostics when something
+      // actually ran but saved nothing, so empty charts can be explained.
+      const wasQuick = !!(data.dailyDebug && data.dailyDebug.skipped);
       const extras = [
         { label: 'Engine hours (30-day total)', rec: data.workHoursRecorded, dbg: data.workHoursDebug },
         { label: 'Daily engine hours (chart)',  rec: data.dailyRecorded,     dbg: data.dailyDebug },
         { label: 'Trip stats (idle, trips, speed)', rec: data.tripStatsRecorded, dbg: data.tripStatsDebug }
       ];
       const extraRow = (x) => {
+        const skipped = x.rec === null;
         const missing = x.rec === undefined;
-        const ok = !missing && Number(x.rec) > 0;
-        const tone = ok ? 'good' : missing ? 'muted' : 'amber';
-        const text = missing ? 'Server function not updated yet' : ok ? `${Number(x.rec)} saved` : 'Nothing saved';
+        const ok = !missing && !skipped && Number(x.rec) > 0;
+        const tone = ok ? 'good' : missing || skipped ? 'muted' : 'amber';
+        const text = skipped ? 'Skipped — fast sync' : missing ? 'Server function not updated yet' : ok ? `${Number(x.rec)} saved` : 'Nothing saved';
         return `<div class="odo-row">
           <span class="odo-rego" style="font-size:.95em">${esc(x.label)}</span>
           <span class="odo-detail"></span>
           <span class="odo-pill odo-pill-${tone}"><i></i>${esc(text)}</span>
         </div>`;
       };
-      const needsDebug = extras.some((x) => x.rec !== undefined && !(Number(x.rec) > 0));
+      const needsDebug = !wasQuick && extras.some((x) => x.rec !== undefined && x.rec !== null && !(Number(x.rec) > 0));
       const debugJson = JSON.stringify({ workHours: data.workHoursDebug, daily: data.dailyDebug, tripStats: data.tripStatsDebug }, null, 2);
       const depthUsed = (data.dailyDebug && data.dailyDebug.depth) || 'recent';
-      const depthNote = depthUsed === 'full'
+      const depthNote = wasQuick
+        ? 'Fast sync — odometers only. Trip stats and engine hours refresh automatically overnight regardless.'
+        : depthUsed === 'full'
         ? 'Full 30-day resync — pulled the whole month.'
         : 'Light sync — pulled only the last few days (fast, safe to run anytime). The 30-day totals still cover the full month, rolled up from everything ever stored.';
       const extrasHtml = `
         <h4 style="margin:18px 0 8px;font-size:.95em">Telematics data <span class="muted" style="font-weight:400;font-size:.85em">— ${esc(depthNote)}</span></h4>
-        <div class="odo-table">${extras.map(extraRow).join('')}</div>
+        ${wasQuick ? '' : `<div class="odo-table">${extras.map(extraRow).join('')}</div>`}
         ${needsDebug ? `<details class="odo-untracked" open>
           <summary>Why nothing saved <span class="muted">— what Netstar replied</span></summary>
           <pre style="white-space:pre-wrap;word-break:break-word;font-size:.78em;margin:8px 0 0;max-height:220px;overflow:auto">${esc(debugJson)}</pre>

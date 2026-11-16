@@ -20,8 +20,11 @@
 //   'positions'       { imeis: [...] } latest status for specific imeis
 //   'sync-odometers'  write each matched vehicle's latest odometer into the
 //                     vehicles table (only ever increasing it), plus trip
-//                     stats and daily engine hours. Used by the
-//                     "Sync GPS data" button and the nightly cron job.
+//                     stats and daily engine hours. Body may also carry
+//                     { quick: true } to skip the trip-stats/daily-hours
+//                     calls and only touch odometers — used by the manual
+//                     "Sync GPS data" button so it stays fast; the nightly
+//                     cron job omits it and keeps refreshing everything.
 // =====================================================================
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
@@ -419,16 +422,21 @@ async function mapLimit<T, R>(
  *
  * depth 'recent' (default): pulls only the last RECENT_DAYS days of daily
  * engine hours — a handful of calls per vehicle, safely inside Netstar's rate
- * limit even run back-to-back. Used for the nightly cron and the manual
- * "Sync GPS data" button.
+ * limit even run back-to-back. Used for the nightly cron.
  * depth 'full': pulls the full 30-day window (one call per device per day —
  * a few hundred calls, ~60-90s paced). Used for the weekly deep-resync cron,
  * or a manual full resync, to backfill any days a light run never reaches.
  * Either way, the 30-day totals shown in the app come from everything ever
  * stored in vehicle_work_hours_daily, not just what this run fetched — so a
  * light run never makes the numbers look thinner than they really are.
+ *
+ * quick: skips trip-summary and daily engine-hours entirely — odometers
+ * only. Used by the manual "Sync GPS data" button, so clicking it doesn't
+ * sit through dozens of paced per-vehicle-per-day calls someone is just
+ * waiting on; the nightly cron (quick=false) still refreshes those every
+ * night regardless of whether anyone clicks the button.
  */
-async function syncOdometers(depth: "recent" | "full" = "recent") {
+async function syncOdometers(depth: "recent" | "full" = "recent", quick = false) {
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ??
     "sb_publishable_hInlEU8CHjlKIiMtAz4t1g_qggctjTA";
@@ -453,9 +461,13 @@ async function syncOdometers(depth: "recent" | "full" = "recent") {
   // while Netstar's rate allowance is fullest) ----------------------------
   // distance, working days, engine/idle/stop time, trips, speeds, overspeed.
   // Matched back to a rego by imei, then applied by record_trip_stats.
-  let tripStatsRecorded = 0;
+  // Skipped entirely on a quick run — see the "quick" doc comment above.
+  let tripStatsRecorded: number | null = 0;
   const tripStatsDebug: Record<string, unknown> = {};
-  try {
+  if (quick) {
+    tripStatsRecorded = null;
+    tripStatsDebug.skipped = "quick sync — odometers only; this refreshes via the nightly sync";
+  } else try {
     const WINDOW_DAYS = 30;
     const now = Date.now();
     const from = netstarDate(now - WINDOW_DAYS * 86400000);
@@ -499,12 +511,17 @@ async function syncOdometers(depth: "recent" | "full" = "recent") {
   // chart AND the 30-day total). One workhour-report call per device per day,
   // newest days first so a partial run still fills the most recent week. Calls
   // are paced and retried on 429 (see nsFetch) and stop at a time budget.
+  // Skipped entirely on a quick run — see the "quick" doc comment above.
   const RECENT_DAYS = 3, FULL_DAYS = 30;
-  let dailyRecorded = 0;
-  let workHoursRecorded = 0;
+  let dailyRecorded: number | null = 0;
+  let workHoursRecorded: number | null = 0;
   const dailyDebug: Record<string, unknown> = { depth };
   const workHoursDebug: Record<string, unknown> = {};
-  try {
+  if (quick) {
+    dailyRecorded = null;
+    workHoursRecorded = null;
+    dailyDebug.skipped = "quick sync — odometers only; this refreshes via the nightly sync";
+  } else try {
     const days = sydneyDays(depth === "full" ? FULL_DAYS : RECENT_DAYS);
     const tasks: Array<{ rego: string; imei: string; day: { key: string; from: string; to: string } }> = [];
     for (const day of days) for (const v of devices) tasks.push({ rego: v.rego, imei: v.imei, day });
@@ -543,7 +560,7 @@ async function syncOdometers(depth: "recent" | "full" = "recent") {
     for (let i = 0; i < dayRows.length; i += 400) {
       const { data: dData, error: dErr } = await db.rpc("record_work_hours_daily", { rows: dayRows.slice(i, i + 400) });
       if (dErr) { dailyDebug.rpcError = dErr.message; break; }
-      dailyRecorded += Number(dData) || 0;
+      dailyRecorded = (dailyRecorded ?? 0) + (Number(dData) || 0);
     }
 
     // Roll the 30-day "hrs/week" total up from EVERY day ever stored, not
@@ -594,7 +611,7 @@ Deno.serve(async (req: Request) => {
     }
 
     if (action === "sync-odometers") {
-      return await syncOdometers(body.depth === "full" ? "full" : "recent");
+      return await syncOdometers(body.depth === "full" ? "full" : "recent", !!body.quick);
     }
 
     // Trips for one vehicle over the last N days, grouped by day (Trips tab).
