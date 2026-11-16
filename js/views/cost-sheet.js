@@ -11,6 +11,8 @@ AD.views['cost-sheet'] = (function () {
   const TREND_WEEKS = 12; // Spend over time, weekly mode
   const TREND_MONTHS = 12; // Spend over time, monthly mode
   const PROJ_MONTHS = 6;  // months to project forward from current
+  const MIN_USAGE_SPAN_DAYS = 28;      // below this, a vehicle's own measurement window is too noisy to trust a per-km rate
+  const THIN_USAGE_SPAN_DAYS = 12 * 7; // below this, the rate is shown but flagged "Thin data"
   let root = null, start = '', period = 'month';
   const PROJ_STORE_KEY = 'ad-cost-proj-overrides';
   let projOverrides = (() => { try { const v = JSON.parse(localStorage.getItem(PROJ_STORE_KEY)) || {}; /* migrate old {planned,unplanned} format */ for (const k of Object.keys(v)) { if (typeof v[k] === 'object') v[k] = (v[k].planned || 0) + (v[k].unplanned || 0); } return v; } catch { return {}; } })();
@@ -170,7 +172,9 @@ AD.views['cost-sheet'] = (function () {
 
       ${costVsUsage(end)}
 
-      <p class="section-foot muted small">Spend is recorded services plus resolved defects, counted on the day the service was recorded or the defect was resolved; imported fuel-card spend is shown as its own band on Spend over time and folded into Cost vs usage. Planned is scheduled servicing; unplanned is a defect repair. The weekly KPIs above cover maintenance only. The average is the ${AVG_WEEKS} weeks before this one. Running cost divides a vehicle's spend by the distance or hours covered between its first and last service in the window, so it needs at least two services to show a rate.</p>
+      ${fuelEconomy(end)}
+
+      <p class="section-foot muted small">Spend is recorded services plus resolved defects, counted on the day the service was recorded or the defect was resolved; imported fuel-card spend is shown as its own band on Spend over time, folded into Cost vs usage, and broken out on its own in Fuel cost per km. Planned is scheduled servicing; unplanned is a defect repair. The weekly KPIs above cover maintenance only. The average is the ${AVG_WEEKS} weeks before this one. Running cost divides a vehicle's spend by the distance or hours covered between its first and last service in the window, so it needs at least two services to show a rate.</p>
 
       ${projection(end)}`;
 
@@ -605,8 +609,7 @@ AD.views['cost-sheet'] = (function () {
    * (i.e. GPS-tracked with enough history); the rest have nothing to divide by.
    */
   function costVsUsage(end) {
-    const MIN_SPAN_DAYS = 28;         // < 4 weeks of measurement is too noisy for a per-km figure
-    const THIN_SPAN_DAYS = 12 * 7;    // < 12 weeks gets a "thin data" caveat
+    const MIN_SPAN_DAYS = MIN_USAGE_SPAN_DAYS, THIN_SPAN_DAYS = THIN_USAGE_SPAN_DAYS;
     const maxWindowDays = RUN_WEEKS * 7;
     const fmtKmRate = (n) => '$' + (n >= 10 ? Math.round(n).toLocaleString('en-AU') : n.toFixed(2));
 
@@ -714,6 +717,90 @@ AD.views['cost-sheet'] = (function () {
         <figcaption><span class="viz-sub">A high cost per kilometre or hour, or a vehicle that barely moves yet still costs money, is a candidate to question, service, or replace. Each vehicle is measured only over the period we actually have GPS or engine-hour data for — no extrapolation.${anyHours ? ' Cost per hour counts stationary work, so it is the fairer measure for vac trucks.' : ''}</span></figcaption>
         <div class="cs-rows">${rows}</div>
         ${V.table(tableHead, tableRows)}
+      </figure>
+    </section>`;
+  }
+
+  /**
+   * Fuel-card spend only, against kilometres actually driven — a pure running-
+   * cost figure that a one-off repair bill can't skew (unlike "Cost vs usage"
+   * above, which mixes in maintenance). Each vehicle is measured over its own
+   * GPS window, same honest-span rule as the maintenance table. Vehicles with
+   * no fuel-card spend recorded yet show as "No fuel data" rather than a
+   * misleading $0.00/km.
+   */
+  function fuelEconomy(end) {
+    const maxWindowDays = RUN_WEEKS * 7;
+    const fmtFuelRate = (n) => '$' + (n >= 10 ? Math.round(n).toLocaleString('en-AU') : n.toFixed(2));
+    const fmtSpan = (days) => days >= 49 ? `${Math.round(days / 7)} weeks` : `${days} days`;
+
+    const lines = AD.store.all('vehicles').filter((v) => !v.hired).map((v) => {
+      const u = L.usageRate(v);
+      if (!u) return null;
+      const span = Math.min(maxWindowDays, u.days);
+      if (span < MIN_USAGE_SPAN_DAYS) return null;
+      const windowKm = u.perDay * span;
+      if (!(windowKm > 0)) return null;
+
+      const from = T.addDays(end, -(span - 1));
+      const fuel = fuelRows().filter((r) => r.vehicleId === v.id && r.date >= from && r.date <= end).reduce((n, r) => n + r.cost, 0);
+      const hasFuel = fuel > 0;
+      return { v, fuel, hasFuel, windowKm, perKm: hasFuel ? fuel / windowKm : null,
+               perWeek: u.perWeek, span, thin: span < THIN_USAGE_SPAN_DAYS };
+    }).filter(Boolean).sort((a, b) => (b.perKm || -1) - (a.perKm || -1));
+
+    if (!lines.length) {
+      return `<section class="section">
+        ${sectionHead({ title: 'Fuel cost per km', meta: 'Fuel-card spend ÷ distance driven' })}
+        <figure class="viz-card"><p class="empty">No usage data yet. Once vehicles have at least ${MIN_USAGE_SPAN_DAYS} days of GPS-synced odometer history, their fuel cost per kilometre appears here.</p></figure>
+      </section>`;
+    }
+
+    const withFuel = lines.filter((l) => l.hasFuel);
+    const medKm = withFuel.length ? median(withFuel.map((l) => l.perKm)) : 0;
+    const top = Math.max(...withFuel.map((l) => l.perKm), 0.0001);
+
+    const rows = lines.map((l, i) => {
+      if (!l.hasFuel) {
+        return `<a class="cs-row cs-row-muted" href="${vehHref(l.v.id)}" style="--i:${i}">
+          <span class="id">${esc(l.v.id)}</span>
+          <span class="cs-hbar"></span>
+          <span class="cs-row-val">—</span>
+          <span class="cs-row-meta">No fuel data over ${fmtSpan(l.span)} · ~${Math.round(l.windowKm).toLocaleString('en-AU')} km driven</span>
+        </a>`;
+      }
+      const costly = medKm > 0 && l.perKm > medKm * 1.3;
+      const flag = l.thin ? '<span class="cs-flag cs-flag-soft">Thin data</span>'
+        : costly ? '<span class="cs-flag">High fuel/km</span>' : '';
+      return `<a class="cs-row" href="${vehHref(l.v.id)}" style="--i:${i}" ${V.tipAttr(l.v.id, [
+        ['Fuel per km', fmtFuelRate(l.perKm), COLOR_FUEL],
+        [`Fuel (${fmtSpan(l.span)})`, L.fmtAUD(l.fuel), COLOR_FUEL],
+        ['Driven', `${Math.round(l.windowKm).toLocaleString('en-AU')} km`, 'var(--mint)']
+      ])}>
+        <span class="id">${esc(l.v.id)}</span>
+        <span class="cs-hbar"><i${costly ? ' class="cs-high-fuel"' : ' class="cs-fuel"'} style="width:${(l.perKm / top) * 100}%"></i>${medKm > 0 ? `<b class="cs-median" style="left:${(medKm / top) * 100}%"></b>` : ''}</span>
+        <span class="cs-row-val">${fmtFuelRate(l.perKm)}<small>/km</small></span>
+        <span class="cs-row-meta">${flag ? flag + ' · ' : ''}${L.fmtAUD(l.fuel)} fuel over ${fmtSpan(l.span)} · ~${Math.round(l.perWeek).toLocaleString('en-AU')} km/week</span>
+      </a>`;
+    }).join('');
+
+    const tableRows = lines.map((l) => [l.v.id,
+      l.hasFuel ? fmtFuelRate(l.perKm) : '—',
+      l.hasFuel ? L.fmtAUD(l.fuel) : '—',
+      `${Math.round(l.windowKm).toLocaleString('en-AU')} km`,
+      `${Math.round(l.perWeek).toLocaleString('en-AU')} km`,
+      fmtSpan(l.span)]);
+
+    const spans = lines.map((l) => l.span);
+    const spanMin = Math.min(...spans), spanMax = Math.max(...spans);
+    const spanLabel = spanMin === spanMax ? fmtSpan(spanMin) : `${fmtSpan(spanMin)}–${fmtSpan(spanMax)}`;
+
+    return `<section class="section">
+      ${sectionHead({ title: 'Fuel cost per km', meta: `${lines.length} GPS-tracked vehicle${lines.length === 1 ? '' : 's'} · fuel-card spend ÷ distance driven over each vehicle's measurement window (${spanLabel}) · the tick marks the median` })}
+      <figure class="viz-card">
+        <figcaption><span class="viz-sub">Fuel-card spend only, so a vehicle's running cost can be read without a repair bill skewing it. Same honest-window rule as Cost vs usage above — no extrapolation, and a vehicle with no fuel imported yet shows as "No fuel data" rather than a misleading $0.00.</span></figcaption>
+        <div class="cs-rows">${rows}</div>
+        ${V.table(['Vehicle', 'Fuel / km', 'Fuel spend', 'Driven', 'Per week', 'Window'], tableRows)}
       </figure>
     </section>`;
   }

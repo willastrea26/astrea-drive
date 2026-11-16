@@ -1436,10 +1436,14 @@ input[type=text], input[type=number], input[type=date], input[type=datetime-loca
 .cs-flag { color: var(--amber); font-weight: 600; }
 .cs-flag-soft { color: var(--muted); font-weight: 600; }
 .cs-more { margin: 8px 8px 0; font-size: 12.5px; color: var(--muted); }
+.cs-row-muted { opacity: .55; }
+.cs-row-muted:hover, .cs-row-muted:focus-visible { opacity: .8; background: var(--hover); }
 
 .cs-hbar { position: relative; height: 10px; border-radius: 5px; background: var(--viz-free); }
 .cs-hbar i { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 5px; background: var(--mint); }
 .cs-hbar i.cs-high { background: var(--amber); }
+.cs-hbar i.cs-fuel { background: var(--cs-blue); }
+.cs-hbar i.cs-high-fuel { background: var(--amber); }
 /* The type median: a tick through the track, so above/below reads without a number. */
 .cs-median { position: absolute; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; border-radius: 1px; background: var(--ink-2); }
 /* Change is zero-centred: red grows right of the centre line (spend up), green left (down). */
