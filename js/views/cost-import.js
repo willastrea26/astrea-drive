@@ -40,17 +40,30 @@ AD.importFuelData = (function () {
     return m ? m[0] : '';
   };
   const normRego = (r) => String(r || '').toUpperCase().replace(/\s+/g, '');
+  // Characters that look alike on a plate — fold the letters to their digit
+  // twin so a fuel-card typo like X053YD still matches XO53YD, or D144DT the
+  // DI44DT on the register. Collision-guarded in regoMaps() so it never
+  // matches when two real vehicles would collapse to the same form.
+  const CONFUSABLE = { O: '0', I: '1', S: '5', B: '8', Z: '2', G: '6', Q: '0' };
+  const canonRego = (r) => normRego(r).replace(/[OISBZGQ]/g, (c) => CONFUSABLE[c] || c);
   function hashId(str) {
     let h = 0x811c9dc5;
     for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193); }
     return 'fuel-' + (h >>> 0).toString(36) + '-' + (str.length.toString(36));
   }
-  function regoMap() {
-    const m = new Map();
+  // exact: normalised rego -> vehicle. canon: look-alike-folded rego -> vehicle,
+  // or null where more than one vehicle folds to it (ambiguous, so not used).
+  function regoMaps() {
+    const exact = new Map(), canon = new Map();
     AD.store.all('vehicles').forEach((v) => {
-      [v.rego, v.netstarRego].forEach((r) => { const k = normRego(r); if (k) m.set(k, v); });
+      [v.rego, v.netstarRego].forEach((r) => {
+        const k = normRego(r); if (!k) return;
+        exact.set(k, v);
+        const c = canonRego(r);
+        canon.set(c, canon.has(c) && canon.get(c) !== v ? null : v);
+      });
     });
-    return m;
+    return { exact, canon };
   }
 
   // Auto-pick a column index whose header matches one of `pats`, else -1.
@@ -168,16 +181,20 @@ AD.importFuelData = (function () {
     // the preview and the actual import so what you see is what you save.
     function build(container) {
       const m = readMapping(container);
-      const vmap = regoMap();
-      const rows = [], unmatched = new Set();
-      let blankRows = 0, unmatchedRows = 0, totalCost = 0, totalLitres = 0;
+      const { exact, canon } = regoMaps();
+      const rows = [], unmatched = new Set(), fuzzy = new Set();
+      let blankRows = 0, unmatchedRows = 0, fuzzyRows = 0, totalCost = 0, totalLitres = 0;
       const vehicles = new Set();
       parsed.rows.forEach((r) => {
         const rego = normRego(r[m.rego]);
         const cost = toNum(r[m.cost]) || 0;
         const litres = m.litres >= 0 ? toNum(r[m.litres]) : null;
         if (!rego || (cost <= 0 && !(litres > 0))) { blankRows++; return; }
-        const v = vmap.get(rego);
+        let v = exact.get(rego);
+        if (!v) {
+          const cv = canon.get(canonRego(rego)); // look-alike (O/0, I/1…) fallback, unambiguous only
+          if (cv) { v = cv; fuzzyRows++; fuzzy.add(`${String(r[m.rego] || '').trim()} → ${v.rego}`); }
+        }
         if (!v) { unmatched.add(rego); unmatchedRows++; return; }
         const date = m.date >= 0 ? toKey(r[m.date]) : '';
         const product = m.product >= 0 ? String(r[m.product] || '').trim() : '';
@@ -187,7 +204,7 @@ AD.importFuelData = (function () {
         rows.push({ id, vehicleId: v.id, rego: String(r[m.rego] || '').trim(), date: date || null, litres: litres != null ? litres : null, cost, product, brand, docket, source: fileName });
         totalCost += cost; totalLitres += litres || 0; vehicles.add(v.id);
       });
-      return { rows, stats: { unmatched: [...unmatched], unmatchedRows, blankRows, totalCost, totalLitres, vehicles: vehicles.size, totalRows: parsed.rows.length } };
+      return { rows, stats: { unmatched: [...unmatched], unmatchedRows, blankRows, fuzzy: [...fuzzy], fuzzyRows, totalCost, totalLitres, vehicles: vehicles.size, totalRows: parsed.rows.length } };
     }
 
     function renderPreview(container) {
@@ -209,6 +226,7 @@ AD.importFuelData = (function () {
           <div class="fi-stat"><b>${stats.vehicles}</b><span>vehicles matched</span></div>
           <div class="fi-stat fi-stat-muted"><b>${stats.unmatchedRows + stats.blankRows}</b><span>rows skipped</span></div>
         </div>
+        ${stats.fuzzyRows ? `<p class="fi-note-skip">${stats.fuzzyRows} row${stats.fuzzyRows === 1 ? '' : 's'} matched past a look-alike typo (O/0, I/1): <span class="muted">${esc(stats.fuzzy.slice(0, 8).join(', '))}${stats.fuzzy.length > 8 ? ` +${stats.fuzzy.length - 8} more` : ''}</span></p>` : ''}
         ${stats.unmatchedRows ? `<p class="fi-note-skip">${stats.unmatchedRows} row${stats.unmatchedRows === 1 ? '' : 's'} for ${stats.unmatched.length} rego${stats.unmatched.length === 1 ? '' : 's'} not in the fleet: <span class="muted">${esc(stats.unmatched.slice(0, 12).join(', '))}${stats.unmatched.length > 12 ? ` +${stats.unmatched.length - 12} more` : ''}</span></p>` : ''}
         ${stats.blankRows ? `<p class="fi-note-skip muted">${stats.blankRows} row${stats.blankRows === 1 ? '' : 's'} with no fuel or cost (e.g. $0 lines) skipped.</p>` : ''}
         ${rows.length ? `<p class="fi-note-skip muted">Re-importing the same file is safe — it updates existing rows instead of adding duplicates.</p>` : '<p class="fi-warn">Nothing to import with these columns — check the mapping above.</p>'}`;
