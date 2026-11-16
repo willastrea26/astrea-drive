@@ -602,31 +602,29 @@ AD.views.dashboard = (function () {
     const today = T.todayKey();
     const aud0 = (n) => n.toLocaleString('en-AU', { style: 'currency', currency: 'AUD', maximumFractionDigits: 0 });
 
-    // 1. Vac truck utilisation, next 14 days: each truck-day counted once, by its firmest booking.
-    const days = Array.from({ length: 14 }, (_, i) => T.addDays(today, i));
-    const util = days.map((d) => {
-      const ds = T.startOfDay(d), de = T.startOfDay(T.addDays(d, 1));
-      const c = { confirmed: 0, tentative: 0, depot: 0, maintenance: 0 };
-      vac.forEach((v) => {
-        const bs = L.bookingsFor(v.id).filter((b) => b.status !== 'cancelled' && Date.parse(b.start) < de && Date.parse(b.end) > ds);
-        if (!bs.length) return;
-        const jobs = bs.filter((b) => b.kind === 'job');
-        c[jobs.some((b) => b.status === 'confirmed') ? 'confirmed' : jobs.length ? 'tentative' : bs.some((b) => b.kind === 'depot') ? 'depot' : 'maintenance']++;
-      });
-      c.free = vac.length - (c.confirmed + c.tentative + c.depot + c.maintenance);
-      return { d, c };
+    // 1. Vac trucks actually working each day, last 14 days — from GPS engine
+    //    hours, not bookings (the fleet isn't scheduled through Drive, so a
+    //    forward-looking bookings chart would just show zeros). A truck
+    //    counts as "working" on a day its tracker reported any engine hours.
+    const DAYS_BACK = 14;
+    const vacTracked = vac.filter((v) => v.odometerSource === 'telematics' || !!v.netstarRego);
+    const perTruck = vacTracked.map((v) => L.workHoursDaily(v, DAYS_BACK)).filter(Boolean);
+    const days = Array.from({ length: DAYS_BACK }, (_, i) => T.addDays(today, -(DAYS_BACK - 1 - i)));
+    const util = days.map((d, i) => {
+      const working = perTruck.filter((p) => p.days[i] && p.days[i].hours > 0).length;
+      const noData = perTruck.filter((p) => !p.days[i] || p.days[i].hours == null).length;
+      return { d, working, noData };
     });
-    const totals = V.BOOKING.map((b) => ({ ...b, value: util.reduce((n, u) => n + u.c[b.key], 0) }));
-    const n = vac.length || 1;
+    const n = vacTracked.length || 1;
+    const workingColor = 'var(--mint)', noDataColor = 'var(--viz-free-key)';
     const utilCols = util.map((u) => {
       const k = T.parseKey(u.d);
       const dow = T.DOW[T.dayOfWeek(u.d)];
-      const booked = n - u.c.free;
-      const rows = V.BOOKING.map((b) => [b.label, String(u.c[b.key]), b.color]).concat([['Free', String(u.c.free), 'var(--viz-free-key)']]);
-      const segs = V.BOOKING.filter((b) => u.c[b.key]).map((b) => `<i style="height:${(u.c[b.key] / n) * 100}%;background:${b.color}"></i>`).join('');
-      return `<a class="uc-col${u.d === today ? ' is-today' : ''}${T.dayOfWeek(u.d) >= 5 ? ' is-weekend' : ''}" href="#/calendar?view=day&date=${u.d}"
-          ${V.tipAttr(`${T.fmtKeyLong(u.d)} · ${booked} of ${n} trucks busy`, rows)} aria-label="${T.fmtKeyLong(u.d)}: ${booked} of ${n} vac trucks busy">
-          <span class="uc-bar">${segs}${u.d === today ? `<span class="uc-cap" style="bottom:calc(${(booked / n) * 100}% + 4px)">${booked}</span>` : ''}</span>
+      const rows = [['Working', String(u.working), workingColor], ['No GPS data', String(u.noData), noDataColor]];
+      const segs = u.working ? `<i style="height:${(u.working / n) * 100}%;background:${workingColor}"></i>` : '';
+      return `<a class="uc-col${u.d === today ? ' is-today' : ''}${T.dayOfWeek(u.d) >= 5 ? ' is-weekend' : ''}" href="#/fleet?type=${encodeURIComponent('Vac truck')}"
+          ${V.tipAttr(`${T.fmtKeyLong(u.d)} · ${u.working} of ${n} trucks working`, rows)} aria-label="${T.fmtKeyLong(u.d)}: ${u.working} of ${n} vac trucks working">
+          <span class="uc-bar">${segs}<span class="uc-cap" style="bottom:calc(${(u.working / n) * 100}% + 4px)">${u.working}</span></span>
           <span class="uc-x"><b>${dow}</b>${k.d}</span>
         </a>`;
     }).join('');
@@ -670,19 +668,21 @@ AD.views.dashboard = (function () {
         <span class="hb-val">${km0(u.perDay)}<small> km/day</small></span>
       </a>`).join('');
 
-    const busyToday = n - util[0].c.free;
+    const workingToday = util[util.length - 1].working;
+    const trackedNote = vacTracked.length < vac.length ? ` · ${vacTracked.length} of ${vac.length} vac trucks have a GPS tracker` : '';
     return `
       <section class="section">
-        ${sectionHead({ title: 'Fleet charts', meta: 'Bookings, usage, open defects and fleet mix' })}
+        ${sectionHead({ title: 'Fleet charts', meta: 'Activity, usage, open defects and fleet mix' })}
         <div class="insights">
           <figure class="viz-card viz-wide">
-            <figcaption><h3>Vac truck utilisation</h3><span class="viz-sub">Trucks busy each day, next 14 days · ${busyToday} of ${n} today</span></figcaption>
-            ${V.legend(totals, { counts: false })}
+            <figcaption><h3>Vac trucks working</h3><span class="viz-sub">Last 14 days, from GPS engine hours · ${workingToday} of ${n} today${trackedNote}</span></figcaption>
+            ${vacTracked.length ? `
             <div class="uc" style="--rows:${n}">
               <div class="uc-axis" aria-hidden="true"><span style="bottom:100%">${n}</span><span style="bottom:50%">${n / 2}</span><span style="bottom:0">0</span></div>
               <div class="uc-plot"><div class="uc-grid" aria-hidden="true"><i style="bottom:100%"></i><i style="bottom:50%"></i><i style="bottom:0"></i></div><div class="uc-cols">${utilCols}</div></div>
             </div>
-            ${V.table(['Date', 'Confirmed', 'Tentative', 'Depot', 'Maintenance', 'Free'], util.map((u) => [T.fmtKeyLong(u.d), u.c.confirmed, u.c.tentative, u.c.depot, u.c.maintenance, u.c.free].map(String)))}
+            ${V.table(['Date', 'Working', 'No GPS data', 'Of'], util.map((u) => [T.fmtKeyLong(u.d), String(u.working), String(u.noData), String(n)]))}
+            ` : `<p class="empty" style="padding:16px">No vac truck has a GPS tracker yet, so there’s nothing to chart here. Fit a tracker and run “Sync GPS data” on the fleet register.</p>`}
           </figure>
 
           <figure class="viz-card">
