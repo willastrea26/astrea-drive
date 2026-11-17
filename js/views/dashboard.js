@@ -12,6 +12,21 @@ AD.views.dashboard = (function () {
     const email = (AD.currentUserEmail || '').toLowerCase();
     return FIRST_NAME_BY_EMAIL[email] || 'Will';
   }
+
+  /** "Telematic inputs" row text — which GPS pull this was and what it brought in. */
+  function syncLabel(r) {
+    if (r.source === 'cron') return r.depth === 'full' ? 'Automatic weekly resync' : 'Automatic nightly sync';
+    if (r.quick) return 'Manual sync (odometers)';
+    return r.depth === 'full' ? 'Manual 30-day resync' : 'Manual sync';
+  }
+  function syncDetail(r) {
+    if (r.ok === false) return `Failed — ${r.error || 'unknown error'}`;
+    const bits = [];
+    if (r.updated != null) bits.push(`${r.updated} odometer${r.updated === 1 ? '' : 's'} updated`);
+    if (r.dailyRecorded != null) bits.push(`${r.dailyRecorded} daily engine-hour reading${r.dailyRecorded === 1 ? '' : 's'}`);
+    if (r.tripStatsRecorded != null) bits.push(`trip stats for ${r.tripStatsRecorded} vehicle${r.tripStatsRecorded === 1 ? '' : 's'}`);
+    return bits.length ? bits.join(' · ') : 'Odometers only';
+  }
   const OWNED_SCHEDULE_VAC_IDS = new Set(Array.from({ length: 8 }, (_, i) => `AVT${String(i + 1).padStart(2, '0')}`));
   let root = null, day = '', schedFilter = 'all';
   // Which insight is on screen. Held across redraws so a background refresh
@@ -435,6 +450,7 @@ AD.views.dashboard = (function () {
     const rego = vehicles.map((v) => ({ v, r: L.regoState(v) })).filter((x) => x.r.state !== 'ok').sort((a, b) => a.r.days - b.r.days);
     const expired = rego.filter((x) => x.r.state === 'overdue').length;
     const activityLog = AD.store.all('activity');
+    const syncLog = AD.store.all('sync_log');
 
     const V = AD.viz;
 
@@ -575,6 +591,14 @@ AD.views.dashboard = (function () {
           }).join('') || '<li class="muted">No activity yet.</li>'}
         </ul>
         <p class="section-foot"><a href="#/activity">View all activity${activityLog.length > 6 ? ` (${activityLog.length})` : ''}</a></p>
+      </section>
+
+      <section class="section">
+        ${sectionHead({ title: 'Telematic inputs', meta: 'GPS syncs — automatic and manual' })}
+        <ul class="rows activity">
+          ${syncLog.slice(0, 8).map((r) => `<li${r.ok === false ? ' class="sync-fail"' : ''}><span class="what">${esc(syncLabel(r))}<span class="t2">${esc(syncDetail(r))}</span></span><span class="when">${esc(T.fmtDateTime(r.ranAt))}</span></li>`).join('')
+            || '<li class="muted">No GPS syncs recorded yet.</li>'}
+        </ul>
       </section>`;
 
     el.querySelectorAll('[data-go]').forEach((b) => b.addEventListener('click', () => { const [r, p] = JSON.parse(b.dataset.go); AD.go(r, p); }));

@@ -290,6 +290,7 @@ table.data { width: 100%; border-collapse: collapse; font-size: 14.5px; }
 .rows .when .t2 { display: block; font-size: 13.5px; color: var(--muted); }
 .rows.activity li { grid-template-columns: minmax(0, 1fr) auto; }
 .rows.activity .when { color: var(--muted); font-size: 13.5px; }
+.rows.activity li.sync-fail .what { color: var(--red); }
 
 /* ============ Toolbar & filters ============ */
 .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 0 0 14px; }

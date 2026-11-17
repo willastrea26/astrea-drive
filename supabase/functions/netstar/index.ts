@@ -76,6 +76,24 @@ const cors = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
+// The cron jobs call this function with the project's service-role key as
+// their Authorization bearer (see netstar-odometer-cron.sql); a browser
+// click carries the signed-in user's own session token instead. Reading the
+// JWT's own "role" claim (already verified by the Supabase gateway before
+// this code runs) tells "scheduled" apart from "someone clicked a button"
+// without needing the cron jobs' bodies to say so themselves.
+function sourceFromAuth(req: Request): "cron" | "manual" {
+  try {
+    const token = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
+    const payload = token.split(".")[1] ?? "";
+    const padded = payload.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((payload.length + 3) % 4);
+    const role = JSON.parse(atob(padded))?.role;
+    return role === "service_role" ? "cron" : "manual";
+  } catch (_e) {
+    return "manual";
+  }
+}
+
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -436,7 +454,7 @@ async function mapLimit<T, R>(
  * waiting on; the nightly cron (quick=false) still refreshes those every
  * night regardless of whether anyone clicks the button.
  */
-async function syncOdometers(depth: "recent" | "full" = "recent", quick = false) {
+async function syncOdometers(depth: "recent" | "full" = "recent", quick = false, source: "cron" | "manual" = "manual") {
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ??
     "sb_publishable_hInlEU8CHjlKIiMtAz4t1g_qggctjTA";
@@ -445,6 +463,23 @@ async function syncOdometers(depth: "recent" | "full" = "recent", quick = false)
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
+  // Records this run to sync_log (dashboard's "Telematic inputs") no matter
+  // how it ends — logging itself is best-effort and never breaks the sync.
+  const logRun = async (ok: boolean, extra: Record<string, unknown> = {}) => {
+    try {
+      await db.rpc("record_sync_log", {
+        p_source: source, p_depth: depth, p_quick: quick, p_ok: ok,
+        p_updated: (extra.updated as number) ?? null,
+        p_verified: (extra.verified as number) ?? null,
+        p_daily_recorded: (extra.dailyRecorded as number) ?? null,
+        p_trip_stats_recorded: (extra.tripStatsRecorded as number) ?? null,
+        p_work_hours_recorded: (extra.workHoursRecorded as number) ?? null,
+        p_error: (extra.error as string) ?? null,
+      });
+    } catch (_e) { /* logging must never sink the sync itself */ }
+  };
+
+  try {
   // Latest odometer per device, matched to fleet by rego.
   const devices = (await fetchVehicles()).filter((v) => v.imei);
   const statuses = await mapLimit(devices, CONCURRENCY, (v) => fetchStatus(v.imei));
@@ -573,7 +608,7 @@ async function syncOdometers(depth: "recent" | "full" = "recent", quick = false)
     dailyDebug.error = String((e as Error)?.message ?? e);
   }
 
-  return json({
+  const result = {
     updated: (data && data.updated) ?? 0,
     verified: (data && data.verified) ?? 0,
     results: data?.results ?? null,
@@ -586,7 +621,18 @@ async function syncOdometers(depth: "recent" | "full" = "recent", quick = false)
     tripStatsRecorded,
     tripStatsDebug,
     syncedAt: new Date().toISOString(),
+  };
+  await logRun(true, {
+    updated: result.updated, verified: result.verified,
+    dailyRecorded: typeof dailyRecorded === "number" ? dailyRecorded : null,
+    tripStatsRecorded: typeof tripStatsRecorded === "number" ? tripStatsRecorded : null,
+    workHoursRecorded: typeof workHoursRecorded === "number" ? workHoursRecorded : null,
   });
+  return json(result);
+  } catch (e) {
+    await logRun(false, { error: String((e as Error)?.message ?? e) });
+    throw e;
+  }
 }
 
 Deno.serve(async (req: Request) => {
@@ -611,7 +657,7 @@ Deno.serve(async (req: Request) => {
     }
 
     if (action === "sync-odometers") {
-      return await syncOdometers(body.depth === "full" ? "full" : "recent", !!body.quick);
+      return await syncOdometers(body.depth === "full" ? "full" : "recent", !!body.quick, sourceFromAuth(req));
     }
 
     // Trips for one vehicle over the last N days, grouped by day (Trips tab).

@@ -56,7 +56,7 @@ AD.store = (function () {
   async function load() {
     const since = new Date(Date.now() - ODO_READING_DAYS * 86400000).toISOString().slice(0, 10);
     const dailySince = new Date(Date.now() - 40 * 86400000).toISOString().slice(0, 10);
-    const [results, readings, workHours, tripStats, workDaily, fuel, vehicleCosts] = await Promise.all([
+    const [results, readings, workHours, tripStats, workDaily, fuel, vehicleCosts, syncLog] = await Promise.all([
       Promise.all(TABLES.map(query)),
       loadOptional('odometer_readings', (q) => q.gte('readDate', since)),
       loadOptional('vehicle_work_hours', (q) => q),
@@ -67,7 +67,9 @@ AD.store = (function () {
       // has been applied. The Costs tab can already show fuel, services and
       // repairs, while manual rego / insurance entries become available as soon
       // as the table exists.
-      loadOptional('vehicle_costs', (q) => q)
+      loadOptional('vehicle_costs', (q) => q),
+      // GPS sync run history (dashboard's "Telematic inputs") — most recent first.
+      loadOptional('sync_log', (q) => q.order('ranAt', { ascending: false }).limit(30))
     ]);
     const next = {};
     results.forEach((r, i) => {
@@ -80,6 +82,7 @@ AD.store = (function () {
     next.vehicle_work_hours_daily = workDaily;
     next.fuel_entries = fuel;
     next.vehicle_costs = vehicleCosts;
+    next.sync_log = syncLog;
     db = next;
     emit('*');
   }
