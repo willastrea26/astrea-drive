@@ -69,18 +69,29 @@ AD.importFuelData = (function () {
     return 'fuel-' + (h >>> 0).toString(36) + '-' + (str.length.toString(36));
   }
   // exact: normalised rego -> vehicle. canon: look-alike-folded rego -> vehicle.
-  // Either map becomes null where two fleet records share the same form; fuel
-  // must never be silently assigned to whichever duplicate happened to load last.
+  // If a registration exists as both an owned and hired record, the owned
+  // fleet vehicle is authoritative for company fuel cards. Other duplicate
+  // combinations remain ambiguous and are not matched silently.
   function regoMaps() {
-    const exact = new Map(), canon = new Map();
+    const exactCandidates = new Map(), canonCandidates = new Map();
+    const add = (map, key, vehicle) => {
+      if (!map.has(key)) map.set(key, []);
+      if (!map.get(key).some((candidate) => candidate.id === vehicle.id)) map.get(key).push(vehicle);
+    };
     AD.store.all('vehicles').forEach((v) => {
       [v.rego, v.netstarRego].forEach((r) => {
         const k = normRego(r); if (!k) return;
-        exact.set(k, exact.has(k) && exact.get(k) !== v ? null : v);
-        const c = canonRego(r);
-        canon.set(c, canon.has(c) && canon.get(c) !== v ? null : v);
+        add(exactCandidates, k, v);
+        add(canonCandidates, canonRego(r), v);
       });
     });
+    const resolve = (candidateMap) => new Map([...candidateMap].map(([key, candidates]) => {
+      const owned = candidates.filter((vehicle) => !vehicle.hired);
+      if (owned.length === 1) return [key, owned[0]];
+      if (!owned.length && candidates.length === 1) return [key, candidates[0]];
+      return [key, null];
+    }));
+    const exact = resolve(exactCandidates), canon = resolve(canonCandidates);
     return { exact, canon };
   }
 
@@ -180,19 +191,30 @@ AD.importFuelData = (function () {
       const pdfNote = parsed.pdfMeta
         ? `<p class="fi-note-skip">BP PDF: <b>${parsed.pdfMeta.transactions}</b> receipt-level transactions from ${parsed.pdfMeta.lineItems} product lines across ${parsed.pdfMeta.vehicleCards} vehicle cards. ${parsed.pdfMeta.feeRows} card fee rows (${Number(parsed.pdfMeta.feeTotal).toLocaleString('en-AU', { style: 'currency', currency: 'AUD' })}) were deliberately excluded.${parsed.pdfMeta.unreadableRows ? ` <b>${parsed.pdfMeta.unreadableRows}</b> dated row${parsed.pdfMeta.unreadableRows === 1 ? '' : 's'} could not be read.` : ''}</p>`
         : '';
-      container.innerHTML = `
-        <p class="note">Found <b>${parsed.rows.length}</b> rows in <b>${esc(fileName)}</b>. Check the columns below — the <b>registration</b> and <b>cost</b> are required.</p>
-        ${pdfNote}
-        <div class="fi-map">
+      const isBpPdf = parsed.provider === 'BP';
+      parsed.fixedMapping = isBpPdf ? def : null;
+      const mapping = isBpPdf ? '' : `
+        <div class="fi-map fi-map-main">
           ${colSelect('rego', 'Registration', true, def.rego)}
           ${colSelect('cost', 'Cost (incl. GST)', true, def.cost)}
-          ${colSelect('date', 'Date', false, def.date)}
-          ${colSelect('litres', 'Litres', false, def.litres)}
-          ${colSelect('product', 'Product', false, def.product)}
-          ${colSelect('brand', 'Brand', false, def.brand)}
-          ${colSelect('docket', 'Receipt / docket', false, def.docket)}
-          ${colSelect('card', 'Card number', false, def.card)}
         </div>
+        <details class="fi-map-advanced">
+          <summary>Advanced column options</summary>
+          <div class="fi-map">
+            ${colSelect('date', 'Date', false, def.date)}
+            ${colSelect('litres', 'Litres', false, def.litres)}
+            ${colSelect('product', 'Product', false, def.product)}
+            ${colSelect('brand', 'Brand', false, def.brand)}
+            ${colSelect('docket', 'Receipt / docket', false, def.docket)}
+            ${colSelect('card', 'Card number', false, def.card)}
+          </div>
+        </details>`;
+      container.innerHTML = `
+        <p class="note">${isBpPdf
+          ? `Found <b>${parsed.rows.length}</b> BP transactions in <b>${esc(fileName)}</b>. Review the import summary below.`
+          : `Found <b>${parsed.rows.length}</b> rows in <b>${esc(fileName)}</b>. Check the required columns below.`}</p>
+        ${pdfNote}
+        ${mapping}
         <div id="fi-preview"></div>
         <div class="fi-actions">
           <button class="btn btn-secondary" id="fi-back" type="button">Choose a different file</button>
@@ -206,6 +228,7 @@ AD.importFuelData = (function () {
     }
 
     function readMapping(container) {
+      if (parsed && parsed.fixedMapping) return { ...parsed.fixedMapping };
       const m = {};
       container.querySelectorAll('[data-map]').forEach((s) => { m[s.dataset.map] = Number(s.value); });
       return m;
@@ -325,5 +348,6 @@ AD.importFuelData = (function () {
     }
   }
 
+  open._regoMaps = regoMaps;
   return open;
 })();

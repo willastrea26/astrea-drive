@@ -2948,6 +2948,11 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 .fi-map-field { display: flex; flex-direction: column; gap: 4px; font-size: .82rem; }
 .fi-map-field span { color: var(--muted, #88a3bb); text-transform: uppercase; letter-spacing: .04em; font-size: .72rem; }
 .fi-map-field select { background: var(--paper, #16314c); color: var(--ink, #eef5fb); border: 1px solid var(--line-2, rgba(255,255,255,.17)); border-radius: 8px; padding: 7px 9px; font: inherit; }
+.fi-map-main { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.fi-map-advanced { margin-top: 12px; font-size: .84rem; }
+.fi-map-advanced summary { width: max-content; cursor: pointer; color: var(--body, #b4cadd); }
+.fi-map-advanced summary:hover { color: var(--ink, #eef5fb); }
+.fi-map-advanced .fi-map { margin-top: 10px; }
 @media (max-width: 640px) { .fi-map { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .fi-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; margin: 16px 0 0; background: var(--line, rgba(255,255,255,.1)); border: 1px solid var(--line, rgba(255,255,255,.1)); border-radius: 12px; overflow: hidden; }
 .fi-stat { background: var(--paper, #16314c); padding: 12px 14px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
