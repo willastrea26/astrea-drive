@@ -42,12 +42,18 @@ select cron.schedule(
   '0 16 * * *',  -- 16:00 UTC ≈ 2-3am Australia/Sydney (DST drifts an hour; fine here)
   $$
   select net.http_post(
-    url     := 'https://ysczookfayziqsnegzjc.supabase.co/functions/v1/netstar',
-    headers := jsonb_build_object(
+    url                   := 'https://ysczookfayziqsnegzjc.supabase.co/functions/v1/netstar',
+    headers               := jsonb_build_object(
       'Content-Type', 'application/json',
       'Authorization', 'Bearer <PASTE_KEY>'
     ),
-    body    := jsonb_build_object('action', 'sync-odometers')
+    body                  := jsonb_build_object('action', 'sync-odometers'),
+    -- The light pass does odometers + a trip-summary call + three days of
+    -- paced engine-hours calls per vehicle — ~45-75s in practice. pg_net
+    -- defaults to a 5-second HTTP timeout, which was dropping the response
+    -- long before the sync finished (and so no row ever reached sync_log
+    -- for the dashboard's "Telematic inputs" to show). 120s gives it room.
+    timeout_milliseconds  := 120000
   );
   $$
 );

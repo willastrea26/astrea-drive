@@ -40,12 +40,17 @@ select cron.schedule(
   '0 18 * * 0',  -- Sundays, 18:00 UTC ≈ 4-5am Australia/Sydney (DST drifts an hour; fine here)
   $$
   select net.http_post(
-    url     := 'https://ysczookfayziqsnegzjc.supabase.co/functions/v1/netstar',
-    headers := jsonb_build_object(
+    url                   := 'https://ysczookfayziqsnegzjc.supabase.co/functions/v1/netstar',
+    headers               := jsonb_build_object(
       'Content-Type', 'application/json',
       'Authorization', 'Bearer <PASTE_KEY>'
     ),
-    body    := jsonb_build_object('action', 'sync-odometers', 'depth', 'full')
+    body                  := jsonb_build_object('action', 'sync-odometers', 'depth', 'full'),
+    -- Full 30-day resync: paced per-vehicle-per-day workhour calls, so ~60-90s.
+    -- pg_net defaults to a 5-second HTTP timeout and would drop the response
+    -- long before the sync could finish. 180s gives it room, matching the
+    -- light-pass cron (netstar-odometer-cron.sql) with extra headroom.
+    timeout_milliseconds  := 180000
   );
   $$
 );
