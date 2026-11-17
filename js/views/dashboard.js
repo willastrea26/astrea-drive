@@ -296,6 +296,51 @@ AD.views.dashboard = (function () {
     ).join('')}</div>`;
   }
 
+  /** The year-to-date GPS totals, given a compact 14-day visual pulse. */
+  function activityCard(gps, fleetSize, today) {
+    const whole = (n) => Math.round(n).toLocaleString('en-AU');
+    const one = (n) => (Math.round(n * 10) / 10).toLocaleString('en-AU');
+    const from = gps.firstDay
+      ? new Date(gps.firstDay + 'T12:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })
+      : '';
+    const dailyRows = AD.store.all('vehicle_work_hours_daily') || [];
+    const byDay = new Map();
+    dailyRows.forEach((r) => {
+      const day = r.day ? String(r.day).slice(0, 10) : '';
+      if (day) byDay.set(day, (byDay.get(day) || 0) + (Number(r.distanceKm) || 0));
+    });
+    const firstPulseDay = T.addDays(today, -13);
+    const dailyKm = Array.from({ length: 14 }, (_, i) => {
+      const day = T.addDays(firstPulseDay, i);
+      return { day, km: byDay.get(day) || 0 };
+    });
+    const peak = Math.max(...dailyKm.map((d) => d.km), 1);
+    const bars = dailyKm.map((d) => {
+      const height = d.km > 0 ? Math.max(10, (d.km / peak) * 100) : 4;
+      return `<i style="height:${height.toFixed(1)}%" title="${esc(T.fmtKey(d.day))}: ${whole(d.km)} km"></i>`;
+    }).join('');
+    const coverage = fleetSize ? Math.round((gps.tracked / fleetSize) * 100) : 0;
+    const metric = (label, value, note) => `<span class="activity-metric"><small>${esc(label)}</small><b>${value}</b>${note ? `<em>${esc(note)}</em>` : ''}</span>`;
+    return `
+      <button class="strip-item kpi-card-activity" data-go='${JSON.stringify(['tracker', {}])}'>
+        <span class="kpi-top">${kpiIco(I.map, 'blue')}<span class="kpi-title">Fleet activity</span><span class="kpi-chev">${I.chevR}</span></span>
+        <span class="activity-main">
+          <span class="activity-main-copy"><strong>${whole(gps.km)}<small> km</small></strong><span>Driven this year${from ? ` · GPS from ${esc(from)}` : ''}</span></span>
+          <span class="activity-pulse" aria-label="Fleet GPS distance over the last 14 days"><span class="activity-bars" aria-hidden="true">${bars}</span><small>14-day pulse</small></span>
+        </span>
+        <span class="activity-metrics">
+          ${metric('Fuel · YTD', gps.litres ? `${whole(gps.litres)} L` : '—')}
+          ${metric('Engine time · YTD', gps.hours ? `${one(gps.hours)} hrs` : '—')}
+          ${metric(`Trips · ${gps.tripWindowDays}d`, gps.trips ? whole(gps.trips) : '—')}
+          ${metric(`Top speed · ${gps.tripWindowDays}d`, gps.topSpeed != null ? `${whole(gps.topSpeed)} km/h` : '—', gps.topSpeedVeh)}
+        </span>
+        <span class="activity-coverage">
+          <span><b>${gps.tracked}</b> GPS tracked <i>${fleetSize} in fleet</i></span>
+          <span class="activity-coverage-track" aria-label="${coverage}% of the fleet is GPS tracked"><i style="width:${coverage}%"></i></span>
+        </span>
+      </button>`;
+  }
+
   /** Seven-day strip. Empty string when there's no forecast, so the banner just closes up. */
   function wxStrip(days) {
     if (!days || !days.length) return '';
@@ -445,28 +490,12 @@ AD.views.dashboard = (function () {
     const activityLog = AD.store.all('activity');
     const syncLog = AD.store.all('sync_log');
 
-    const V = AD.viz;
-
     /** Donut card: icon + title row, ring on the left, breakdown right, trend across the foot. */
     const donutCard = ({ go, icon, label, ring, legend, foot }) => `
       <button class="strip-item kpi-card-ring" data-go='${JSON.stringify(go)}'>
         <div class="kpi-top">${icon}<span class="kpi-title">${esc(label)}</span><span class="kpi-chev">${I.chevR}</span></div>
         <div class="kpi-ring-wrap">${ring}</div>
         <div class="kpi-ring-side">${legend}</div>
-        ${foot ? `<span class="kpi-foot">${foot}</span>` : ''}
-      </button>`;
-
-    /** Stat card: one headline figure, then a 2x2 grid of supporting ones. */
-    const statCard = ({ go, icon, label, hero, heroUnit, heroSub, cells, foot }) => `
-      <button class="strip-item kpi-card-stats" data-go='${JSON.stringify(go)}'>
-        <div class="kpi-top">${icon}<span class="kpi-title">${esc(label)}</span><span class="kpi-chev">${I.chevR}</span></div>
-        <div class="kpi-hero"><b>${esc(hero)}</b>${heroUnit ? `<small>${esc(heroUnit)}</small>` : ''}</div>
-        ${heroSub ? `<div class="kpi-hero-sub">${esc(heroSub)}</div>` : ''}
-        <div class="kpi-grid">${cells.map((c) => `
-          <div class="kpi-cell">
-            <b>${esc(c.value)}${c.unit ? `<small>${esc(c.unit)}</small>` : ''}</b>
-            <span>${esc(c.label)}</span>
-          </div>`).join('')}</div>
         ${foot ? `<span class="kpi-foot">${foot}</span>` : ''}
       </button>`;
 
@@ -511,8 +540,6 @@ AD.views.dashboard = (function () {
     // Fleet activity card: year-to-date distance, fuel and engine hours, plus
     // trips and top speed over Netstar's own rolling window.
     const gps = L.gpsTotals();
-    const n0 = (n) => Math.round(n || 0).toLocaleString('en-AU');
-
     el.classList.toggle('anim-in', fresh);
     fresh = false;
 
@@ -524,19 +551,7 @@ AD.views.dashboard = (function () {
       ${insightsBand(facts({ vehicles, vac, svc, rego, defects, today }))}
 
       <div class="strip" role="group" aria-label="Fleet summary">
-        ${statCard({
-          go: ['tracker', {}], icon: kpiIco(I.map, 'blue'), label: 'Fleet activity',
-          hero: n0(gps.km), heroUnit: 'km', heroSub: `driven this year${gps.firstDay ? ` · GPS from ${T.fmtKey(gps.firstDay)}` : ''}`,
-          cells: [
-            { value: n0(gps.litres), unit: 'L', label: 'Fuel this year' },
-            { value: n0(gps.hours), unit: 'hrs', label: 'Engine hours' },
-            { value: n0(gps.trips), label: `Trips · last ${gps.tripWindowDays}d` },
-            { value: gps.topSpeed != null ? n0(gps.topSpeed) : '—', unit: gps.topSpeed != null ? 'km/h' : '', label: gps.topSpeedVeh ? `Top speed · ${gps.topSpeedVeh}` : 'Top speed' }
-          ],
-          foot: gps.tracked
-            ? `<span class="kpi-footline">${gps.tracked} GPS-tracked vehicle${gps.tracked === 1 ? '' : 's'}</span><span>${vehicles.length} in the fleet</span>`
-            : `<span class="kpi-footline">No GPS data yet</span><span>${vehicles.length} vehicles in the fleet</span>`
-        })}
+        ${activityCard(gps, vehicles.length, today)}
         ${donutCard({
           go: ['maintenance', { filter: 'due' }],
           icon: kpiIco(I.wrench, 'amber'),
