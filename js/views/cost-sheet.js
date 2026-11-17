@@ -910,13 +910,13 @@ AD.views['cost-sheet'] = (function () {
       ...(l.cpl != null ? [['Average price', '$' + l.cpl.toFixed(2) + '/L', 'var(--muted)']] : []),
       ...(l.lastDate ? [['Last fill', T.fmtKey(l.lastDate), 'var(--muted)']] : [])
     ])}>
-      <span class="id">${esc(l.v.id)}</span>
+      <span class="id">${esc(l.v.id)}${l.v.rego ? `<small class="cs-rego">${esc(l.v.rego)}</small>` : ''}</span>
       <span class="cs-hbar"><i class="cs-fuel" style="width:${(l.litres / top) * 100}%"></i></span>
       <span class="cs-row-val">${l0(l.litres)}<small> L</small></span>
       <span class="cs-row-meta">${L.fmtAUD(l.cost)} total · ${l.fills} fill${l.fills === 1 ? '' : 's'}${l.cpl != null ? ` · $${l.cpl.toFixed(2)}/L avg` : ''}</span>
     </a>`).join('');
 
-    const tableRows = lines.map((l) => [l.v.id, l0(l.litres) + ' L', L.fmtAUD(l.cost), String(l.fills),
+    const tableRows = lines.map((l) => [l.v.id, l.v.rego || '—', l0(l.litres) + ' L', L.fmtAUD(l.cost), String(l.fills),
       l.cpl != null ? '$' + l.cpl.toFixed(2) : '—', l.lastDate ? T.fmtKey(l.lastDate) : '—']);
 
     return `<section class="section">
@@ -924,7 +924,7 @@ AD.views['cost-sheet'] = (function () {
       <figure class="viz-card">
         <figcaption><span class="viz-sub">Every vehicle with imported fuel-card data, most litres first. Hover any row for the litres purchased, the accumulated fuel cost, the number of fills and the average price per litre. This covers all imported transactions, not just the period selected above.</span></figcaption>
         <div class="cs-rows">${rows}</div>
-        ${V.table(['Vehicle', 'Litres', 'Fuel cost', 'Fills', 'Avg /L', 'Last fill'], tableRows)}
+        ${V.table(['Vehicle', 'Rego', 'Litres', 'Fuel cost', 'Fills', 'Avg /L', 'Last fill'], tableRows)}
       </figure>
     </section>`;
   }
