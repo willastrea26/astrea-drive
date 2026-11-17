@@ -903,18 +903,21 @@ AD.views['cost-sheet'] = (function () {
     const totalLitres = lines.reduce((n, l) => n + l.litres, 0);
     const totalCost = lines.reduce((n, l) => n + l.cost, 0);
 
-    const rows = lines.map((l, i) => `<a class="cs-row" href="${vehHref(l.v.id)}" style="--i:${i}" ${V.tipAttr(l.v.id, [
+    const rows = lines.map((l, i) => {
+      const art = (AD.art && AD.art.forVehicle(l.v, 44)) || '';
+      return `<a class="cs-row cs-row-art" href="${vehHref(l.v.id)}" style="--i:${i}" ${V.tipAttr(l.v.id, [
       ['Litres purchased', l0(l.litres) + ' L', COLOR_FUEL],
       ['Fuel cost (total)', L.fmtAUD(l.cost), 'var(--cs-amber)'],
       ['Fills', String(l.fills), 'var(--muted)'],
       ...(l.cpl != null ? [['Average price', '$' + l.cpl.toFixed(2) + '/L', 'var(--muted)']] : []),
       ...(l.lastDate ? [['Last fill', T.fmtKey(l.lastDate), 'var(--muted)']] : [])
     ])}>
-      <span class="id">${esc(l.v.id)}${l.v.rego ? `<small class="cs-rego">${esc(l.v.rego)}</small>` : ''}</span>
+      <span class="id">${art ? `<span class="cs-veh-art">${art}</span>` : ''}<span class="cs-id-text">${esc(l.v.id)}${l.v.rego ? `<small class="cs-rego">${esc(l.v.rego)}</small>` : ''}</span></span>
       <span class="cs-hbar"><i class="cs-fuel" style="width:${(l.litres / top) * 100}%"></i></span>
       <span class="cs-row-val">${l0(l.litres)}<small> L</small></span>
       <span class="cs-row-meta">${L.fmtAUD(l.cost)} total · ${l.fills} fill${l.fills === 1 ? '' : 's'}${l.cpl != null ? ` · $${l.cpl.toFixed(2)}/L avg` : ''}</span>
-    </a>`).join('');
+    </a>`;
+    }).join('');
 
     const tableRows = lines.map((l) => [l.v.id, l.v.rego || '—', L.driverName(l.v.driverId) || '—',
       l0(l.litres) + ' L', L.fmtAUD(l.cost), String(l.fills),
