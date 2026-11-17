@@ -55,13 +55,20 @@ AD.store = (function () {
 
   async function load() {
     const since = new Date(Date.now() - ODO_READING_DAYS * 86400000).toISOString().slice(0, 10);
-    const dailySince = new Date(Date.now() - 40 * 86400000).toISOString().slice(0, 10);
+    // Daily telematics: 40 days covers the rolling charts, but the dashboard's
+    // year-to-date totals need everything since 1 January — so reach back to
+    // whichever is earlier. One row per tracked vehicle per day, so this stays
+    // small; if the tracked fleet ever grows enough to near the row cap below,
+    // move these totals to a server-side aggregate instead.
+    const rollingSince = new Date(Date.now() - 40 * 86400000).toISOString().slice(0, 10);
+    const yearSince = new Date().getFullYear() + '-01-01';
+    const dailySince = rollingSince < yearSince ? rollingSince : yearSince;
     const [results, readings, workHours, tripStats, workDaily, fuel, vehicleCosts, syncLog] = await Promise.all([
       Promise.all(TABLES.map(query)),
       loadOptional('odometer_readings', (q) => q.gte('readDate', since)),
       loadOptional('vehicle_work_hours', (q) => q),
       loadOptional('vehicle_trip_stats', (q) => q),
-      loadOptional('vehicle_work_hours_daily', (q) => q.gte('day', dailySince)),
+      loadOptional('vehicle_work_hours_daily', (q) => q.gte('day', dailySince).limit(20000)),
       loadOptional('fuel_entries', (q) => q),
       // Kept optional so the app still loads before the vehicle-costs migration
       // has been applied. The Costs tab can already show fuel, services and

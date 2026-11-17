@@ -1788,6 +1788,21 @@ input[type=text], input[type=number], input[type=date], input[type=datetime-loca
 .kpi-legend-item > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .kpi-legend-stack { grid-template-columns: 1fr; gap: 12px; }
 
+/* ---- Stat grid card (Fleet activity): one headline figure, then a 2x2 ---- */
+.kpi-card-stats { display: flex; flex-direction: column; text-align: left; }
+.kpi-hero { font-family: var(--font-display); display: flex; align-items: baseline; gap: 7px; line-height: 1; }
+.kpi-hero b { font-size: 46px; font-weight: 700; letter-spacing: -0.035em; font-variant-numeric: tabular-nums; }
+.kpi-hero small { font-size: 19px; font-weight: 700; color: var(--muted); }
+.kpi-hero-sub { margin-top: 7px; font-size: 13px; color: var(--muted); }
+.kpi-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 14px; margin-top: 24px; }
+.kpi-cell { min-width: 0; }
+.kpi-cell b {
+  display: block; font-family: var(--font-display); font-size: 23px; font-weight: 700;
+  line-height: 1.1; letter-spacing: -0.02em; font-variant-numeric: tabular-nums;
+}
+.kpi-cell b small { font-size: 12px; font-weight: 700; color: var(--muted); margin-left: 3px; letter-spacing: 0; }
+.kpi-cell > span { display: block; margin-top: 4px; font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* ---- Donut ring card ---- */
 .kpi-card-ring {
   display: grid; grid-template-columns: auto minmax(0, 1fr);
@@ -1963,6 +1978,10 @@ input[type=text], input[type=number], input[type=date], input[type=datetime-loca
   .kpi-ico { width: 38px; height: 38px; border-radius: 8px; }
   .kpi-ico .ico { width: 19px; height: 19px; }
   .kpi-title { font-size: 12px; letter-spacing: .06em; }
+  .kpi-hero b { font-size: 38px; }
+  .kpi-hero small { font-size: 17px; }
+  .kpi-cell b { font-size: 20px; }
+  .kpi-grid { gap: 15px 12px; margin-top: 20px; }
 }
 @media (max-width: 1280px) {
   .strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }

@@ -257,6 +257,55 @@ AD.logic = (function () {
   }
 
   /**
+   * Fleet-wide activity totals for the dashboard card.
+   *
+   * Distance and engine hours are true year-to-date, summed from the daily
+   * telematics rows; fuel litres are year-to-date from imported fuel-card
+   * transactions (whole fleet, not just GPS-tracked, since that's the real
+   * fuel total). Trips and top speed only exist as Netstar's own rolling
+   * window on vehicle_trip_stats — there's no per-day trip history to sum —
+   * so they come back with that window length attached rather than being
+   * passed off as yearly figures.
+   */
+  function gpsTotals() {
+    const yearStart = T.todayKey().slice(0, 4) + '-01-01';
+
+    let km = 0, hours = 0, firstDay = '', lastDay = '';
+    const tracked = new Set();
+    (S().all('vehicle_work_hours_daily') || []).forEach((r) => {
+      const d = String(r.day || '').slice(0, 10);
+      if (!d || d < yearStart) return;
+      km += Number(r.distanceKm) || 0;
+      hours += Number(r.hours) || 0;
+      tracked.add(r.vehicleId);
+      if (!firstDay || d < firstDay) firstDay = d;
+      if (d > lastDay) lastDay = d;
+    });
+
+    const litres = (S().all('fuel_entries') || []).reduce((n, r) => {
+      const d = r.date ? String(r.date).slice(0, 10) : '';
+      return d && d >= yearStart ? n + (Number(r.litres) || 0) : n;
+    }, 0);
+
+    // Rolling window — one row per vehicle, each already an aggregate.
+    let trips = 0, topSpeed = 0, topSpeedVeh = '', tripWindowDays = 0;
+    (S().all('vehicle_trip_stats') || []).forEach((r) => {
+      trips += Number(r.trips) || 0;
+      const ms = Number(r.maxSpeed);
+      if (Number.isFinite(ms) && ms > topSpeed) { topSpeed = ms; topSpeedVeh = r.vehicleId; }
+      const w = Number(r.windowDays) || 30;
+      if (w > tripWindowDays) tripWindowDays = w;
+    });
+
+    return {
+      km, hours, litres,
+      trips, topSpeed: topSpeed > 0 ? topSpeed : null, topSpeedVeh,
+      tripWindowDays: tripWindowDays || 30,
+      tracked: tracked.size, firstDay, lastDay, yearStart
+    };
+  }
+
+  /**
    * Every real cost recorded against one vehicle, normalised into the shape the
    * profile Costs tab uses. Fuel imports, completed services, resolved defect
    * repairs and manually entered ownership costs all land in the same list.
@@ -574,7 +623,7 @@ AD.logic = (function () {
   }
 
   return {
-    serviceState, serviceTriggers, usageRate, workHours, workHoursDaily, tripStats, fuelFor, fuelEconomy, vehicleCostsFor, HOURS_TYPES,
+    serviceState, serviceTriggers, usageRate, workHours, workHoursDaily, tripStats, fuelFor, fuelEconomy, gpsTotals, vehicleCostsFor, HOURS_TYPES,
     regoState, attentionTone, openDefects, fmtKm, fmtHours, fmtAUD, driverName, userName,
     vacTrucks, schedulableVehicles, bookingsFor, activeAt, overlaps, conflictIds, driverConflictIds, nextBooking, locate, hasCoords,
     bookingCategory, bookingTitle, SOON_DAYS, SOON_KM, SOON_HOURS, URGENT_HOURS,

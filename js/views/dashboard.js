@@ -290,12 +290,6 @@ AD.views.dashboard = (function () {
     </svg>`;
   }
 
-  function trendTag(pct, label) {
-    if (pct === 0) return `<span class="kpi-trend kpi-trend-flat"><b>—</b> ${esc(label)}</span>`;
-    const arrow = pct > 0 ? '↑' : '↓';
-    return `<span class="kpi-trend kpi-trend-${pct > 0 ? 'up' : 'down'}"><b>${arrow} ${Math.abs(pct)}%</b> ${esc(label)}</span>`;
-  }
-
   function legendGrid(parts, cls) {
     return `<div class="kpi-legend${cls ? ' ' + cls : ''}">${parts.map(p =>
       `<span class="kpi-legend-item" title="${p.value} ${esc(p.label)}"><i style="background:${p.color}"></i><b>${p.value}</b><span>${esc(p.label)}</span></span>`
@@ -440,7 +434,6 @@ AD.views.dashboard = (function () {
     const vehicles = AD.store.all('vehicles');
     const vac = L.vacTrucks();
     const ownedScheduleVac = vac.filter((v) => !v.hired && OWNED_SCHEDULE_VAC_IDS.has(v.id));
-    const available = vehicles.filter((v) => v.status === 'Available');
     const svc = vehicles.map((v) => ({ v, s: L.serviceState(v) })).filter((x) => x.s.state !== 'ok')
       .sort((a, b) => (a.s.state === b.s.state ? a.s.daysLeft - b.s.daysLeft : a.s.state === 'overdue' ? -1 : 1));
     const overdue = svc.filter((x) => x.s.state === 'overdue').length;
@@ -463,10 +456,21 @@ AD.views.dashboard = (function () {
         ${foot ? `<span class="kpi-foot">${foot}</span>` : ''}
       </button>`;
 
-    const join = (...parts) => parts.filter(Boolean).join(' · ');
+    /** Stat card: one headline figure, then a 2x2 grid of supporting ones. */
+    const statCard = ({ go, icon, label, hero, heroUnit, heroSub, cells, foot }) => `
+      <button class="strip-item kpi-card-stats" data-go='${JSON.stringify(go)}'>
+        <div class="kpi-top">${icon}<span class="kpi-title">${esc(label)}</span><span class="kpi-chev">${I.chevR}</span></div>
+        <div class="kpi-hero"><b>${esc(hero)}</b>${heroUnit ? `<small>${esc(heroUnit)}</small>` : ''}</div>
+        ${heroSub ? `<div class="kpi-hero-sub">${esc(heroSub)}</div>` : ''}
+        <div class="kpi-grid">${cells.map((c) => `
+          <div class="kpi-cell">
+            <b>${esc(c.value)}${c.unit ? `<small>${esc(c.unit)}</small>` : ''}</b>
+            <span>${esc(c.label)}</span>
+          </div>`).join('')}</div>
+        ${foot ? `<span class="kpi-foot">${foot}</span>` : ''}
+      </button>`;
 
-    // Summary visuals
-    const byStatus = V.VEHICLE.map((s) => ({ ...s, value: vehicles.filter((v) => v.status === s.key).length }));
+    const join = (...parts) => parts.filter(Boolean).join(' · ');
 
     // Service & registration health across the whole fleet, bucketed for the
     // rings: red = overdue/expired, orange = due within 2 weeks, green = clear.
@@ -504,18 +508,10 @@ AD.views.dashboard = (function () {
       { label: 'Low', value: defects.filter((d) => d.priority === 'Low').length, color: 'var(--viz-low)' }
     ];
 
-    // Utilisation trend. Compared against the same weekday over the previous
-    // four weeks so a weekday is never measured against an average dragged
-    // down by weekends, when no trucks are booked.
-    const dayBusy = (dk) => {
-      const s2 = T.startOfDay(dk), e2 = T.startOfDay(T.addDays(dk, 1));
-      return vac.filter(v => L.bookingsFor(v.id).some(b => b.status !== 'cancelled' && Date.parse(b.start) < e2 && Date.parse(b.end) > s2)).length;
-    };
-    const todayBusy = dayBusy(today);
-    let sameDaySum = 0;
-    for (let w = 1; w <= 4; w++) sameDaySum += dayBusy(T.addDays(today, -7 * w));
-    const utilAvg = sameDaySum / 4;
-    const utilTrend = utilAvg > 0 ? Math.round(((todayBusy - utilAvg) / utilAvg) * 100) : 0;
+    // Fleet activity card: year-to-date distance, fuel and engine hours, plus
+    // trips and top speed over Netstar's own rolling window.
+    const gps = L.gpsTotals();
+    const n0 = (n) => Math.round(n || 0).toLocaleString('en-AU');
 
     el.classList.toggle('anim-in', fresh);
     fresh = false;
@@ -528,11 +524,18 @@ AD.views.dashboard = (function () {
       ${insightsBand(facts({ vehicles, vac, svc, rego, defects, today }))}
 
       <div class="strip" role="group" aria-label="Fleet summary">
-        ${donutCard({
-          go: ['fleet', {}], icon: kpiIco(I.truck, 'blue'), label: 'Fleet availability',
-          ring: donutRing(byStatus, `${Math.round((available.length / (vehicles.length || 1)) * 100)}%`, 'available'),
-          legend: legendGrid(byStatus, 'kpi-legend-stack'),
-          foot: `<span class="kpi-footline">${vehicles.length} vehicles · ${vac.length} vac trucks</span>${trendTag(utilTrend, 'vs last week')}`
+        ${statCard({
+          go: ['tracker', {}], icon: kpiIco(I.map, 'blue'), label: 'Fleet activity',
+          hero: n0(gps.km), heroUnit: 'km', heroSub: `driven this year${gps.firstDay ? ` · GPS from ${T.fmtKey(gps.firstDay)}` : ''}`,
+          cells: [
+            { value: n0(gps.litres), unit: 'L', label: 'Fuel this year' },
+            { value: n0(gps.hours), unit: 'hrs', label: 'Engine hours' },
+            { value: n0(gps.trips), label: `Trips · last ${gps.tripWindowDays}d` },
+            { value: gps.topSpeed != null ? n0(gps.topSpeed) : '—', unit: gps.topSpeed != null ? 'km/h' : '', label: gps.topSpeedVeh ? `Top speed · ${gps.topSpeedVeh}` : 'Top speed' }
+          ],
+          foot: gps.tracked
+            ? `<span class="kpi-footline">${gps.tracked} GPS-tracked vehicle${gps.tracked === 1 ? '' : 's'}</span><span>${vehicles.length} in the fleet</span>`
+            : `<span class="kpi-footline">No GPS data yet</span><span>${vehicles.length} vehicles in the fleet</span>`
         })}
         ${donutCard({
           go: ['maintenance', { filter: 'due' }],
