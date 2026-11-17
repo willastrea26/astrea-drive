@@ -502,7 +502,8 @@ async function syncOdometers(depth: "recent" | "full" = "recent", quick = false,
   if (quick) {
     tripStatsRecorded = null;
     tripStatsDebug.skipped = "quick sync — odometers only; this refreshes via the nightly sync";
-  } else try {
+  } else {
+  try {
     const WINDOW_DAYS = 30;
     const now = Date.now();
     const from = netstarDate(now - WINDOW_DAYS * 86400000);
@@ -541,6 +542,7 @@ async function syncOdometers(depth: "recent" | "full" = "recent", quick = false,
   } catch (e) {
     tripStatsDebug.error = String((e as Error)?.message ?? e);
   }
+  }
 
   // ---- Daily engine hours, last 30 days (feeds the vehicle "Engine hours"
   // chart AND the 30-day total). One workhour-report call per device per day,
@@ -556,7 +558,8 @@ async function syncOdometers(depth: "recent" | "full" = "recent", quick = false,
     dailyRecorded = null;
     workHoursRecorded = null;
     dailyDebug.skipped = "quick sync — odometers only; this refreshes via the nightly sync";
-  } else try {
+  } else {
+  try {
     const days = sydneyDays(depth === "full" ? FULL_DAYS : RECENT_DAYS);
     const tasks: Array<{ rego: string; imei: string; day: { key: string; from: string; to: string } }> = [];
     for (const day of days) for (const v of devices) tasks.push({ rego: v.rego, imei: v.imei, day });
@@ -606,6 +609,7 @@ async function syncOdometers(depth: "recent" | "full" = "recent", quick = false,
     else workHoursRecorded = Number(whData) || 0;
   } catch (e) {
     dailyDebug.error = String((e as Error)?.message ?? e);
+  }
   }
 
   const result = {
