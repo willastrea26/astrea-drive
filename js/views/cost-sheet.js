@@ -13,8 +13,7 @@ AD.views['cost-sheet'] = (function () {
     month: { label: 'month', plural: 'months', baselineN: 3 },
     year: { label: 'year', plural: 'years', baselineN: 1 }
   };
-  const RUN_WEEKS = 52; // running-cost window: a year of weeks, ending with the week on screen
-  const RUN_PER_GROUP = 8; // running-cost rows per vehicle type; the rest live in the table view
+  const RUN_WEEKS = 52; // cost-vs-usage measurement cap: a year of weeks, ending with the week on screen
   const MOVERS_MAX = 8; // vehicles shown in "What moved"; the rest live in the table view
   const TREND_WEEKS = 12; // Spend over time, weekly mode
   const TREND_MONTHS = 12; // Spend over time, monthly mode
@@ -131,9 +130,6 @@ AD.views['cost-sheet'] = (function () {
   const TONE_VAR = { worse: 'var(--red)', better: 'var(--green)' };
   const kpi = (label, value, foot, tone) => `<div class="cs-kpi"${tone ? ` style="--cs-tone:${TONE_VAR[tone]}"` : ''}><span>${esc(label)}</span><strong>${value}</strong>${foot}</div>`;
   const fmtChange = (n) => Math.abs(n) < 0.005 ? '—' : (n > 0 ? '+' : '−') + L.fmtAUD(Math.abs(n));
-  // Hourly plant runs to tens of dollars, light vehicles to cents per km; whole
-  // dollars for the first, cents only where they carry the comparison.
-  const fmtRate = (n) => n >= 10 ? '$' + Math.round(n).toLocaleString('en-AU') : '$' + n.toFixed(2);
   const median = (nums) => {
     const s = [...nums].sort((a, b) => a - b), m = s.length >> 1;
     return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
@@ -216,10 +212,7 @@ AD.views['cost-sheet'] = (function () {
         ${movers(now, base)}
       </div>
 
-      <section class="section">
-        ${sectionHead({ title: 'Running cost', meta: `${RUN_WEEKS} weeks to ${T.fmtKey(end)} · grouped by vehicle type · the tick marks each type's median` })}
-        ${running(end)}
-      </section>
+      ${fuelLitreage()}
 
       ${costVsUsage(end)}
 
@@ -884,70 +877,56 @@ AD.views['cost-sheet'] = (function () {
   }
 
   /**
-   * What each vehicle has cost over the trailing year, against the distance or
-   * engine hours it covered in that time. Hours-tracked plant is rated per hour,
-   * everything else per kilometre; a vehicle with one service (or none carrying
-   * a reading) has no span to divide by, so it shows spend only.
+   * Fuel litres purchased per vehicle, most litres first — every vehicle with
+   * imported fuel-card data, so the whole fuelled fleet shows (not just the
+   * GPS-tracked ones). All-time across every imported transaction, independent
+   * of the week/month/year selector above, so the totals are the full picture.
+   * Hover shows the litres, the accumulated fuel cost, the number of fills and
+   * the average price per litre.
    */
-  function running(end) {
-    const from = T.addDays(end, -(7 * RUN_WEEKS - 1));
-    const rows = rowsBetween(from, end);
-    const ids = [...new Set(rows.map((r) => r.vehicleId))];
-    if (!ids.length) return '<p class="empty">No costs recorded in this period.</p>';
+  function fuelLitreage() {
+    const l0 = (n) => Math.round(n).toLocaleString('en-AU');
+    const lines = AD.store.all('vehicles').filter((v) => !v.hired).map((v) => {
+      const f = L.fuelFor(v); // no window → all-time
+      if (!f || !(f.litres > 0)) return null;
+      return { v, litres: f.litres, cost: f.cost, fills: f.count, cpl: f.litres > 0 ? f.cost / f.litres : null, lastDate: f.lastDate };
+    }).filter(Boolean).sort((a, b) => b.litres - a.litres);
 
-    const lines = ids.map((id) => {
-      const mine = rows.filter((r) => r.vehicleId === id);
-      const v = AD.store.get('vehicles', id);
-      const byHours = !!v && L.HOURS_TYPES.has(v.type);
-      const reads = mine.map((r) => Number(byHours ? r.hours : r.odometer)).filter((n) => Number.isFinite(n) && n > 0);
-      const span = reads.length > 1 ? Math.max(...reads) - Math.min(...reads) : 0;
-      const total = sum(mine);
-      return { id, total, jobs: mine.length, span, byHours, type: v ? v.type : 'Not in the fleet list', rate: span > 0 ? total / span : null };
-    });
-    const unit = (r) => (r.byHours ? 'hr' : 'km');
-    const covered = (r) => (r.byHours ? L.fmtHours(r.span) : L.fmtKm(r.span));
+    if (!lines.length) {
+      return `<section class="section">
+        ${sectionHead({ title: 'Fuel purchased by vehicle', meta: 'Litres · all imported fuel-card data' })}
+        <figure class="viz-card"><p class="empty">No fuel-card data imported yet. Use “Import cost data” at the top of the page to load a WEX or BP export.</p></figure>
+      </section>`;
+    }
 
-    // Rates only compare fairly within a type: an excavator per engine hour and a
-    // ute per kilometre aren't on the same scale, and even two per-km classes
-    // differ by an order of magnitude. Each type gets its own card and its own bar scale.
-    const rated = lines.filter((r) => r.rate != null);
-    const groups = [...new Set(rated.map((r) => r.type))].map((type) => {
-      const mine = rated.filter((r) => r.type === type).sort((a, b) => b.rate - a.rate);
-      return { type, lines: mine, byHours: mine[0].byHours, mid: median(mine.map((r) => r.rate)), spend: mine.reduce((n, r) => n + r.total, 0) };
-    }).sort((a, b) => b.spend - a.spend);
+    const top = Math.max(...lines.map((l) => l.litres), 1);
+    const totalLitres = lines.reduce((n, l) => n + l.litres, 0);
+    const totalCost = lines.reduce((n, l) => n + l.cost, 0);
 
-    const card = (g) => {
-      const top = Math.max(...g.lines.map((r) => r.rate));
-      // A median of one or two vehicles is just those vehicles; don't flag against it.
-      const judge = g.lines.length >= 3;
-      const shown = g.lines.slice(0, RUN_PER_GROUP);
-      return `<article class="cs-rc-group">
-        <header><h3>${esc(g.type)}</h3><span class="viz-sub">Per ${g.byHours ? 'engine hour' : 'kilometre'} · median ${fmtRate(g.mid)}/${unit(g)} · ${g.lines.length} vehicle${g.lines.length === 1 ? '' : 's'}</span></header>
-        <div class="cs-rows">${shown.map((r, i) => {
-          const over = g.mid ? (r.rate - g.mid) / g.mid : 0;
-          const high = judge && over > 0.25;
-          return `<a class="cs-row" href="${vehHref(r.id)}" style="--i:${i}">
-            <span class="id">${esc(r.id)}</span>
-            <span class="cs-hbar"><i${high ? ' class="cs-high"' : ''} style="width:${(r.rate / top) * 100}%"></i>${g.lines.length > 1 ? `<b class="cs-median" style="left:${(g.mid / top) * 100}%"></b>` : ''}</span>
-            <span class="cs-row-val">${fmtRate(r.rate)}<small>/${unit(r)}</small></span>
-            <span class="cs-row-meta">${high ? `<span class="cs-flag">${Math.round(over * 100)}% above median</span> · ` : ''}${L.fmtAUD(r.total)} over ${covered(r)} · ${r.jobs} job${r.jobs === 1 ? '' : 's'}</span>
-          </a>`;
-        }).join('')}</div>
-        ${g.lines.length > shown.length ? `<p class="cs-more">${g.lines.length - shown.length} more in the table below.</p>` : ''}
-      </article>`;
-    };
+    const rows = lines.map((l, i) => `<a class="cs-row" href="${vehHref(l.v.id)}" style="--i:${i}" ${V.tipAttr(l.v.id, [
+      ['Litres purchased', l0(l.litres) + ' L', COLOR_FUEL],
+      ['Fuel cost (total)', L.fmtAUD(l.cost), 'var(--cs-amber)'],
+      ['Fills', String(l.fills), 'var(--muted)'],
+      ...(l.cpl != null ? [['Average price', '$' + l.cpl.toFixed(2) + '/L', 'var(--muted)']] : []),
+      ...(l.lastDate ? [['Last fill', T.fmtKey(l.lastDate), 'var(--muted)']] : [])
+    ])}>
+      <span class="id">${esc(l.v.id)}</span>
+      <span class="cs-hbar"><i class="cs-fuel" style="width:${(l.litres / top) * 100}%"></i></span>
+      <span class="cs-row-val">${l0(l.litres)}<small> L</small></span>
+      <span class="cs-row-meta">${L.fmtAUD(l.cost)} total · ${l.fills} fill${l.fills === 1 ? '' : 's'}${l.cpl != null ? ` · $${l.cpl.toFixed(2)}/L avg` : ''}</span>
+    </a>`).join('');
 
-    const unrated = lines.filter((r) => r.rate == null).sort((a, b) => b.total - a.total);
-    const noRate = unrated.length ? `<p class="cs-norate"><b>No rate yet for ${unrated.length} vehicle${unrated.length === 1 ? '' : 's'}.</b>
-      A rate needs at least two services with ${unrated.some((r) => r.byHours) ? 'meter' : 'odometer'} readings in this window:
-      ${unrated.slice(0, 12).map((r) => `<a href="${vehHref(r.id)}">${esc(r.id)}</a>`).join(', ')}${unrated.length > 12 ? ` and ${unrated.length - 12} more` : ''}.</p>` : '';
+    const tableRows = lines.map((l) => [l.v.id, l0(l.litres) + ' L', L.fmtAUD(l.cost), String(l.fills),
+      l.cpl != null ? '$' + l.cpl.toFixed(2) : '—', l.lastDate ? T.fmtKey(l.lastDate) : '—']);
 
-    const tableRows = [...lines].sort((a, b) => a.type.localeCompare(b.type) || (b.rate || 0) - (a.rate || 0))
-      .map((r) => [r.id, r.type, String(r.jobs), L.fmtAUD(r.total), r.span > 0 ? covered(r) : '—', r.rate != null ? `${fmtRate(r.rate)}/${unit(r)}` : '—']);
-
-    return `${groups.length ? `<div class="cs-rc-grid">${groups.map(card).join('')}</div>` : ''}
-      ${noRate}
-      ${V.table(['Vehicle', 'Type', 'Jobs', 'Spend', 'Covered', 'Running cost'], tableRows)}`;
+    return `<section class="section">
+      ${sectionHead({ title: 'Fuel purchased by vehicle', meta: `${lines.length} vehicle${lines.length === 1 ? '' : 's'} · ${l0(totalLitres)} L · ${L.fmtAUD(totalCost)} total · all imported fuel-card data` })}
+      <figure class="viz-card">
+        <figcaption><span class="viz-sub">Every vehicle with imported fuel-card data, most litres first. Hover any row for the litres purchased, the accumulated fuel cost, the number of fills and the average price per litre. This covers all imported transactions, not just the period selected above.</span></figcaption>
+        <div class="cs-rows">${rows}</div>
+        ${V.table(['Vehicle', 'Litres', 'Fuel cost', 'Fills', 'Avg /L', 'Last fill'], tableRows)}
+      </figure>
+    </section>`;
   }
 
   return { title: 'Cost sheet', render, refresh: () => root && draw() };
