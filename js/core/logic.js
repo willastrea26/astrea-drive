@@ -211,6 +211,52 @@ AD.logic = (function () {
   }
 
   /**
+   * Day-matched fuel economy for a GPS-tracked vehicle: real fuel (cost AND
+   * litres) ÷ the ACTUAL distance driven over the exact days we have both,
+   * from the daily telematics km (vehicle_work_hours_daily) rather than an
+   * extrapolated average rate. This is the honest version — no multiplying a
+   * km/day guess out to a window — so it needs only a short overlap, not weeks.
+   *
+   * Window = the span of days we actually have a daily GPS km reading for
+   * (bounded by `days`, default the ~40 days the store keeps). Distance = the
+   * sum of those readings. Fuel = every fuel-card transaction dated inside that
+   * same window. Because a tank fill covers several days' driving, fuel and km
+   * are summed over the window rather than matched day-for-day — standard for
+   * fuel economy and honest over any span of a week or more.
+   *
+   * Returns the finished rates PLUS every input that went into them, so a
+   * tooltip can show exactly how the number was reached. null when the vehicle
+   * has no daily GPS km at all (e.g. a light vehicle with no Netstar unit).
+   */
+  function fuelEconomy(v, days = 40) {
+    const daily = workHoursDaily(v, days);
+    if (!daily) return null;
+    const withKm = daily.days.filter((d) => d.km != null && d.km >= 0);
+    if (!withKm.length) return null;
+    const kmTotal = withKm.reduce((s, d) => s + (d.km || 0), 0);
+    if (!(kmTotal > 0)) return null;
+
+    const fromKey = withKm[0].day, toKey = withKm[withKm.length - 1].day;
+    const spanDays = T.daysBetween(fromKey, toKey) + 1;
+    const fuel = fuelFor(v, fromKey, toKey);
+    const fuelCost = fuel ? fuel.cost : 0;
+    const litres = fuel ? fuel.litres : 0;
+    const hasFuel = !!(fuel && (fuelCost > 0 || litres > 0));
+
+    return {
+      kmTotal: Math.round(kmTotal),
+      kmDaysWithData: withKm.length,  // days inside the window that had a GPS reading
+      spanDays,                        // calendar days first→last reading
+      fromKey, toKey,
+      hasFuel,
+      fuelCost, litres,
+      fuelTxns: fuel ? fuel.count : 0,
+      costPerKm: hasFuel && fuelCost > 0 ? fuelCost / kmTotal : null,
+      litresPer100: hasFuel && litres > 0 ? (litres / kmTotal) * 100 : null
+    };
+  }
+
+  /**
    * Every real cost recorded against one vehicle, normalised into the shape the
    * profile Costs tab uses. Fuel imports, completed services, resolved defect
    * repairs and manually entered ownership costs all land in the same list.
@@ -528,7 +574,7 @@ AD.logic = (function () {
   }
 
   return {
-    serviceState, serviceTriggers, usageRate, workHours, workHoursDaily, tripStats, fuelFor, vehicleCostsFor, HOURS_TYPES,
+    serviceState, serviceTriggers, usageRate, workHours, workHoursDaily, tripStats, fuelFor, fuelEconomy, vehicleCostsFor, HOURS_TYPES,
     regoState, attentionTone, openDefects, fmtKm, fmtHours, fmtAUD, driverName, userName,
     vacTrucks, schedulableVehicles, bookingsFor, activeAt, overlaps, conflictIds, driverConflictIds, nextBooking, locate, hasCoords,
     bookingCategory, bookingTitle, SOON_DAYS, SOON_KM, SOON_HOURS, URGENT_HOURS,

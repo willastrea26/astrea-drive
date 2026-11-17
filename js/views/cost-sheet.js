@@ -223,7 +223,7 @@ AD.views['cost-sheet'] = (function () {
 
       ${costVsUsage(end)}
 
-      ${fuelEconomy(end)}
+      ${fuelPerKm()}
 
       <p class="section-foot muted small">Spend is recorded services plus resolved defects, counted on the day the service was recorded or the defect was resolved; imported fuel-card spend is shown as its own band on Spend over time, folded into Cost vs usage, and broken out on its own in Fuel cost per km. Planned is scheduled servicing; unplanned is a defect repair. The KPIs above cover maintenance only, for the ${cfg.label} on screen, against the average of the ${cfg.baselineN} ${cfg.baselineN === 1 ? cfg.label : cfg.plural} before. Running cost divides a vehicle's spend by the distance or hours covered between its first and last service in the window, so it needs at least two services to show a rate.</p>
 
@@ -784,85 +784,101 @@ AD.views['cost-sheet'] = (function () {
   }
 
   /**
-   * Fuel-card spend only, against kilometres actually driven — a pure running-
-   * cost figure that a one-off repair bill can't skew (unlike "Cost vs usage"
-   * above, which mixes in maintenance). Each vehicle is measured over its own
-   * GPS window, same honest-span rule as the maintenance table. Vehicles with
-   * no fuel-card spend recorded yet show as "No fuel data" rather than a
-   * misleading $0.00/km.
+   * Fuel cost per km AND litres per 100km, each from REAL fuel matched to the
+   * REAL distance driven over the exact days we have both (L.fuelEconomy uses
+   * the daily GPS km, not an extrapolated rate). Only GPS-tracked vehicles have
+   * daily km, so only they appear. Every row's tooltip shows the full
+   * derivation — the fuel, the distance, the days, and the division itself — so
+   * the number can be trusted at a glance.
    */
-  function fuelEconomy(end) {
-    const maxWindowDays = RUN_WEEKS * 7;
+  function fuelPerKm() {
+    const MIN_DAYS = 5, THIN_DAYS = 14;   // days of GPS readings needed before a rate is shown / is trustworthy
     const fmtFuelRate = (n) => '$' + (n >= 10 ? Math.round(n).toLocaleString('en-AU') : n.toFixed(2));
-    const fmtSpan = (days) => days >= 49 ? `${Math.round(days / 7)} weeks` : `${days} days`;
+    const fmtL100 = (n) => n.toFixed(1) + ' L/100km';
+    const km0 = (n) => Math.round(n).toLocaleString('en-AU');
 
     const lines = AD.store.all('vehicles').filter((v) => !v.hired).map((v) => {
-      const u = L.usageRate(v);
-      if (!u) return null;
-      const span = Math.min(maxWindowDays, u.days);
-      if (span < MIN_USAGE_SPAN_DAYS) return null;
-      const windowKm = u.perDay * span;
-      if (!(windowKm > 0)) return null;
-
-      const from = T.addDays(end, -(span - 1));
-      const fuel = fuelRows().filter((r) => r.vehicleId === v.id && r.date >= from && r.date <= end).reduce((n, r) => n + r.cost, 0);
-      const hasFuel = fuel > 0;
-      return { v, fuel, hasFuel, windowKm, perKm: hasFuel ? fuel / windowKm : null,
-               perWeek: u.perWeek, span, thin: span < THIN_USAGE_SPAN_DAYS };
-    }).filter(Boolean).sort((a, b) => (b.perKm || -1) - (a.perKm || -1));
+      const fe = L.fuelEconomy(v);                    // null → no daily GPS km, so not shown at all
+      if (!fe || fe.kmDaysWithData < MIN_DAYS) return null;
+      return { v, fe, thin: fe.kmDaysWithData < THIN_DAYS };
+    }).filter(Boolean).sort((a, b) => (b.fe.costPerKm || -1) - (a.fe.costPerKm || -1));
 
     if (!lines.length) {
       return `<section class="section">
-        ${sectionHead({ title: 'Fuel cost per km', meta: 'Fuel-card spend ÷ distance driven' })}
-        <figure class="viz-card"><p class="empty">No usage data yet. Once vehicles have at least ${MIN_USAGE_SPAN_DAYS} days of GPS-synced odometer history, their fuel cost per kilometre appears here.</p></figure>
+        ${sectionHead({ title: 'Fuel cost per km', meta: 'Real fuel ÷ real distance driven' })}
+        <figure class="viz-card"><p class="empty">No GPS-tracked vehicle has at least ${MIN_DAYS} days of daily distance data yet. As the nightly sync builds up daily kilometres for the vac trucks and tippers, their fuel cost per kilometre appears here.</p></figure>
       </section>`;
     }
 
-    const withFuel = lines.filter((l) => l.hasFuel);
-    const medKm = withFuel.length ? median(withFuel.map((l) => l.perKm)) : 0;
-    const top = Math.max(...withFuel.map((l) => l.perKm), 0.0001);
+    const withFuel = lines.filter((l) => l.fe.hasFuel && l.fe.costPerKm != null);
+    const medKm = withFuel.length ? median(withFuel.map((l) => l.fe.costPerKm)) : 0;
+    const top = Math.max(...withFuel.map((l) => l.fe.costPerKm), 0.0001);
+
+    // The derivation tooltip — spells out exactly how the figure was reached.
+    const tip = (l) => {
+      const fe = l.fe;
+      const window = `${fe.kmDaysWithData} day${fe.kmDaysWithData === 1 ? '' : 's'} · ${T.fmtKey(fe.fromKey)}–${T.fmtKey(fe.toKey)}`;
+      if (!fe.hasFuel) {
+        return V.tipAttr(l.v.id, [
+          ['Distance (GPS)', `${km0(fe.kmTotal)} km`, 'var(--mint)'],
+          ['Over', window, 'var(--muted)'],
+          ['Fuel in this window', 'none imported', 'var(--muted)']
+        ]);
+      }
+      return V.tipAttr(l.v.id, [
+        ...(fe.costPerKm != null ? [['Fuel cost / km', fmtFuelRate(fe.costPerKm), COLOR_FUEL]] : []),
+        ...(fe.litresPer100 != null ? [['Fuel economy', fmtL100(fe.litresPer100), COLOR_FUEL]] : []),
+        ['Fuel used', `${fe.litres.toFixed(0)} L · ${L.fmtAUD(fe.fuelCost)}`, 'var(--muted)'],
+        ['Transactions', `${fe.fuelTxns} fill${fe.fuelTxns === 1 ? '' : 's'}`, 'var(--muted)'],
+        ['Distance (GPS)', `${km0(fe.kmTotal)} km`, 'var(--mint)'],
+        ['Over', window, 'var(--muted)'],
+        ...(fe.costPerKm != null ? [[`= ${L.fmtAUD(fe.fuelCost)} ÷ ${km0(fe.kmTotal)} km`, fmtFuelRate(fe.costPerKm) + '/km', 'var(--ink)']] : [])
+      ]);
+    };
 
     const rows = lines.map((l, i) => {
-      if (!l.hasFuel) {
-        return `<a class="cs-row cs-row-muted" href="${vehHref(l.v.id)}" style="--i:${i}">
+      const fe = l.fe;
+      if (!fe.hasFuel || fe.costPerKm == null) {
+        return `<a class="cs-row cs-row-muted" href="${vehHref(l.v.id)}" style="--i:${i}" ${tip(l)}>
           <span class="id">${esc(l.v.id)}</span>
           <span class="cs-hbar"></span>
           <span class="cs-row-val">—</span>
-          <span class="cs-row-meta">No fuel data over ${fmtSpan(l.span)} · ~${Math.round(l.windowKm).toLocaleString('en-AU')} km driven</span>
+          <span class="cs-row-meta">No fuel in the GPS window · ${km0(fe.kmTotal)} km over ${fe.kmDaysWithData} days</span>
         </a>`;
       }
-      const costly = medKm > 0 && l.perKm > medKm * 1.3;
+      const costly = medKm > 0 && fe.costPerKm > medKm * 1.3;
       const flag = l.thin ? '<span class="cs-flag cs-flag-soft">Thin data</span>'
         : costly ? '<span class="cs-flag">High fuel/km</span>' : '';
-      return `<a class="cs-row" href="${vehHref(l.v.id)}" style="--i:${i}" ${V.tipAttr(l.v.id, [
-        ['Fuel per km', fmtFuelRate(l.perKm), COLOR_FUEL],
-        [`Fuel (${fmtSpan(l.span)})`, L.fmtAUD(l.fuel), COLOR_FUEL],
-        ['Driven', `${Math.round(l.windowKm).toLocaleString('en-AU')} km`, 'var(--mint)']
-      ])}>
+      const econ = fe.litresPer100 != null ? ` · ${fmtL100(fe.litresPer100)}` : '';
+      return `<a class="cs-row" href="${vehHref(l.v.id)}" style="--i:${i}" ${tip(l)}>
         <span class="id">${esc(l.v.id)}</span>
-        <span class="cs-hbar"><i${costly ? ' class="cs-high-fuel"' : ' class="cs-fuel"'} style="width:${(l.perKm / top) * 100}%"></i>${medKm > 0 ? `<b class="cs-median" style="left:${(medKm / top) * 100}%"></b>` : ''}</span>
-        <span class="cs-row-val">${fmtFuelRate(l.perKm)}<small>/km</small></span>
-        <span class="cs-row-meta">${flag ? flag + ' · ' : ''}${L.fmtAUD(l.fuel)} fuel over ${fmtSpan(l.span)} · ~${Math.round(l.perWeek).toLocaleString('en-AU')} km/week</span>
+        <span class="cs-hbar"><i${costly ? ' class="cs-high-fuel"' : ' class="cs-fuel"'} style="width:${(fe.costPerKm / top) * 100}%"></i>${medKm > 0 ? `<b class="cs-median" style="left:${(medKm / top) * 100}%"></b>` : ''}</span>
+        <span class="cs-row-val">${fmtFuelRate(fe.costPerKm)}<small>/km</small></span>
+        <span class="cs-row-meta">${flag ? flag + ' · ' : ''}${L.fmtAUD(fe.fuelCost)} fuel over ${km0(fe.kmTotal)} km${econ}</span>
       </a>`;
     }).join('');
 
-    const tableRows = lines.map((l) => [l.v.id,
-      l.hasFuel ? fmtFuelRate(l.perKm) : '—',
-      l.hasFuel ? L.fmtAUD(l.fuel) : '—',
-      `${Math.round(l.windowKm).toLocaleString('en-AU')} km`,
-      `${Math.round(l.perWeek).toLocaleString('en-AU')} km`,
-      fmtSpan(l.span)]);
+    const tableRows = lines.map((l) => {
+      const fe = l.fe;
+      return [l.v.id,
+        fe.costPerKm != null ? fmtFuelRate(fe.costPerKm) : '—',
+        fe.litresPer100 != null ? fe.litresPer100.toFixed(1) : '—',
+        fe.hasFuel ? L.fmtAUD(fe.fuelCost) : '—',
+        fe.hasFuel ? fe.litres.toFixed(0) : '—',
+        `${km0(fe.kmTotal)} km`,
+        `${fe.kmDaysWithData} days`];
+    });
 
-    const spans = lines.map((l) => l.span);
-    const spanMin = Math.min(...spans), spanMax = Math.max(...spans);
-    const spanLabel = spanMin === spanMax ? fmtSpan(spanMin) : `${fmtSpan(spanMin)}–${fmtSpan(spanMax)}`;
+    const daysArr = lines.map((l) => l.fe.kmDaysWithData);
+    const dMin = Math.min(...daysArr), dMax = Math.max(...daysArr);
+    const dayLabel = dMin === dMax ? `${dMin} days` : `${dMin}–${dMax} days`;
 
     return `<section class="section">
-      ${sectionHead({ title: 'Fuel cost per km', meta: `${lines.length} GPS-tracked vehicle${lines.length === 1 ? '' : 's'} · fuel-card spend ÷ distance driven over each vehicle's measurement window (${spanLabel}) · the tick marks the median` })}
+      ${sectionHead({ title: 'Fuel cost per km', meta: `${lines.length} GPS-tracked vehicle${lines.length === 1 ? '' : 's'} · real fuel ÷ real distance driven, matched day-for-day (${dayLabel} of data) · the tick marks the median` })}
       <figure class="viz-card">
-        <figcaption><span class="viz-sub">Fuel-card spend only, so a vehicle's running cost can be read without a repair bill skewing it. Same honest-window rule as Cost vs usage above — no extrapolation, and a vehicle with no fuel imported yet shows as "No fuel data" rather than a misleading $0.00.</span></figcaption>
+        <figcaption><span class="viz-sub">Fuel-card spend divided by the distance the GPS actually recorded over the same days — no estimated kilometres. Hover any row to see the full working: the fuel, the distance, the days, and the division. Litres per 100km is the truer efficiency measure, since it ignores fuel-price swings.</span></figcaption>
         <div class="cs-rows">${rows}</div>
-        ${V.table(['Vehicle', 'Fuel / km', 'Fuel spend', 'Driven', 'Per week', 'Window'], tableRows)}
+        ${V.table(['Vehicle', 'Fuel / km', 'L/100km', 'Fuel spend', 'Litres', 'Distance', 'GPS days'], tableRows)}
       </figure>
     </section>`;
   }
