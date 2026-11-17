@@ -214,9 +214,9 @@ AD.views['cost-sheet'] = (function () {
 
       ${fuelLitreage()}
 
-      ${costVsUsage(end)}
-
       ${fuelPerKm()}
+
+      ${costVsUsage(end)}
 
       <p class="section-foot muted small">Spend is recorded services plus resolved defects, counted on the day the service was recorded or the defect was resolved; imported fuel-card spend is shown as its own band on Spend over time, folded into Cost vs usage, and broken out on its own in Fuel cost per km. Planned is scheduled servicing; unplanned is a defect repair. The KPIs above cover maintenance only, for the ${cfg.label} on screen, against the average of the ${cfg.baselineN} ${cfg.baselineN === 1 ? cfg.label : cfg.plural} before. Running cost divides a vehicle's spend by the distance or hours covered between its first and last service in the window, so it needs at least two services to show a rate.</p>
 
