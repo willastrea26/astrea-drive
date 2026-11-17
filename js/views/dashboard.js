@@ -22,10 +22,19 @@ AD.views.dashboard = (function () {
   function syncDetail(r) {
     if (r.ok === false) return `Failed — ${r.error || 'unknown error'}`;
     const bits = [];
-    if (r.updated != null) bits.push(`${r.updated} odometer${r.updated === 1 ? '' : 's'} updated`);
-    if (r.dailyRecorded != null) bits.push(`${r.dailyRecorded} daily engine-hour reading${r.dailyRecorded === 1 ? '' : 's'}`);
-    if (r.tripStatsRecorded != null) bits.push(`trip stats for ${r.tripStatsRecorded} vehicle${r.tripStatsRecorded === 1 ? '' : 's'}`);
-    return bits.length ? bits.join(' · ') : 'Odometers only';
+    if (r.updated != null && r.updated > 0) bits.push(`${r.updated} odometer${r.updated === 1 ? '' : 's'} updated`);
+    if (r.dailyRecorded != null && r.dailyRecorded > 0) bits.push(`${r.dailyRecorded} daily engine-hour reading${r.dailyRecorded === 1 ? '' : 's'}`);
+    if (r.tripStatsRecorded != null && r.tripStatsRecorded > 0) bits.push(`trip stats for ${r.tripStatsRecorded} vehicle${r.tripStatsRecorded === 1 ? '' : 's'}`);
+    return bits.length ? bits.join(' · ') : 'Nothing new';
+  }
+  /** Did this sync actually record anything? Zero-everything successes are
+   *  hidden from the main list so the dashboard shows only runs that moved
+   *  the numbers. Failures are kept visible — they're always worth seeing. */
+  function syncAdded(r) {
+    if (r.ok === false) return true;
+    return (Number(r.updated) || 0) > 0
+      || (Number(r.dailyRecorded) || 0) > 0
+      || (Number(r.tripStatsRecorded) || 0) > 0;
   }
   const OWNED_SCHEDULE_VAC_IDS = new Set(Array.from({ length: 8 }, (_, i) => `AVT${String(i + 1).padStart(2, '0')}`));
   let root = null, day = '', schedFilter = 'all';
@@ -618,9 +627,46 @@ AD.views.dashboard = (function () {
       <section class="section">
         ${sectionHead({ title: 'Telematic inputs', meta: 'GPS syncs — automatic and manual' })}
         <ul class="rows activity">
-          ${syncLog.slice(0, 8).map((r) => `<li${r.ok === false ? ' class="sync-fail"' : ''}><span class="what">${esc(syncLabel(r))}<span class="t2">${esc(syncDetail(r))}</span></span><span class="when">${esc(T.fmtDateTime(r.ranAt))}</span></li>`).join('')
-            || '<li class="muted">No GPS syncs recorded yet.</li>'}
+          ${(() => {
+            // Top list hides zero-everything successes — only runs that actually
+            // moved the numbers (or failed) show up. Everything else is still
+            // available in the "View all inputs" table below for diagnostics.
+            const shown = syncLog.filter(syncAdded).slice(0, 8);
+            return shown.map((r) => `<li${r.ok === false ? ' class="sync-fail"' : ''}><span class="what">${esc(syncLabel(r))}<span class="t2">${esc(syncDetail(r))}</span></span><span class="when">${esc(T.fmtDateTime(r.ranAt))}</span></li>`).join('')
+              || '<li class="muted">No GPS syncs with new data yet.</li>';
+          })()}
         </ul>
+        ${syncLog.length ? `<details class="sync-all">
+          <summary>View all inputs <span class="muted">(${syncLog.length} run${syncLog.length === 1 ? '' : 's'})</span></summary>
+          <div class="table-wrap">
+            <table class="data sync-tbl">
+              <thead><tr>
+                <th style="width:160px">When</th>
+                <th style="width:200px">Type</th>
+                <th style="width:88px">Odometers</th>
+                <th style="width:120px">Engine-hour days</th>
+                <th style="width:120px">Trip stats</th>
+                <th>Result</th>
+              </tr></thead>
+              <tbody>${syncLog.map((r) => {
+                const cell = (n) => n == null ? `<span class="muted">—</span>` : (Number(n) === 0 ? `<span class="muted">0</span>` : String(n));
+                const result = r.ok === false
+                  ? `<span class="flag flag-red">Failed</span> <span class="t2">${esc(r.error || 'unknown error')}</span>`
+                  : syncAdded(r)
+                    ? `<span class="flag flag-green">Added data</span>`
+                    : `<span class="flag flag-muted">Nothing new</span>`;
+                return `<tr${r.ok === false ? ' class="sync-fail"' : ''}>
+                  <td>${esc(T.fmtDateTime(r.ranAt))}</td>
+                  <td>${esc(syncLabel(r))}</td>
+                  <td>${cell(r.updated)}</td>
+                  <td>${cell(r.dailyRecorded)}</td>
+                  <td>${cell(r.tripStatsRecorded)}</td>
+                  <td>${result}</td>
+                </tr>`;
+              }).join('')}</tbody>
+            </table>
+          </div>
+        </details>` : ''}
       </section>`;
 
     detailsRestore(el, openDetails);

@@ -228,6 +228,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .flag { font-size: 14px; font-weight: 600; white-space: nowrap; }
 .flag-red { color: var(--red); }
 .flag-amber { color: var(--amber); }
+.flag-green { color: var(--green); }
 .flag-muted { color: var(--muted); font-weight: 400; }
 .tag-now { display: inline-block; font-size: 12px; font-weight: 700; color: var(--blue-strong); background: var(--blue-tint); border-radius: 3px; padding: 0 5px; margin-left: 6px; line-height: 18px; vertical-align: 1px; }
 .dash { color: var(--muted); }
@@ -291,6 +292,17 @@ table.data { width: 100%; border-collapse: collapse; font-size: 14.5px; }
 .rows.activity li { grid-template-columns: minmax(0, 1fr) auto; }
 .rows.activity .when { color: var(--muted); font-size: 13.5px; }
 .rows.activity li.sync-fail .what { color: var(--red); }
+
+/* "View all inputs" collapsible table under Telematic inputs on the Dashboard. */
+.sync-all { margin-top: 10px; }
+.sync-all > summary { cursor: pointer; font-size: 14px; color: var(--muted); padding: 8px 2px; list-style: none; user-select: none; }
+.sync-all > summary::-webkit-details-marker { display: none; }
+.sync-all > summary::before { content: '▸ '; color: var(--muted); font-size: 12px; }
+.sync-all[open] > summary::before { content: '▾ '; }
+.sync-all > summary:hover { color: var(--ink); }
+.sync-all .table-wrap { margin-top: 6px; }
+.sync-tbl tr.sync-fail td { color: var(--red); }
+.sync-tbl .muted { color: var(--muted); }
 
 /* ============ Toolbar & filters ============ */
 .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 0 0 14px; }

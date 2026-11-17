@@ -76,7 +76,7 @@ AD.store = (function () {
       // as the table exists.
       loadOptional('vehicle_costs', (q) => q),
       // GPS sync run history (dashboard's "Telematic inputs") — most recent first.
-      loadOptional('sync_log', (q) => q.order('ranAt', { ascending: false }).limit(30))
+      loadOptional('sync_log', (q) => q.order('ranAt', { ascending: false }).limit(100))
     ]);
     const next = {};
     results.forEach((r, i) => {
