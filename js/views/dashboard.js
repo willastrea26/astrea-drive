@@ -2,7 +2,7 @@
 AD.views = AD.views || {};
 
 AD.views.dashboard = (function () {
-  const { esc, stateBadge, bookingBadge, scheduleBadge, pageHeader, sectionHead, dash, relTime } = AD.ui;
+  const { esc, stateBadge, bookingBadge, scheduleBadge, pageHeader, sectionHead, dash, relTime, detailsSnapshot, detailsRestore } = AD.ui;
   const L = AD.logic, T = AD.time, I = AD.icons;
   const LIST_MAX = 5;
   const FIRST_NAME_BY_EMAIL = {
@@ -520,6 +520,10 @@ AD.views.dashboard = (function () {
     el.classList.toggle('anim-in', fresh);
     fresh = false;
 
+    // A background refresh (the 45s poll) rebuilds this whole block — don't
+    // let it silently snap shut a "View as table" someone just opened.
+    const openDetails = detailsSnapshot(el);
+
     el.innerHTML = `
       ${insightsBand(facts({ vehicles, vac, svc, rego, defects, today }))}
 
@@ -600,6 +604,8 @@ AD.views.dashboard = (function () {
             || '<li class="muted">No GPS syncs recorded yet.</li>'}
         </ul>
       </section>`;
+
+    detailsRestore(el, openDetails);
 
     el.querySelectorAll('[data-go]').forEach((b) => b.addEventListener('click', () => { const [r, p] = JSON.parse(b.dataset.go); AD.go(r, p); }));
     wireInsights(el);

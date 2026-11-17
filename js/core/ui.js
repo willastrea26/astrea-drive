@@ -336,6 +336,23 @@ AD.ui = (function () {
     draw();
   }
 
+  /**
+   * A view's draw() rebuilds its whole el.innerHTML on every refresh (the
+   * 45s background poll included), which silently resets any <details>
+   * (V.table's "View as table" toggle) back to closed even if someone just
+   * opened it. Call this right before setting innerHTML to capture which
+   * ones are open, then detailsRestore right after — matched by position,
+   * since content regenerates from scratch but the set of tables on a given
+   * page doesn't change between one redraw and the next.
+   */
+  function detailsSnapshot(el) {
+    return [...el.querySelectorAll('details')].map((d) => d.open);
+  }
+  function detailsRestore(el, snapshot) {
+    const now = el.querySelectorAll('details');
+    snapshot.forEach((open, i) => { if (open && now[i]) now[i].open = true; });
+  }
+
   function relTime(iso) {
     const mins = Math.round((Date.now() - Date.parse(iso)) / 60000);
     if (mins < 1) return 'Just now';
@@ -348,6 +365,6 @@ AD.ui = (function () {
   return {
     esc, $, $$, badge, vehicleBadge, priorityBadge, defectBadge, stateBadge, bookingBadge, scheduleBadge, BOOKING_LABEL,
     pageHeader, sectionHead, dash, attentionFlags, labelFields, modal, closeModal, confirm, toast, formData, showErrors, options, relTime,
-    compressImage, photoPicker, photoLightbox
+    compressImage, photoPicker, photoLightbox, detailsSnapshot, detailsRestore
   };
 })();

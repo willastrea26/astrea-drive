@@ -2,7 +2,7 @@
 AD.views = AD.views || {};
 
 AD.views['cost-sheet'] = (function () {
-  const { esc, pageHeader, sectionHead } = AD.ui;
+  const { esc, pageHeader, sectionHead, detailsSnapshot, detailsRestore } = AD.ui;
   const L = AD.logic, T = AD.time, I = AD.icons, V = AD.viz;
   const AVG_WEEKS = 4; // same trailing window the dashboard uses for its utilisation trend
   // How many trailing periods the headline KPIs and "What moved" compare the
@@ -181,6 +181,10 @@ AD.views['cost-sheet'] = (function () {
     el.classList.toggle('anim-in', fresh);
     fresh = false;
 
+    // A background refresh (the 45s poll) rebuilds this whole block — don't
+    // let it silently snap shut a "View as table" someone just opened.
+    const openDetails = detailsSnapshot(el);
+
     el.innerHTML = `
       ${pageHeader({
         title: 'Cost sheet',
@@ -221,6 +225,8 @@ AD.views['cost-sheet'] = (function () {
       <p class="section-foot muted small">Spend is recorded services plus resolved defects, counted on the day the service was recorded or the defect was resolved; imported fuel-card spend is shown as its own band on Spend over time, folded into Cost vs usage, and broken out on its own in Fuel cost per km. Planned is scheduled servicing; unplanned is a defect repair. The KPIs above cover maintenance only, for the ${cfg.label} on screen, against the average of the ${cfg.baselineN} ${cfg.baselineN === 1 ? cfg.label : cfg.plural} before. Running cost divides a vehicle's spend by the distance or hours covered between its first and last service in the window, so it needs at least two services to show a rate.</p>
 
       ${projection(end)}`;
+
+    detailsRestore(el, openDetails);
 
     el.querySelector('#cs-import').onclick = () => AD.importFuelData(() => draw());
     el.querySelector('#w-prev').onclick = () => go(stepPeriod(scope, start, -1));
