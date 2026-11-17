@@ -916,7 +916,8 @@ AD.views['cost-sheet'] = (function () {
       <span class="cs-row-meta">${L.fmtAUD(l.cost)} total · ${l.fills} fill${l.fills === 1 ? '' : 's'}${l.cpl != null ? ` · $${l.cpl.toFixed(2)}/L avg` : ''}</span>
     </a>`).join('');
 
-    const tableRows = lines.map((l) => [l.v.id, l.v.rego || '—', l0(l.litres) + ' L', L.fmtAUD(l.cost), String(l.fills),
+    const tableRows = lines.map((l) => [l.v.id, l.v.rego || '—', L.driverName(l.v.driverId) || '—',
+      l0(l.litres) + ' L', L.fmtAUD(l.cost), String(l.fills),
       l.cpl != null ? '$' + l.cpl.toFixed(2) : '—', l.lastDate ? T.fmtKey(l.lastDate) : '—']);
 
     return `<section class="section">
@@ -924,7 +925,7 @@ AD.views['cost-sheet'] = (function () {
       <figure class="viz-card">
         <figcaption><span class="viz-sub">Every vehicle with imported fuel-card data, most litres first. Hover any row for the litres purchased, the accumulated fuel cost, the number of fills and the average price per litre. This covers all imported transactions, not just the period selected above.</span></figcaption>
         <div class="cs-rows">${rows}</div>
-        ${V.table(['Vehicle', 'Rego', 'Litres', 'Fuel cost', 'Fills', 'Avg /L', 'Last fill'], tableRows)}
+        ${V.table(['Vehicle', 'Rego', 'Assigned driver', 'Litres', 'Fuel cost', 'Fills', 'Avg /L', 'Last fill'], tableRows)}
       </figure>
     </section>`;
   }
