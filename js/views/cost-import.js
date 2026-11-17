@@ -1,8 +1,8 @@
 /*
  * Fuel-cost import — manual stopgap before the WEX / BP API.
  *
- * Reads a fuel-card spreadsheet (.xlsx / .csv), lets the user confirm which
- * columns are the rego and cost (auto-detected for the WEX export, editable
+ * Reads a fuel-card spreadsheet (.xlsx / .csv) or BP Plus PDF, then lets the
+ * user confirm the rego and cost columns (auto-detected for the WEX export,
  * for any other layout), matches each row to a vehicle by rego, and saves the
  * transactions into fuel_entries. Re-importing the same file upserts on a
  * deterministic row id, so nothing double-counts.
@@ -15,6 +15,8 @@ AD.importFuelData = (function () {
   const fmtDate = (k) => k ? new Date(k + 'T12:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
 
   const XLSX_SRC = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+  const PDFJS_SRC = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+  const PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
   function loadXLSX() {
     if (window.XLSX) return Promise.resolve(window.XLSX);
     return new Promise((resolve, reject) => {
@@ -22,6 +24,20 @@ AD.importFuelData = (function () {
       s.src = XLSX_SRC;
       s.onload = () => resolve(window.XLSX);
       s.onerror = () => reject(new Error('Could not load the spreadsheet reader — check your internet connection.'));
+      document.head.appendChild(s);
+    });
+  }
+  function loadPDFJS() {
+    if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+    return new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = PDFJS_SRC;
+      s.onload = () => {
+        if (!window.pdfjsLib) { reject(new Error('The PDF reader did not load.')); return; }
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
+        resolve(window.pdfjsLib);
+      };
+      s.onerror = () => reject(new Error('Could not load the PDF reader — check your internet connection.'));
       document.head.appendChild(s);
     });
   }
@@ -52,14 +68,15 @@ AD.importFuelData = (function () {
     for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193); }
     return 'fuel-' + (h >>> 0).toString(36) + '-' + (str.length.toString(36));
   }
-  // exact: normalised rego -> vehicle. canon: look-alike-folded rego -> vehicle,
-  // or null where more than one vehicle folds to it (ambiguous, so not used).
+  // exact: normalised rego -> vehicle. canon: look-alike-folded rego -> vehicle.
+  // Either map becomes null where two fleet records share the same form; fuel
+  // must never be silently assigned to whichever duplicate happened to load last.
   function regoMaps() {
     const exact = new Map(), canon = new Map();
     AD.store.all('vehicles').forEach((v) => {
       [v.rego, v.netstarRego].forEach((r) => {
         const k = normRego(r); if (!k) return;
-        exact.set(k, v);
+        exact.set(k, exact.has(k) && exact.get(k) !== v ? null : v);
         const c = canonRego(r);
         canon.set(c, canon.has(c) && canon.get(c) !== v ? null : v);
       });
@@ -90,9 +107,9 @@ AD.importFuelData = (function () {
 
     function dropStep(err) {
       return `
-        <p class="note">Drop your fuel-card spreadsheet here (WEX, BP or Ampol export — <b>.xlsx</b> or <b>.csv</b>). Each row is matched to a vehicle by its registration; rows for regos not in the fleet are skipped.</p>
+        <p class="note">Drop your fuel-card export here — <b>.xlsx</b>, <b>.csv</b>, or a BP Plus Vehicle Analysis <b>.pdf</b>. Each transaction is matched to a vehicle by its registration; rows for regos not in the fleet are skipped.</p>
         <label class="fi-drop" id="fi-drop">
-          <input type="file" id="fi-file" accept=".xlsx,.xls,.csv" hidden>
+          <input type="file" id="fi-file" accept=".xlsx,.xls,.csv,.pdf" hidden>
           <span class="fi-drop-ico">${AD.icons.file}</span>
           <span class="fi-drop-main">Drop a file here, or <b>browse</b></span>
           <span class="fi-drop-sub">Nothing is sent anywhere until you press Import.</span>
@@ -114,6 +131,14 @@ AD.importFuelData = (function () {
       fileName = file.name;
       container.innerHTML = `<p class="note">Reading <b>${esc(file.name)}</b>…</p>`;
       try {
+        if (/\.pdf$/i.test(file.name)) {
+          const pdfjs = await loadPDFJS();
+          const result = await AD.bpPdf.read(file, pdfjs, AD.store.all('vehicles'));
+          if (!result.rows.length) throw new Error('No BP fuel transactions could be read from this PDF. Use the BP Plus Vehicle Analysis report or export the transactions to Excel.');
+          parsed = { headers: result.headers, rows: result.rows, provider: 'BP', pdfMeta: result.meta };
+          renderMapStep(container);
+          return;
+        }
         const XLSX = await loadXLSX();
         const buf = await file.arrayBuffer();
         const wb = XLSX.read(buf, { type: 'array' });
@@ -148,10 +173,16 @@ AD.importFuelData = (function () {
         date: guess(H, [/^date$/i, /date/i]),
         litres: guess(H, [/lit/i, /qty/i, /quantity/i]),
         product: guess(H, [/product/i]),
-        brand: guess(H, [/fuel brand/i, /brand/i])
+        brand: guess(H, [/fuel brand/i, /brand/i]),
+        docket: guess(H, [/receipt/i, /docket/i]),
+        card: guess(H, [/card number/i, /^card$/i])
       };
+      const pdfNote = parsed.pdfMeta
+        ? `<p class="fi-note-skip">BP PDF: <b>${parsed.pdfMeta.transactions}</b> receipt-level transactions from ${parsed.pdfMeta.lineItems} product lines across ${parsed.pdfMeta.vehicleCards} vehicle cards. ${parsed.pdfMeta.feeRows} card fee rows (${Number(parsed.pdfMeta.feeTotal).toLocaleString('en-AU', { style: 'currency', currency: 'AUD' })}) were deliberately excluded.${parsed.pdfMeta.unreadableRows ? ` <b>${parsed.pdfMeta.unreadableRows}</b> dated row${parsed.pdfMeta.unreadableRows === 1 ? '' : 's'} could not be read.` : ''}</p>`
+        : '';
       container.innerHTML = `
         <p class="note">Found <b>${parsed.rows.length}</b> rows in <b>${esc(fileName)}</b>. Check the columns below — the <b>registration</b> and <b>cost</b> are required.</p>
+        ${pdfNote}
         <div class="fi-map">
           ${colSelect('rego', 'Registration', true, def.rego)}
           ${colSelect('cost', 'Cost (incl. GST)', true, def.cost)}
@@ -159,6 +190,8 @@ AD.importFuelData = (function () {
           ${colSelect('litres', 'Litres', false, def.litres)}
           ${colSelect('product', 'Product', false, def.product)}
           ${colSelect('brand', 'Brand', false, def.brand)}
+          ${colSelect('docket', 'Receipt / docket', false, def.docket)}
+          ${colSelect('card', 'Card number', false, def.card)}
         </div>
         <div id="fi-preview"></div>
         <div class="fi-actions">
@@ -184,7 +217,7 @@ AD.importFuelData = (function () {
       const m = readMapping(container);
       const { exact, canon } = regoMaps();
       const rows = [], unmatched = new Set(), fuzzy = new Set();
-      let blankRows = 0, unmatchedRows = 0, fuzzyRows = 0, totalCost = 0, totalLitres = 0;
+      let blankRows = 0, unmatchedRows = 0, fuzzyRows = 0, duplicateRows = 0, identityRows = 0, totalCost = 0, totalLitres = 0;
       let minDate = '', maxDate = '';
       const vehicles = new Set();
       // Some rows are genuinely identical on every exported field — e.g. two
@@ -209,12 +242,24 @@ AD.importFuelData = (function () {
         const date = m.date >= 0 ? toKey(r[m.date]) : '';
         const product = m.product >= 0 ? String(r[m.product] || '').trim() : '';
         const brand = m.brand >= 0 ? String(r[m.brand] || '').trim() : '';
-        const docket = '';
-        const baseId = hashId([rego, date, cost, litres || '', product].join('|'));
-        const n = (seenIds.get(baseId) || 0) + 1;
-        seenIds.set(baseId, n);
-        const id = n === 1 ? baseId : `${baseId}-${n}`;
-        rows.push({ id, vehicleId: v.id, rego: String(r[m.rego] || '').trim(), date: date || null, litres: litres != null ? litres : null, cost, product, brand, docket, source: fileName });
+        const docket = m.docket >= 0 ? String(r[m.docket] || '').trim() : '';
+        const card = m.card >= 0 ? String(r[m.card] || '').trim() : '';
+        let id = '';
+        if (parsed.provider === 'BP') {
+          id = AD.fuelIdentity.bpId({ cardNumber: card, date, docket });
+          if (!id) { identityRows++; return; }
+          if (seenIds.has(id)) { duplicateRows++; return; }
+          seenIds.set(id, 1);
+        } else {
+          // Preserve the established WEX identity so re-importing a file that
+          // was loaded before PDF support still updates, rather than duplicates.
+          const baseId = hashId([rego, date, cost, litres || '', product].join('|'));
+          const n = (seenIds.get(baseId) || 0) + 1;
+          seenIds.set(baseId, n);
+          id = n === 1 ? baseId : `${baseId}-${n}`;
+        }
+        const source = parsed.provider === 'BP' ? `BP PDF · ${fileName}` : fileName;
+        rows.push({ id, vehicleId: v.id, rego: String(r[m.rego] || '').trim(), date: date || null, litres: litres != null ? litres : null, cost, product, brand: brand || parsed.provider || '', docket, source });
         totalCost += cost; totalLitres += litres || 0; vehicles.add(v.id);
         if (date) { if (!minDate || date < minDate) minDate = date; if (!maxDate || date > maxDate) maxDate = date; }
       });
@@ -224,7 +269,7 @@ AD.importFuelData = (function () {
       const noFuel = AD.store.all('vehicles')
         .filter((x) => !x.hired && !seenVehicles.has(x.id))
         .map((x) => x.id).sort();
-      return { rows, stats: { unmatched: [...unmatched], unmatchedRows, blankRows, fuzzy: [...fuzzy], fuzzyRows, totalCost, totalLitres, vehicles: vehicles.size, totalRows: parsed.rows.length, minDate, maxDate, noFuel } };
+      return { rows, stats: { unmatched: [...unmatched], unmatchedRows, blankRows, duplicateRows, identityRows, fuzzy: [...fuzzy], fuzzyRows, totalCost, totalLitres, vehicles: vehicles.size, totalRows: parsed.rows.length, minDate, maxDate, noFuel } };
     }
 
     function renderPreview(container) {
@@ -244,14 +289,16 @@ AD.importFuelData = (function () {
           <div class="fi-stat fi-stat-good"><b>${rows.length}</b><span>transactions to import</span></div>
           <div class="fi-stat fi-stat-mint"><b>${aud(stats.totalCost)}</b><span>total spend</span></div>
           <div class="fi-stat"><b>${stats.vehicles}</b><span>vehicles matched</span></div>
-          <div class="fi-stat fi-stat-muted"><b>${stats.unmatchedRows + stats.blankRows}</b><span>rows skipped</span></div>
+          <div class="fi-stat fi-stat-muted"><b>${stats.unmatchedRows + stats.blankRows + stats.duplicateRows + stats.identityRows}</b><span>rows skipped</span></div>
         </div>
         ${stats.minDate ? `<p class="fi-note-skip">Covers <b>${esc(fmtDate(stats.minDate))}</b> to <b>${esc(fmtDate(stats.maxDate))}</b>.</p>` : ''}
         ${stats.fuzzyRows ? `<p class="fi-note-skip">${stats.fuzzyRows} row${stats.fuzzyRows === 1 ? '' : 's'} matched past a look-alike typo (O/0, I/1): <span class="muted">${esc(stats.fuzzy.slice(0, 8).join(', '))}${stats.fuzzy.length > 8 ? ` +${stats.fuzzy.length - 8} more` : ''}</span></p>` : ''}
         ${stats.unmatchedRows ? `<p class="fi-note-skip">${stats.unmatchedRows} row${stats.unmatchedRows === 1 ? '' : 's'} for ${stats.unmatched.length} rego${stats.unmatched.length === 1 ? '' : 's'} not in the fleet: <span class="muted">${esc(stats.unmatched.slice(0, 12).join(', '))}${stats.unmatched.length > 12 ? ` +${stats.unmatched.length - 12} more` : ''}</span></p>` : ''}
         ${stats.blankRows ? `<p class="fi-note-skip muted">${stats.blankRows} row${stats.blankRows === 1 ? '' : 's'} with no fuel or cost (e.g. $0 lines) skipped.</p>` : ''}
+        ${stats.duplicateRows ? `<p class="fi-note-skip muted">${stats.duplicateRows} repeated BP receipt${stats.duplicateRows === 1 ? '' : 's'} collapsed so it can’t be counted twice.</p>` : ''}
+        ${stats.identityRows ? `<p class="fi-warn">${stats.identityRows} BP transaction${stats.identityRows === 1 ? '' : 's'} had no usable card/date/receipt identity and were skipped.</p>` : ''}
         ${stats.noFuel.length ? `<details class="fi-no-fuel"><summary>${stats.noFuel.length} fleet vehicle${stats.noFuel.length === 1 ? '' : 's'} with no fuel in this file</summary><p class="muted">${esc(stats.noFuel.join(', '))}</p></details>` : ''}
-        ${rows.length ? `<p class="fi-note-skip muted">Re-importing the same file is safe — it updates existing rows instead of adding duplicates.</p>` : '<p class="fi-warn">Nothing to import with these columns — check the mapping above.</p>'}`;
+        ${rows.length ? `<p class="fi-note-skip muted">Re-importing the same file is safe — it updates existing rows instead of adding duplicates.${parsed.provider === 'BP' ? ' These receipt IDs are also reserved for the future BP API, so historical PDF rows will be updated rather than added again.' : ''}</p>` : '<p class="fi-warn">Nothing to import with these columns — check the mapping above.</p>'}`;
     }
 
     async function doImport(container) {

@@ -6,9 +6,11 @@
 -- rego. A stopgap until the WEX/BP API is wired up; the same table will
 -- serve the API later.
 --
--- One row per transaction. `id` is a deterministic hash built in the
--- browser from rego + date + docket + cost + product, so re-importing the
--- same spreadsheet upserts the same rows instead of double-counting.
+-- One row per transaction. `id` is deterministic, so re-importing the same
+-- source upserts instead of double-counting. Existing WEX spreadsheets retain
+-- their legacy rego/date/cost/litres/product identity. BP imports use card +
+-- date + receipt, shared with the future BP API, so API backfill replaces the
+-- temporary PDF row rather than adding a second transaction.
 -- Approved users read and write it with their own sign-in (no service key).
 -- =====================================================================
 
