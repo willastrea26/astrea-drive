@@ -1,4 +1,4 @@
-/* Cost sheet — what the fleet cost this week, measured against its average week. */
+/* Cost sheet — what the fleet cost over the selected period, measured against its prior average. */
 AD.views = AD.views || {};
 
 AD.views['cost-sheet'] = (function () {
@@ -21,7 +21,7 @@ AD.views['cost-sheet'] = (function () {
   const PROJ_MONTHS = 6;  // months to project forward from current
   const MIN_USAGE_SPAN_DAYS = 28;      // below this, a vehicle's own measurement window is too noisy to trust a per-km rate
   const THIN_USAGE_SPAN_DAYS = 12 * 7; // below this, the rate is shown but flagged "Thin data"
-  let root = null, start = '', end = '', scope = 'week', period = 'month';
+  let root = null, start = '', end = '', scope = 'year', period = 'month';
   const PROJ_STORE_KEY = 'ad-cost-proj-overrides';
   let projOverrides = (() => { try { const v = JSON.parse(localStorage.getItem(PROJ_STORE_KEY)) || {}; /* migrate old {planned,unplanned} format */ for (const k of Object.keys(v)) { if (typeof v[k] === 'object') v[k] = (v[k].planned || 0) + (v[k].unplanned || 0); } return v; } catch { return {}; } })();
   function saveOverrides() { try { localStorage.setItem(PROJ_STORE_KEY, JSON.stringify(projOverrides)); } catch {} }
@@ -143,7 +143,7 @@ AD.views['cost-sheet'] = (function () {
 
   function render(el, params) {
     root = el;
-    scope = params.scope === 'month' || params.scope === 'year' ? params.scope : 'week';
+    scope = params.scope === 'week' || params.scope === 'month' ? params.scope : 'year';
     const anchor = /^\d{4}-\d{2}-\d{2}$/.test(params.week || '') ? params.week : T.todayKey();
     start = periodStart(scope, anchor);
     period = params.period === 'week' ? 'week' : 'month';
@@ -264,7 +264,7 @@ AD.views['cost-sheet'] = (function () {
   }
 
   function setParams() {
-    AD.setParams({ week: start === periodStart(scope, T.todayKey()) ? '' : start, period: period === 'month' ? '' : period, scope: scope === 'week' ? '' : scope });
+    AD.setParams({ week: start === periodStart(scope, T.todayKey()) ? '' : start, period: period === 'month' ? '' : period, scope: scope === 'year' ? '' : scope });
   }
 
   /** One row per calendar month over the trailing year, each bar split planned against unplanned. */
