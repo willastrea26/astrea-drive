@@ -136,7 +136,13 @@ const NETSTAR_REGO_OVERRIDES: Record<string, string> = {
 };
 
 async function fetchVehicles(): Promise<Device[]> {
-  const res = await fetch(`${NETSTAR_BASE}/external/company-vehicles`, {
+  // Goes through nsFetch (paced + retry-on-429), not plain fetch: this is the
+  // FIRST call every sync makes, and the live tracker map polls the same
+  // Netstar key on a timer. When the map has drained the rate-limit bucket, a
+  // plain fetch here 429s and throws "company-vehicles 429", killing the whole
+  // sync before it reads a single odometer. Pacing/retrying lets it wait its
+  // turn instead. A single call, so the latency cost to the live map is tiny.
+  const res = await nsFetch(`${NETSTAR_BASE}/external/company-vehicles`, {
     method: "POST",
     headers: netstarHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ company_name: COMPANY, company_names: [COMPANY] }),
@@ -382,11 +388,17 @@ async function probeReports(imei: string, from: string, to: string) {
   return out;
 }
 
-async function fetchStatus(imei: string) {
+// paced=true routes through nsFetch (spaced + retry-on-429) instead of a plain
+// fetch. The sync passes true so a rate-limited odometer read waits and retries
+// rather than silently returning null (which showed up as "0 odometers
+// updated"). The live map leaves it false so the map stays snappy.
+async function fetchStatus(imei: string, paced = false) {
   const url = `${NETSTAR_BASE}/external/reports/object-status?imei=${
     encodeURIComponent(imei)
   }`;
-  const res = await fetch(url, { headers: netstarHeaders() });
+  const res = await (paced
+    ? nsFetch(url, { headers: netstarHeaders() })
+    : fetch(url, { headers: netstarHeaders() }));
   if (!res.ok) return null;
   const payload = await res.json();
   const d = Array.isArray(payload?.data) ? payload.data[0] : null;
@@ -482,7 +494,8 @@ async function syncOdometers(depth: "recent" | "full" = "recent", quick = false,
   try {
   // Latest odometer per device, matched to fleet by rego.
   const devices = (await fetchVehicles()).filter((v) => v.imei);
-  const statuses = await mapLimit(devices, CONCURRENCY, (v) => fetchStatus(v.imei));
+  // paced=true: these odometer reads retry on 429 instead of coming back null.
+  const statuses = await mapLimit(devices, CONCURRENCY, (v) => fetchStatus(v.imei, true));
   const readings: Array<{ rego: string; km: number | null }> = [];
   devices.forEach((v, i) => {
     const km = statuses[i]?.odometerYesterday;
