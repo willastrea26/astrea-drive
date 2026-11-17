@@ -674,7 +674,43 @@ Deno.serve(async (req: Request) => {
     }
 
     if (action === "sync-odometers") {
-      return await syncOdometers(body.depth === "full" ? "full" : "recent", !!body.quick, sourceFromAuth(req));
+      const depth = body.depth === "full" ? "full" : "recent";
+      const quick = !!body.quick;
+      const source = sourceFromAuth(req);
+
+      // Cron calls arrive through pg_net. We've confirmed via net._http_response
+      // that pg_net is giving up at exactly 5000ms on this project regardless of
+      // the timeout_milliseconds set on the cron job itself (120000/180000) —
+      // so raising that value further won't help. The real sync takes 45-90s,
+      // far past that. Rather than keep fighting pg_net's timeout, respond to
+      // it immediately for a cron call and run the actual sync in the
+      // background via EdgeRuntime.waitUntil (Supabase's documented mechanism
+      // for exactly this). syncOdometers() still calls record_sync_log itself
+      // once it finishes, so Telematic inputs gets the real result a minute or
+      // two later — pg_net just never has to sit around waiting for it.
+      //
+      // Manual browser clicks are unaffected: they run over the browser's own
+      // connection, never touch pg_net, and the UI wants the real result back
+      // immediately to show in its modal — so those still run to completion
+      // synchronously, exactly as before.
+      if (source === "cron") {
+        const run = syncOdometers(depth, quick, source).catch(() => {
+          // Already recorded via logRun() inside syncOdometers; swallow here
+          // so an unhandled rejection doesn't surface after we've responded.
+        });
+        // deno-lint-ignore no-explicit-any
+        const rt = (globalThis as any).EdgeRuntime;
+        if (rt?.waitUntil) rt.waitUntil(run);
+        return json({
+          started: true,
+          source,
+          depth,
+          quick,
+          note: "Cron sync started in the background — check Telematic inputs in a minute or two for the result.",
+        });
+      }
+
+      return await syncOdometers(depth, quick, source);
     }
 
     // Trips for one vehicle over the last N days, grouped by day (Trips tab).
