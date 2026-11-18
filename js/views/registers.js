@@ -62,6 +62,11 @@ AD.views = AD.views || {};
   // Shared with the employee profile page (employee.js).
   AD.employees = { TEAMS, teamFor, teamOf, listOf };
 
+  /** Small round photo for register rows (like the fleet's vehicle thumbnails);
+   *  initials when no photo has been added yet. */
+  const initialsOf = (name) => String(name || '?').trim().split(/\s+/).filter(Boolean).map((p) => p[0]).slice(0, 2).join('').toUpperCase();
+  const empThumb = (r) => `<span class="emp-thumb" aria-hidden="true">${r.photo ? `<img src="${esc(r.photo)}" alt="" loading="lazy">` : esc(initialsOf(r.name))}</span>`;
+
   /** Insert/update an employee; if the "team" column hasn't been added to the
    *  table yet, save everything else instead of failing. */
   async function saveEmployee(fn, rec) {
@@ -237,7 +242,7 @@ AD.views = AD.views || {};
       edit: (r, done) => AD.employeeForm(r, done),
       href: (r) => '#/employee/' + encodeURIComponent(r.id),
       cols: [
-        { head: 'Employee', width: 220, cell: (r) => `<a class="id" href="#/employee/${encodeURIComponent(r.id)}">${esc(r.name)}</a><span class="t2">${or(r.position)}</span>` },
+        { head: 'Employee', width: 270, cell: (r) => `<span class="emp-cell">${empThumb(r)}<span class="emp-cell-text"><a class="id" href="#/employee/${encodeURIComponent(r.id)}">${esc(r.name)}</a><span class="t2">${or(r.position)}</span></span></span>` },
         { head: 'Licences applied', width: 130, cls: 'col-opt col-wide', cell: (r) => or(r.licencesApplied) },
         { head: 'Contact', width: 230, cls: 'col-opt', cell: (r) => `${r.mobile ? `<span class="nowrap">${esc(r.mobile)}</span>` : '<span class="muted">No mobile</span>'}${r.email ? `<span class="t2"><a href="mailto:${esc(r.email)}">${esc(r.email)}</a></span>` : ''}` },
         { head: 'Date of birth', width: 115, cls: 'col-opt col-wide nowrap', cell: (r) => fmtDate(r.dateOfBirth) },
