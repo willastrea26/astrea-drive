@@ -254,7 +254,7 @@ table.data { width: 100%; border-collapse: collapse; font-size: 14.5px; }
 .data tbody td.truck-cell.span { background: var(--paper) !important; }
 .data .id { font-weight: 700; font-size: 15px; color: var(--ink); white-space: nowrap; }
 .data a.id:hover { color: var(--blue); text-decoration: none; }
-.col-thumb { width: 66px; padding-right: 4px !important; }
+.col-thumb { width: 86px; padding-right: 18px !important; }
 /* Fleet rows: vertically centre every cell so one tall column doesn't push the rest off-centre */
 #f-body td { vertical-align: middle; }
 .fleet-group-row th {
@@ -270,9 +270,9 @@ table.data { width: 100%; border-collapse: collapse; font-size: 14.5px; }
 .fleet-thumb-icon .ico { width: 20px; height: 20px; }
 @media (max-width: 640px) { .col-thumb { display: none; } }
 .fleet-table { table-layout: fixed; }
-.fleet-table-owned { min-width: 1450px; }
-.fleet-table-hired { min-width: 1180px; }
-.fleet-table .fleet-col-thumb { width: 64px; }
+.fleet-table-owned { min-width: 1472px; }
+.fleet-table-hired { min-width: 1202px; }
+.fleet-table .fleet-col-thumb { width: 86px; }
 .fleet-table .fleet-col-id { width: 88px; }
 .fleet-table .fleet-col-rego { width: 120px; }
 .fleet-table .fleet-col-model { width: 257px; }
