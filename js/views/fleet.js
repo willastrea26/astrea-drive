@@ -38,6 +38,8 @@ AD.vehicleForm = function (vehicle, onSaved) {
         <div class="field"><label>Make <span class="req">*</span></label><input type="text" name="make" value="${esc(v.make)}"></div>
         <div class="field"><label>Model <span class="req">*</span></label><input type="text" name="model" value="${esc(v.model)}"></div>
         <div class="field"><label>Vehicle type</label><select name="type">${options(AD.VEHICLE_TYPES, v.type)}</select></div>
+        <div class="field"><label>Capacity</label><input type="text" name="capacity" value="${esc(v.capacity || '')}" maxlength="20" placeholder="e.g. 5t, 20t">
+          <div class="help">Size of the asset — payload for trucks, operating weight for excavators. Helps non-plant staff tell a 5t tipper from a 20t one at a glance.</div></div>
         <div class="field"><label>Year</label><input type="number" name="year" value="${esc(v.year)}" min="1980" max="2100"></div>
         ${hiredMode
           ? `<div class="field"><label>Hire company <span class="req">*</span></label>
@@ -132,6 +134,7 @@ AD.vehicleForm = function (vehicle, onSaved) {
           serviceIntervalHours: d.serviceIntervalHours === '' ? null : Number(d.serviceIntervalHours),
           trackByDate: !!d.trackByDate, trackByKm: !!d.trackByKm, trackByHours: !!d.trackByHours,
           notes: d.notes,
+          capacity: d.capacity ? d.capacity.trim() : null,
           vin: d.vin || null, variant: d.variant || null, netstarRego: d.netstarRego ? d.netstarRego.toUpperCase() : null, linktTag: d.linktTag || null,
           wrdtPlantNo: d.wrdtPlantNo || null, evieFob: d.evieFob || null, evieCard: d.evieCard || null,
           hired: hiredMode, hireCompany: hiredMode ? (d.hireCompany || '') : ''
@@ -164,7 +167,7 @@ AD.vehicleForm = function (vehicle, onSaved) {
 /** Retry a vehicle write without engine-hours columns when the migration
  *  update-vehicles-engine-hours.sql has not been run yet. */
 async function stripUnknownColumns(fn, rec) {
-  const extras = ['engineHours', 'nextServiceHours', 'serviceIntervalHours', 'trackByDate', 'trackByKm', 'trackByHours'];
+  const extras = ['engineHours', 'nextServiceHours', 'serviceIntervalHours', 'trackByDate', 'trackByKm', 'trackByHours', 'capacity'];
   try {
     return await fn(rec);
   } catch (e) {
@@ -210,12 +213,14 @@ AD.views.fleet = (function () {
     const tableColumns = isHired
       ? `<colgroup>
           <col class="fleet-col-thumb"><col class="fleet-col-id"><col class="fleet-col-rego col-opt">
-          <col class="fleet-col-model"><col class="fleet-col-type col-opt col-wide"><col class="fleet-col-company col-opt col-wide">
+          <col class="fleet-col-model"><col class="fleet-col-type col-opt col-wide"><col class="fleet-col-capacity col-opt col-wide">
+          <col class="fleet-col-company col-opt col-wide">
           <col class="fleet-col-status"><col class="fleet-col-docs col-opt"><col class="fleet-col-action col-opt col-wide">
         </colgroup>`
       : `<colgroup>
           <col class="fleet-col-thumb"><col class="fleet-col-id"><col class="fleet-col-rego col-opt">
-          <col class="fleet-col-model"><col class="fleet-col-type col-opt col-wide"><col class="fleet-col-driver col-opt">
+          <col class="fleet-col-model"><col class="fleet-col-type col-opt col-wide"><col class="fleet-col-capacity col-opt col-wide">
+          <col class="fleet-col-driver col-opt">
           <col class="fleet-col-odo col-opt col-wide"><col class="fleet-col-status"><col class="fleet-col-attn col-opt">
           <col class="fleet-col-action col-opt col-wide">
         </colgroup>`;
@@ -243,6 +248,7 @@ AD.views.fleet = (function () {
           <th class="col-opt fleet-head-rego">Registration</th>
           <th class="col-model">Make / model</th>
           <th class="col-opt col-wide">Type</th>
+          <th class="col-opt col-wide">Capacity</th>
           ${isHired
             ? '<th class="col-opt col-wide">Hire company</th>'
             : '<th class="col-opt">Assigned driver</th><th class="num col-opt col-wide">Odometer</th>'}
@@ -439,6 +445,7 @@ AD.views.fleet = (function () {
         <td class="col-opt fleet-cell-rego">${esc(v.rego)}</td>
         <td class="fleet-cell-model">${esc(v.make || '')} ${esc(model || '')}<span class="t2">${esc(v.year || '')}${spec ? ' · ' + esc(spec) : ''}</span>${alerts ? `<span class="t2 only-mobile">${alerts}</span>` : ''}</td>
         <td class="col-opt col-wide">${esc(v.type)}</td>
+        <td class="col-opt col-wide">${v.capacity ? esc(v.capacity) : '<span class="muted">—</span>'}</td>
         ${isHired
           ? `<td class="col-opt col-wide">${esc(v.hireCompany || '—')}</td>`
           : `<td class="col-opt">${v.driverId ? esc(L.driverName(v.driverId)) : '<span class="muted">Unassigned</span>'}</td>
@@ -451,7 +458,7 @@ AD.views.fleet = (function () {
           <button class="btn btn-ghost btn-sm" data-edit="${v.id}" title="Edit ${esc(v.id)}" aria-label="Edit ${esc(v.id)}">${I.edit} Edit</button>
         </td></tr>`;
     };
-    const colspan = isHired ? 9 : 10;
+    const colspan = isHired ? 10 : 11;
     const grouped = [];
     TYPE_ORDER.concat([...new Set(list.map(groupType).filter((t) => !TYPE_ORDER.includes(t)))]).forEach((vehicleType) => {
       const vehicles = list.filter((v) => groupType(v) === vehicleType);

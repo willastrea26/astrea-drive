@@ -614,6 +614,7 @@ AD.views.vehicle = (function () {
 
   function detailsFacts(v) {
     const rows = [
+      v.capacity && ['Capacity', v.capacity],
       v.variant && ['Variant', v.variant],
       v.vin && ['VIN', v.vin],
       v.linktTag && ['Linkt tag', v.linktTag],
