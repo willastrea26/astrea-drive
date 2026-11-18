@@ -1310,6 +1310,10 @@ AD.views.vehicle = (function () {
     const latest = rows.slice(0, 50);
 
     const kpi = (label, value, sub) => `<div class="cost-kpi"><span>${esc(label)}</span><strong>${L.fmtAUD(value)}</strong><small>${esc(sub)}</small></div>`;
+    const hasUnitCost = v.unitCost != null && v.unitCost !== '';
+    const unitCostKpi = hasUnitCost
+      ? kpi('Unit cost', v.unitCost, 'Purchase price of this asset')
+      : `<div class="cost-kpi"><span>Unit cost</span><strong class="muted">—</strong><small><button type="button" class="btn btn-link" data-edit-vehicle>Add purchase price</button></small></div>`;
     return `
       <div class="tab-tools cost-tab-tools">
         <span class="t2">Actual recorded costs · ${esc(months[0].full)} to ${esc(months[11].full)}</span>
@@ -1324,6 +1328,7 @@ AD.views.vehicle = (function () {
         ${kpi('Fuel', fuel, 'Imported automatically')}
         ${kpi('Maintenance', maintenance, 'Service, repairs and tyres')}
         ${kpi('Ownership', ownership, 'Rego, insurance and finance')}
+        ${unitCostKpi}
       </div>
 
       <section class="section viz-card vehicle-cost-card">

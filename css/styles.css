@@ -2600,7 +2600,7 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 .cost-tab-tools { align-items: center; }
 .tab-tool-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .cost-kpis {
-  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px;
+  display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px;
   margin-bottom: 18px;
 }
 .cost-kpi {

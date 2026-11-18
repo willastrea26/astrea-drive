@@ -41,6 +41,8 @@ AD.vehicleForm = function (vehicle, onSaved) {
         <div class="field"><label>Capacity</label><input type="text" name="capacity" value="${esc(v.capacity || '')}" maxlength="20" placeholder="e.g. 5t, 20t">
           <div class="help">Size of the asset — payload for trucks, operating weight for excavators. Helps non-plant staff tell a 5t tipper from a 20t one at a glance.</div></div>
         <div class="field"><label>Year</label><input type="number" name="year" value="${esc(v.year)}" min="1980" max="2100"></div>
+        ${!hiredMode ? `<div class="field"><label>Unit cost ($)</label><input type="number" name="unitCost" value="${v.unitCost != null && v.unitCost !== '' ? esc(v.unitCost) : ''}" min="0" step="1" placeholder="e.g. 85000">
+          <div class="help">Purchase price of this vehicle or plant. Shown on its Costs tab — not counted in running-cost totals.</div></div>` : ''}
         ${hiredMode
           ? `<div class="field"><label>Hire company <span class="req">*</span></label>
                <input type="text" name="hireCompany" value="${esc(v.hireCompany)}" list="hired-co-list" placeholder="e.g. Quinnex">
@@ -122,6 +124,7 @@ AD.vehicleForm = function (vehicle, onSaved) {
         if (d.trackByHours && (d.nextServiceHours === '' || !(Number(d.nextServiceHours) >= 0))) err.nextServiceHours = 'Required — Hours trigger is ticked.';
         if (!d.trackByDate && !d.trackByKm && !d.trackByHours) err.trackByDate = 'Tick at least one trigger.';
         if (d.engineHours !== '' && !(Number(d.engineHours) >= 0)) err.engineHours = 'Enter a valid number of hours.';
+        if (d.unitCost !== undefined && d.unitCost !== '' && !(Number(d.unitCost) >= 0)) err.unitCost = 'Enter a valid dollar amount.';
         if (!showErrors(form, err)) return;
 
         const rec = {
@@ -135,6 +138,7 @@ AD.vehicleForm = function (vehicle, onSaved) {
           trackByDate: !!d.trackByDate, trackByKm: !!d.trackByKm, trackByHours: !!d.trackByHours,
           notes: d.notes,
           capacity: d.capacity ? d.capacity.trim() : null,
+          unitCost: d.unitCost !== undefined && d.unitCost !== '' ? Math.round(Number(d.unitCost)) : null,
           vin: d.vin || null, variant: d.variant || null, netstarRego: d.netstarRego ? d.netstarRego.toUpperCase() : null, linktTag: d.linktTag || null,
           wrdtPlantNo: d.wrdtPlantNo || null, evieFob: d.evieFob || null, evieCard: d.evieCard || null,
           hired: hiredMode, hireCompany: hiredMode ? (d.hireCompany || '') : ''
@@ -167,7 +171,7 @@ AD.vehicleForm = function (vehicle, onSaved) {
 /** Retry a vehicle write without engine-hours columns when the migration
  *  update-vehicles-engine-hours.sql has not been run yet. */
 async function stripUnknownColumns(fn, rec) {
-  const extras = ['engineHours', 'nextServiceHours', 'serviceIntervalHours', 'trackByDate', 'trackByKm', 'trackByHours', 'capacity'];
+  const extras = ['engineHours', 'nextServiceHours', 'serviceIntervalHours', 'trackByDate', 'trackByKm', 'trackByHours', 'capacity', 'unitCost'];
   try {
     return await fn(rec);
   } catch (e) {
