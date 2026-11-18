@@ -76,21 +76,24 @@ const cors = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-// The cron jobs call this function with the project's service-role key as
-// their Authorization bearer (see netstar-odometer-cron.sql); a browser
-// click carries the signed-in user's own session token instead. Reading the
-// JWT's own "role" claim (already verified by the Supabase gateway before
-// this code runs) tells "scheduled" apart from "someone clicked a button"
-// without needing the cron jobs' bodies to say so themselves.
+// A button click in the app always carries the signed-in user's own session
+// token, whose JWT "role" claim is "authenticated". Anything else — the cron
+// jobs' service-role key, an anon key from a dashboard-made cron job, or any
+// other non-user caller — is treated as scheduled, so it runs in the
+// background (see the sync-odometers branch below). Keying on "is this a
+// person?" rather than "is this exactly the service_role key?" means a cron job
+// set up with a different key can't silently fall back to the foreground path
+// and get cut off by pg_net's 5-second timeout. (The Supabase gateway has
+// already verified the JWT before this code runs.)
 function sourceFromAuth(req: Request): "cron" | "manual" {
   try {
     const token = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
     const payload = token.split(".")[1] ?? "";
     const padded = payload.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((payload.length + 3) % 4);
     const role = JSON.parse(atob(padded))?.role;
-    return role === "service_role" ? "cron" : "manual";
+    return role === "authenticated" ? "manual" : "cron";
   } catch (_e) {
-    return "manual";
+    return "cron";
   }
 }
 

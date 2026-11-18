@@ -26,7 +26,10 @@
 --
 -- SQL ALTERNATIVE (if you prefer running it here): paste this into the
 -- SQL Editor. Replace <PASTE_KEY> with your project's service-role key
--- (Dashboard > Settings > API > service_role). Do NOT commit the real key
+-- (Dashboard > Project Settings > API Keys > "Legacy API keys" tab > service_role).
+-- It must be the long key starting "eyJ" (a JWT). The newer "sb_secret_..." keys
+-- are NOT accepted here: the gateway rejects them with 401
+-- UNAUTHORIZED_INVALID_JWT_FORMAT and the sync never runs. Do NOT commit the real key
 -- anywhere — it only needs to live in this job definition in the database.
 -- =====================================================================
 
