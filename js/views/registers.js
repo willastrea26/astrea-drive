@@ -1,5 +1,5 @@
 /*
- * Employee, general equipment and technology registers — listed under the
+ * Employee, equipment and technology registers — listed under the
  * "Registers" heading in the sidebar. Each is a page shell for now: the
  * columns and the Supabase table behind each one are still to be decided,
  * so nothing is stored yet. Once the fields are agreed, each becomes a full
@@ -10,7 +10,7 @@ AD.views = AD.views || {};
 (function () {
   const REGISTERS = [
     { route: 'employee-register', title: 'Employee register', icon: 'users', what: 'staff' },
-    { route: 'equipment-register', title: 'General equipment register', icon: 'box', what: 'general equipment' },
+    { route: 'equipment-register', title: 'Equipment register', icon: 'box', what: 'equipment' },
     { route: 'technology-register', title: 'Technology register', icon: 'monitor', what: 'technology items such as laptops, phones and tablets' }
   ];
 

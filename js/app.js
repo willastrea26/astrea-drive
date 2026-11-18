@@ -25,7 +25,7 @@ AD.views = AD.views || {};
     { group: 'Registers' },
     { route: 'fleet', label: 'Fleet register', icon: I.truck },
     { route: 'employee-register', label: 'Employee register', icon: I.users },
-    { route: 'equipment-register', label: 'General equipment register', icon: I.box },
+    { route: 'equipment-register', label: 'Equipment register', icon: I.box },
     { route: 'technology-register', label: 'Technology register', icon: I.monitor }
   ];
 
