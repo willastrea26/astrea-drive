@@ -88,7 +88,7 @@ AD.views['power-tools'] = (function () {
 
     root.innerHTML = `
       ${pageHeader({
-        title: 'Power & motor tools',
+        title: 'Power & motor tools register',
         sub: summary || 'No tools recorded yet',
         actions: `<button class="btn btn-primary" id="add-tool">${I.plus} Add tool</button>`
       })}
@@ -128,5 +128,5 @@ AD.views['power-tools'] = (function () {
     });
   }
 
-  return { title: 'Power & motor tools', render, refresh: () => root && rows() };
+  return { title: 'Power & motor tools register', render, refresh: () => root && rows() };
 })();

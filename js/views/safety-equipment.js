@@ -53,7 +53,7 @@ AD.views['safety-equipment'] = (function () {
   }
 
   return {
-    title: () => AD.views[active].title,
+    title: 'Safety equipment register',
     render,
     refresh: () => root && AD.views[active].refresh && AD.views[active].refresh()
   };
