@@ -42,12 +42,45 @@ AD.views = AD.views || {};
   };
 
   // =========================================================== employees
+  // Teams the employee register is grouped by. Each person's team is worked
+  // out from their position (TEAM_RULES, first match wins) unless the Edit
+  // form sets it explicitly — so new starters land in the right group with
+  // no extra data entry, and anyone who doesn't fit the rule can be moved.
+  const TEAMS = ['Management', 'Surveying', 'Locating', 'Vac trucks', 'Civil', 'Engineering & design', 'Workshop', 'Office'];
+  const TEAM_RULES = [
+    [/managing director|operations manager/i, 'Management'],
+    [/survey|spatial/i, 'Surveying'],
+    [/\blocat/i, 'Locating'], // word start, so "Resource Allocator" isn't a locator
+    [/vac truck/i, 'Vac trucks'],
+    [/civil|labourer|dilapidation|pipe ?layer|plant operator|excavator/i, 'Civil'],
+    [/engineer|draft|revit|design/i, 'Engineering & design'],
+    [/mechanic|workshop|fitter/i, 'Workshop'],
+    [/account|assistant|coordinator|bid|business development|allocator|admin|reception|payroll|office/i, 'Office']
+  ];
+  const teamFor = (position) => (TEAM_RULES.find(([re]) => re.test(position || '')) || [])[1] || '';
+  const teamOf = (r) => r.team || teamFor(r.position) || 'Unassigned';
+
+  /** Insert/update an employee; if the "team" column hasn't been added to the
+   *  table yet, save everything else instead of failing. */
+  async function saveEmployee(fn, rec) {
+    try {
+      return await fn(rec);
+    } catch (e) {
+      const msg = String((e && (e.message || e.details || e.hint)) || e);
+      if (!('team' in rec) || !/pgrst204|42703|schema cache|could not find|team/i.test(msg)) throw e;
+      const { team, ...rest } = rec;
+      AD.ui.toast('Saved, but the team couldn’t be stored yet — run supabase/create-employees.sql again to add the Team column.', 'error');
+      return fn(rest);
+    }
+  }
+
   /** Add / edit an employee. Pass null to add. */
   AD.employeeForm = function (emp, onSaved) {
     const { formData, showErrors, modal, toast, confirm } = AD.ui;
     const isNew = !emp;
-    const e = emp || { name: '', licencesApplied: '', position: '', mobile: '', email: '', dateOfBirth: '', startDate: '', address: '', suburb: '', state: 'NSW', postcode: '', licenceRegister: '' };
+    const e = emp || { name: '', team: '', licencesApplied: '', position: '', mobile: '', email: '', dateOfBirth: '', startDate: '', address: '', suburb: '', state: 'NSW', postcode: '', licenceRegister: '' };
     const dateVal = (v) => (v ? esc(String(v).slice(0, 10)) : '');
+    const autoLabel = (position) => `Automatic — ${teamFor(position) || 'Unassigned'}`;
 
     modal({
       title: isNew ? 'Add employee' : `Edit ${e.name}`,
@@ -57,6 +90,8 @@ AD.views = AD.views || {};
           <div class="form-section-title full"><b>Employee</b><span>Name, role and contact details</span></div>
           <div class="field"><label>Name <span class="req">*</span></label><input type="text" name="name" value="${esc(e.name)}"></div>
           <div class="field"><label>Position</label><input type="text" name="position" value="${esc(e.position)}"></div>
+          <div class="field"><label>Team</label><select name="team">${AD.ui.options(TEAMS, e.team || '', autoLabel(e.position))}</select>
+            <div class="help">Leave on Automatic to group by position, or pick a team to override it.</div></div>
           <div class="field"><label>Mobile phone</label><input type="text" name="mobile" value="${esc(e.mobile)}" inputmode="tel"></div>
           <div class="field"><label>Email</label><input type="email" name="email" value="${esc(e.email)}"></div>
           <div class="field"><label>Date of birth</label><input type="date" name="dateOfBirth" value="${dateVal(e.dateOfBirth)}"></div>
@@ -79,6 +114,10 @@ AD.views = AD.views || {};
       onMount(el, close) {
         const form = el.querySelector('form');
         el.querySelector('[data-close]').onclick = close;
+        // Keep the "Automatic — <team>" option in step with the position typed.
+        form.elements.position.addEventListener('input', () => {
+          form.elements.team.options[0].textContent = autoLabel(form.elements.position.value);
+        });
         const removeBtn = el.querySelector('[data-remove]');
         if (removeBtn) removeBtn.onclick = async () => {
           const ok = await confirm({ title: `Remove ${e.name}?`, message: 'This permanently deletes their record from the employee register. It can’t be undone.', confirmText: 'Remove', danger: true });
@@ -100,7 +139,7 @@ AD.views = AD.views || {};
           if (!showErrors(form, err)) return;
           const tidyList = (s) => listOf(s).join(', ');
           const rec = {
-            name: d.name, position: d.position, mobile: d.mobile, email: d.email,
+            name: d.name, team: d.team, position: d.position, mobile: d.mobile, email: d.email,
             dateOfBirth: d.dateOfBirth || null, startDate: d.startDate || null,
             address: d.address, suburb: d.suburb, state: d.state.toUpperCase(), postcode: d.postcode,
             licencesApplied: tidyList(d.licencesApplied), licenceRegister: tidyList(d.licenceRegister)
@@ -109,11 +148,11 @@ AD.views = AD.views || {};
           let saved;
           try {
             if (isNew) {
-              saved = await AD.store.insert('employees', rec, 'EMP');
+              saved = await saveEmployee((r) => AD.store.insert('employees', r, 'EMP'), rec);
               await AD.store.log(`${rec.name} added to the employee register`);
               toast(`${rec.name} added`);
             } else {
-              saved = await AD.store.update('employees', e.id, rec);
+              saved = await saveEmployee((r) => AD.store.update('employees', e.id, r), rec);
               await AD.store.log(`${rec.name}’s employee details updated`);
               toast(`${rec.name} saved`);
             }
@@ -159,11 +198,11 @@ AD.views = AD.views || {};
   const EQ_TONE = { 'In service': 'aqua', 'Under repair': 'violet', 'Out of service': 'red' };
   const IT_TONE = { 'In use': 'blue', Spare: 'aqua', 'In repair': 'violet', Retired: 'grey muted' };
 
-  /** Filter dropdown that groups rows by one field. */
-  const groupFilter = (key) => ({
-    label: 'All groups',
-    options: (rows, order) => order.filter((g) => rows.some((r) => r[key] === g)),
-    match: (r, v) => r[key] === v
+  /** Filter dropdown matching the register's grouping (only groups in use). */
+  const groupFilter = (label, groupOf, order) => ({
+    label,
+    options: (rows) => order.filter((g) => rows.some((r) => groupOf(r) === g)),
+    match: (r, v) => groupOf(r) === v
   });
 
   // ============================================================ registers
@@ -172,12 +211,16 @@ AD.views = AD.views || {};
       route: 'employee-register', title: 'Employee register', noun: 'employee',
       table: 'employees', setupFile: 'supabase/create-employees.sql',
       rows: () => AD.store.all('employees').slice().sort((a, b) => String(a.name).localeCompare(String(b.name))),
-      search: ['name', 'position', 'mobile', 'email', 'suburb', 'postcode', 'licencesApplied', 'licenceRegister'],
-      filter: {
-        label: 'Any licence or ticket',
-        options: (rows) => [...new Set(rows.flatMap((r) => listOf(r.licenceRegister)))].sort((a, b) => a.localeCompare(b)),
-        match: (r, v) => listOf(r.licenceRegister).includes(v)
-      },
+      search: ['name', 'position', 'team', 'mobile', 'email', 'suburb', 'postcode', 'licencesApplied', 'licenceRegister'],
+      groupOf: teamOf, groupOrder: TEAMS.concat('Unassigned'),
+      filters: [
+        groupFilter('All teams', teamOf, TEAMS.concat('Unassigned')),
+        {
+          label: 'Any licence or ticket',
+          options: (rows) => [...new Set(rows.flatMap((r) => listOf(r.licenceRegister)))].sort((a, b) => a.localeCompare(b)),
+          match: (r, v) => listOf(r.licenceRegister).includes(v)
+        }
+      ],
       summary: (rows) => {
         if (!rows.length) return 'No staff recorded yet';
         const withLic = rows.filter((r) => listOf(r.licenceRegister).length).length;
@@ -198,9 +241,9 @@ AD.views = AD.views || {};
     },
     {
       route: 'equipment-register', title: 'Equipment register', noun: 'item', sample: true,
-      rows: EQUIPMENT, groupBy: 'category', groupOrder: ['Surveying', 'Locating', 'Civil', 'Safety', 'Traffic control'],
+      rows: EQUIPMENT, groupOf: (r) => r.category, groupOrder: ['Surveying', 'Locating', 'Civil', 'Safety', 'Traffic control'],
       search: ['id', 'name', 'category', 'make', 'serial', 'location', 'assignedTo'],
-      filter: groupFilter('category'),
+      filters: [groupFilter('All categories', (r) => r.category, ['Surveying', 'Locating', 'Civil', 'Safety', 'Traffic control'])],
       summary: (rows) => {
         const over = rows.filter((r) => dueState(r.nextInspection) === 'overdue').length;
         const soon = rows.filter((r) => dueState(r.nextInspection) === 'soon').length;
@@ -218,9 +261,9 @@ AD.views = AD.views || {};
     },
     {
       route: 'technology-register', title: 'Technology register', noun: 'device', sample: true,
-      rows: TECHNOLOGY, groupBy: 'type', groupOrder: ['Laptop', 'Tablet', 'Phone', 'Field controller', 'Drone', 'Site internet'],
+      rows: TECHNOLOGY, groupOf: (r) => r.type, groupOrder: ['Laptop', 'Tablet', 'Phone', 'Field controller', 'Drone', 'Site internet'],
       search: ['id', 'type', 'make', 'serial', 'assignedTo', 'phone'],
-      filter: groupFilter('type'),
+      filters: [groupFilter('All device types', (r) => r.type, ['Laptop', 'Tablet', 'Phone', 'Field controller', 'Drone', 'Site internet'])],
       summary: (rows) => {
         const w = rows.filter((r) => dueState(r.warranty) === 'soon').length;
         return `${rows.length} devices · ${rows.filter((r) => r.status === 'In use').length} in use${w ? ` · <span class="flag flag-amber">${w} warrant${w === 1 ? 'y' : 'ies'} ending within 30 days</span>` : ''}`;
@@ -239,23 +282,25 @@ AD.views = AD.views || {};
 
   // =============================================================== render
   REGISTERS.forEach((reg) => {
-    let root = null, q = '', pick = '';
+    let root = null, q = '', picks = [];
     const missing = () => reg.table && !AD.store.available(reg.table);
+    // Search also matches the group name (e.g. typing "civil" finds the Civil team).
+    const haystack = (r) => reg.search.map((k) => r[k]).concat(reg.groupOf ? [reg.groupOf(r)] : []).join(' ').toLowerCase();
 
     function table() {
       if (!root) return;
       const all = reg.rows();
       const needle = q.trim().toLowerCase();
-      const list = all.filter((r) => (!pick || reg.filter.match(r, pick))
-        && (!needle || reg.search.some((k) => String(r[k] || '').toLowerCase().includes(needle))));
+      const list = all.filter((r) => reg.filters.every((f, i) => !picks[i] || f.match(r, picks[i]))
+        && (!needle || haystack(r).includes(needle)));
       const cols = reg.cols.concat(reg.edit ? [{ head: '', cls: 'col-action', cell: (r) => `<button class="btn btn-sm btn-ghost" data-edit="${esc(r.id)}">${AD.icons.edit} Edit</button>` }] : []);
       const colspan = cols.length;
       const rowHtml = (r) => `<tr>${cols.map((c) => `<td class="${c.cls || ''}">${c.cell(r)}</td>`).join('')}</tr>`;
       let body;
-      if (reg.groupBy) {
-        const groups = reg.groupOrder.concat([...new Set(list.map((r) => r[reg.groupBy]))].filter((g) => !reg.groupOrder.includes(g)));
+      if (reg.groupOf) {
+        const groups = reg.groupOrder.concat([...new Set(list.map(reg.groupOf))].filter((g) => !reg.groupOrder.includes(g)));
         body = groups.map((g) => {
-          const rows = list.filter((r) => r[reg.groupBy] === g);
+          const rows = list.filter((r) => reg.groupOf(r) === g);
           return rows.length ? `<tr class="fleet-group-row"><th colspan="${colspan}"><span>${esc(g)}</span><small>${plural(rows.length, reg.noun)}</small></th></tr>${rows.map(rowHtml).join('')}` : '';
         }).join('');
       } else {
@@ -274,8 +319,9 @@ AD.views = AD.views || {};
       const { pageHeader, options } = AD.ui;
       const I = AD.icons;
       const all = reg.rows();
-      const opts = reg.filter.options(all, reg.groupOrder || []);
-      if (pick && !opts.includes(pick)) pick = '';
+      const opts = reg.filters.map((f) => f.options(all));
+      // Drop a filter choice that no longer exists (e.g. its last row was removed).
+      picks = reg.filters.map((f, i) => (picks[i] && opts[i].includes(picks[i]) ? picks[i] : ''));
       const note = reg.sample
         ? `<div class="sample-note">${I.alert}<div><b>Sample data.</b> These rows are made up for a fictional company, ${esc(COMPANY)}, so you can see how this register will look. Nothing here is saved, and your fleet data isn’t touched.</div></div>`
         : missing()
@@ -287,7 +333,7 @@ AD.views = AD.views || {};
         ${note}
         <div class="toolbar">
           <div class="search">${I.search}<input type="search" id="reg-q" placeholder="Search ${esc(reg.noun)}s" aria-label="Search ${esc(reg.noun)}s" value="${esc(q)}"></div>
-          <select id="reg-filter" aria-label="Filter">${options(opts, pick, reg.filter.label)}</select>
+          ${reg.filters.map((f, i) => `<select data-filter="${i}" aria-label="${esc(f.label)}">${options(opts[i], picks[i], f.label)}</select>`).join('')}
           <span class="count" id="reg-count"></span>
         </div>
         <div class="table-wrap"><table class="data reg-table">
@@ -295,7 +341,7 @@ AD.views = AD.views || {};
           <tbody id="reg-body"></tbody>
         </table></div>`;
       root.querySelector('#reg-q').addEventListener('input', (e) => { q = e.target.value; table(); });
-      root.querySelector('#reg-filter').addEventListener('change', (e) => { pick = e.target.value; table(); });
+      root.querySelectorAll('[data-filter]').forEach((s) => s.addEventListener('change', (e) => { picks[Number(s.dataset.filter)] = e.target.value; table(); }));
       const add = root.querySelector('#reg-add');
       if (add) add.onclick = () => reg.add.open(() => draw());
       table();
@@ -303,7 +349,7 @@ AD.views = AD.views || {};
 
     AD.views[reg.route] = {
       title: reg.title,
-      render(el) { root = el; q = ''; pick = ''; draw(); },
+      render(el) { root = el; q = ''; picks = []; draw(); },
       // Background data refresh: redraw but keep the search and filter.
       refresh: () => root && draw()
     };

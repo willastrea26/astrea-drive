@@ -13,6 +13,7 @@ BEGIN;
 create table if not exists public.employees (
   id                  text primary key,
   name                text not null,
+  team                text not null default '',   -- blank = worked out from position
   "licencesApplied"   text not null default '',   -- Full / Mobility
   position            text not null default '',
   mobile              text not null default '',
@@ -25,6 +26,10 @@ create table if not exists public.employees (
   postcode            text not null default '',
   "licenceRegister"   text not null default ''     -- comma-separated licences and tickets
 );
+
+-- Added after the first version of this file: tables created before then
+-- get the Team column here. Blank means "work it out from the position".
+alter table public.employees add column if not exists team text not null default '';
 
 revoke all on table public.employees from anon;
 grant select, insert, update, delete on table public.employees to authenticated;
