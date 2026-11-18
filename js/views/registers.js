@@ -290,7 +290,29 @@ AD.views = AD.views || {};
   const assigneeCell = (emp) => emp
     ? `<span class="emp-cell">${empThumb(emp).replace('class="emp-thumb"', 'class="emp-thumb emp-thumb-sm"')}<span class="emp-cell-text"><a href="#/employee/${encodeURIComponent(emp.id)}">${esc(emp.name)}</a>${emp.position ? `<span class="t2">${esc(emp.position)}</span>` : ''}</span></span>`
     : '<span class="muted">Unassigned</span>';
-  AD.devices = { DEVICE_TYPES, DEVICE_STATUSES, IT_TONE, devicesFor };
+  /** Same look for a made-up person on a sample device (no profile to link to). */
+  const sampleAssigneeCell = (p) => `<span class="emp-cell">${empThumb({ name: p.name }).replace('class="emp-thumb"', 'class="emp-thumb emp-thumb-sm"')}<span class="emp-cell-text"><span class="sample-person">${esc(p.name)}</span><span class="t2">${esc(p.position)}</span></span></span>`;
+
+  // SAMPLE DEVICES — shown ONLY while the register has no real devices, so the
+  // layout (and a device profile) can be seen before any are added. They live
+  // in this file only: never written to Supabase, read-only, clearly labelled,
+  // and gone as soon as the first real device is added. Names, numbers and
+  // serials are made up.
+  const SAMPLE_DEVICES = () => [
+    { id: 'sample-001', sample: true, type: 'Laptop', make: 'Dell Latitude 5440', assetTag: 'IT-001', serial: 'DL5440-7H2KQ', sampleAssignee: { name: 'Sophie Kim', position: 'Project coordinator' }, mobile: '', purchased: day(-410), warrantyEnds: day(320), status: 'In use', notes: 'Docking station and second monitor at the Wetherill Park office.' },
+    { id: 'sample-002', sample: true, type: 'Laptop', make: 'Panasonic Toughbook 40', assetTag: 'IT-002', serial: 'TB40-1123987', sampleAssignee: { name: 'Priya Nair', position: 'Registered surveyor' }, mobile: '', purchased: day(-1010), warrantyEnds: day(-280), status: 'In use', notes: 'Rugged field laptop. Out of warranty — due for replacement next financial year.' },
+    { id: 'sample-003', sample: true, type: 'Field controller', make: 'Trimble TSC7', assetTag: 'IT-003', serial: 'TSC7-55031', sampleAssignee: { name: 'Josh Whitfield', position: 'Survey technician' }, mobile: '', purchased: day(-640), warrantyEnds: day(90), status: 'In use', notes: '' },
+    { id: 'sample-004', sample: true, type: 'Tablet', make: 'Samsung Galaxy Tab Active5', assetTag: 'IT-004', serial: 'IMEI 356938110041221', sampleAssignee: { name: 'Mia Tanaka', position: 'Utility locator' }, mobile: '0491 571 491', purchased: day(-200), warrantyEnds: day(530), status: 'In use', notes: '' },
+    { id: 'sample-005', sample: true, type: 'Phone', make: 'Samsung Galaxy XCover7', assetTag: 'IT-005', serial: 'IMEI 352719331802465', sampleAssignee: { name: 'Liam Carter', position: 'Site supervisor' }, mobile: '0491 571 804', purchased: day(-150), warrantyEnds: day(580), status: 'In use', notes: '' },
+    { id: 'sample-006', sample: true, type: 'Phone', make: 'Apple iPhone 15', assetTag: 'IT-006', serial: 'IMEI 359812447019937', sampleAssignee: { name: 'Sophie Kim', position: 'Project coordinator' }, mobile: '0491 572 549', purchased: day(-330), warrantyEnds: day(22), status: 'In use', notes: '' },
+    { id: 'sample-007', sample: true, type: 'Phone', make: 'Samsung Galaxy XCover6 Pro', assetTag: 'IT-007', serial: 'IMEI 351046228861734', sampleAssignee: null, mobile: '', purchased: day(-900), warrantyEnds: day(-170), status: 'Spare', notes: 'Spare for new starters. Wiped and reset.' },
+    { id: 'sample-008', sample: true, type: 'Drone', make: 'DJI Matrice 350 RTK', assetTag: 'IT-008', serial: '1ZNBJ7Q00C0093', sampleAssignee: { name: 'Josh Whitfield', position: 'Survey technician' }, mobile: '', purchased: day(-260), warrantyEnds: day(105), status: 'In repair', notes: 'Gimbal fault — with the DJI repair centre.' },
+    { id: 'sample-009', sample: true, type: 'Site internet', make: 'Starlink Standard kit', assetTag: 'IT-009', serial: 'KIT-4F2290A1', sampleAssignee: null, mobile: '', purchased: day(-120), warrantyEnds: day(245), status: 'In use', notes: 'Lives in the site shed on the Granville job.' }
+  ];
+  const showingSampleDevices = () => !AD.store.all('tech_devices').length;
+  const sampleDevice = (id) => (showingSampleDevices() ? SAMPLE_DEVICES().find((d) => d.id === id) || null : null);
+
+  AD.devices = { DEVICE_TYPES, DEVICE_STATUSES, IT_TONE, devicesFor, sampleDevice };
 
   /** Add / edit a device. Pass null to add; `preset` pre-fills a new one
    *  (e.g. { employeeId } when adding from an employee's profile). */
@@ -473,15 +495,18 @@ AD.views = AD.views || {};
       route: 'technology-register', title: 'Technology register', noun: 'device',
       table: 'tech_devices', setupFile: 'supabase/create-tech-devices.sql',
       // assignee (the person's name) is added so search finds devices by who has them.
-      rows: () => AD.store.all('tech_devices')
-        .map((d) => Object.assign({}, d, { type: d.type || 'Other', assignee: (employeeById(d.employeeId) || {}).name || '' }))
+      // Until the first real device exists, the sample devices stand in.
+      rows: () => (showingSampleDevices() ? SAMPLE_DEVICES() : AD.store.all('tech_devices'))
+        .map((d) => Object.assign({}, d, { type: d.type || 'Other', assignee: (employeeById(d.employeeId) || d.sampleAssignee || {}).name || '' }))
         .sort((a, b) => String(a.make).localeCompare(String(b.make))),
+      sample: showingSampleDevices,
+      sampleNote: () => `<b>Sample devices.</b> These are made up to show how the technology register — and each device’s profile — will look. They’re not saved anywhere and disappear as soon as you add your first real device.${!AD.store.available('tech_devices') ? ' To start adding your own, run <code>supabase/create-tech-devices.sql</code> in the Supabase SQL Editor.' : ''}`,
       groupOf: (r) => r.type, groupOrder: DEVICE_TYPES,
       search: ['make', 'type', 'assetTag', 'serial', 'assignee', 'mobile', 'status', 'notes'],
       filters: [
         groupFilter('All device types', (r) => r.type, DEVICE_TYPES),
         { label: 'Any status', options: (rows) => DEVICE_STATUSES.filter((s) => rows.some((r) => r.status === s)), match: (r, v) => r.status === v },
-        { label: 'Assigned or not', options: () => [['yes', 'Assigned to someone'], ['no', 'Unassigned']], match: (r, v) => (v === 'yes') === !!employeeById(r.employeeId) }
+        { label: 'Assigned or not', options: () => [['yes', 'Assigned to someone'], ['no', 'Unassigned']], match: (r, v) => (v === 'yes') === !!r.assignee }
       ],
       summary: (rows) => {
         if (!rows.length) return 'No devices recorded yet';
@@ -499,7 +524,7 @@ AD.views = AD.views || {};
       cols: [
         { head: 'Device', width: 240, cell: (r) => `<a class="id" href="#/device/${encodeURIComponent(r.id)}">${esc(r.make)}</a><span class="t2">${esc([r.assetTag, r.status === 'Retired' ? 'Retired' : ''].filter(Boolean).join(' · ') || r.type)}</span>` },
         { head: 'Serial / IMEI', width: 190, cls: 'col-opt', cell: (r) => or(r.serial) },
-        { head: 'Assigned to', width: 230, cell: (r) => assigneeCell(employeeById(r.employeeId)) },
+        { head: 'Assigned to', width: 230, cell: (r) => (r.sampleAssignee ? sampleAssigneeCell(r.sampleAssignee) : assigneeCell(employeeById(r.employeeId))) },
         { head: 'Mobile number', width: 140, cls: 'col-opt nowrap', cell: (r) => or(r.mobile) },
         { head: 'Purchased', width: 110, cls: 'col-opt col-wide nowrap', cell: (r) => fmtDate(r.purchased) },
         { head: 'Warranty', width: 150, cls: 'col-opt', cell: (r) => (r.warrantyEnds ? dueCell(String(r.warrantyEnds).slice(0, 10), { soon: WARRANTY_SOON_DAYS, past: (n) => `Ended ${n}d ago`, future: 'Ends in' }) : AD.ui.dash) },
@@ -521,7 +546,8 @@ AD.views = AD.views || {};
       const needle = q.trim().toLowerCase();
       const list = all.filter((r) => reg.filters.every((f, i) => !picks[i] || f.match(r, picks[i]))
         && (!needle || haystack(r).includes(needle)));
-      const cols = reg.cols.concat(reg.edit ? [{ head: '', cls: 'col-action', cell: (r) => `<button class="btn btn-sm btn-ghost" data-edit="${esc(r.id)}">${AD.icons.edit} Edit</button>` }] : []);
+      // Sample rows are read-only, so they get no Edit button.
+      const cols = reg.cols.concat(reg.edit ? [{ head: '', cls: 'col-action', cell: (r) => (r.sample ? '' : `<button class="btn btn-sm btn-ghost" data-edit="${esc(r.id)}">${AD.icons.edit} Edit</button>`) }] : []);
       const colspan = cols.length;
       const rowHtml = (r) => `<tr${reg.href ? ` class="row-link" data-href="${esc(reg.href(r))}" title="Open ${esc(r.name || r.make || r.id)}"` : ''}>${cols.map((c) => `<td class="${c.cls || ''}">${c.cell(r)}</td>`).join('')}</tr>`;
       let body;
@@ -556,8 +582,11 @@ AD.views = AD.views || {};
       // Drop a filter choice that no longer exists (e.g. its last row was removed).
       const optValue = (o) => (Array.isArray(o) ? o[0] : o); // options may be plain values or [value, label]
       picks = reg.filters.map((f, i) => (picks[i] && opts[i].some((o) => optValue(o) === picks[i]) ? picks[i] : ''));
-      const note = reg.sample
-        ? `<div class="sample-note">${I.alert}<div><b>Sample data.</b> These rows are made up for a fictional company, ${esc(COMPANY)}, so you can see how this register will look. Nothing here is saved, and your fleet data isn’t touched.</div></div>`
+      // `sample` is true for an all-sample register, or a function for one that
+      // shows sample rows only until real data exists.
+      const isSample = typeof reg.sample === 'function' ? reg.sample() : !!reg.sample;
+      const note = isSample
+        ? `<div class="sample-note">${I.alert}<div>${reg.sampleNote ? reg.sampleNote() : `<b>Sample data.</b> These rows are made up for a fictional company, ${esc(COMPANY)}, so you can see how this register will look. Nothing here is saved, and your fleet data isn’t touched.`}</div></div>`
         : missing()
           ? `<div class="sample-note">${I.alert}<div><b>Not set up yet.</b> The table for this register hasn’t been created in Supabase. Run <code>${esc(reg.setupFile)}</code> in the Supabase SQL Editor, then refresh.</div></div>`
           : '';

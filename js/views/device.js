@@ -44,6 +44,7 @@ AD.views.device = (function () {
   // ------------------------------------------------------------- photo
   function photoBox(d) {
     const icon = I[TYPE_ICON[d.type] || 'monitor'] || I.monitor;
+    if (d.sample) return `<div class="emp-avatar dev-photo" aria-hidden="true"><span class="dev-photo-icon">${icon}</span></div>`;
     return `<div class="emp-avatar dev-photo is-drop${d.photo ? ' has-photo' : ''}" id="dev-photo" role="button" tabindex="0"
         title="${d.photo ? 'Drop a new photo or click to change it' : 'Drop a photo or click to add one'}" aria-label="${d.photo ? 'Change' : 'Add'} device photo">
       ${d.photo ? `<img src="${esc(d.photo)}" alt="">` : `<span class="dev-photo-icon">${icon}</span>`}
@@ -91,9 +92,12 @@ AD.views.device = (function () {
   // -------------------------------------------------------------- page
   function draw() {
     const el = root;
-    const d = AD.store.get('tech_devices', devId);
+    // A real device, or one of the read-only sample devices the register shows
+    // until the first real one is added.
+    const d = AD.store.get('tech_devices', devId) || (AD.devices && AD.devices.sampleDevice(devId));
+    const sample = !!(d && d.sample);
     const back = `<nav class="crumbs" aria-label="Breadcrumb"><a href="#/technology-register">Technology register</a>${I.chevR}<span aria-current="page">${esc((d && d.make) || 'Device')}</span></nav>`;
-    if (!AD.store.available('tech_devices')) {
+    if (!d && !AD.store.available('tech_devices')) {
       el.innerHTML = `${back}<p class="empty">The technology register hasn’t been set up yet. Run <code>supabase/create-tech-devices.sql</code> in the Supabase SQL Editor, then refresh.</p>`;
       return;
     }
@@ -102,11 +106,14 @@ AD.views.device = (function () {
       return;
     }
     const tone = (AD.devices && AD.devices.IT_TONE[d.status]) || 'grey';
-    const emp = d.employeeId ? AD.store.get('employees', d.employeeId) : null;
-    const team = emp && AD.employees ? AD.employees.teamOf(emp) : '';
+    // Sample devices carry a made-up person (no profile, no contact details).
+    const emp = sample ? d.sampleAssignee : (d.employeeId ? AD.store.get('employees', d.employeeId) : null);
+    const team = emp && !sample && AD.employees ? AD.employees.teamOf(emp) : '';
     const w = warranty(day10(d.warrantyEnds));
     const telHref = emp && emp.mobile ? 'tel:' + emp.mobile.replace(/[^\d+]/g, '') : '';
-    const empLink = emp ? `<a href="#/employee/${encodeURIComponent(emp.id)}">${esc(emp.name)}</a>` : '<span class="muted">Unassigned</span>';
+    const empLink = !emp ? '<span class="muted">Unassigned</span>'
+      : sample ? esc(emp.name)
+      : `<a href="#/employee/${encodeURIComponent(emp.id)}">${esc(emp.name)}</a>`;
     const notRec = '<span class="muted">Not recorded</span>';
 
     const details = [
@@ -122,6 +129,7 @@ AD.views.device = (function () {
 
     el.innerHTML = `
       ${back}
+      ${sample ? `<div class="sample-note">${I.alert}<div><b>Sample device.</b> Made up to show how a device profile looks — it isn’t saved anywhere, can’t be edited, and disappears once you add your first real device to the technology register.</div></div>` : ''}
       <header class="veh-hero emp-hero">
         ${photoBox(d)}
         <div class="veh-ident">
@@ -135,7 +143,7 @@ AD.views.device = (function () {
           <div><dt>Warranty</dt><dd>${w.html}${w.flag ? ` ${w.flag}` : ''}</dd></div>
         </dl>
         <div class="veh-actions">
-          <button class="btn btn-primary" data-edit-dev>${I.edit} Edit device</button>
+          ${sample ? '' : `<button class="btn btn-primary" data-edit-dev>${I.edit} Edit device</button>`}
         </div>
       </header>
 
@@ -145,8 +153,13 @@ AD.views.device = (function () {
           <dl class="emp-details">${details.map(([dt, dd]) => `<div><dt>${esc(dt)}</dt><dd>${dd}</dd></div>`).join('')}</dl>
         </section>
         <section class="section">
-          ${sectionHead({ title: 'Assigned to', level: 3, actions: `<button type="button" class="btn btn-ghost btn-sm" data-reassign>${I.edit} ${emp ? 'Reassign' : 'Assign'}</button>` })}
-          ${emp
+          ${sectionHead({ title: 'Assigned to', level: 3, actions: sample ? '' : `<button type="button" class="btn btn-ghost btn-sm" data-reassign>${I.edit} ${emp ? 'Reassign' : 'Assign'}</button>` })}
+          ${emp && sample
+            ? `<div class="dev-person is-sample">
+                <span class="emp-thumb" aria-hidden="true">${esc(initials(emp.name))}</span>
+                <span class="dev-person-text"><span class="id">${esc(emp.name)}</span><span class="t2">${esc(emp.position || '')}</span></span>
+              </div>`
+            : emp
             ? `<div class="dev-person" data-emp="${esc(emp.id)}" title="Open ${esc(emp.name)}’s profile">
                 <span class="emp-thumb" aria-hidden="true">${emp.photo ? `<img src="${esc(emp.photo)}" alt="">` : esc(initials(emp.name))}</span>
                 <span class="dev-person-text">
@@ -165,6 +178,7 @@ AD.views.device = (function () {
         </section>
       </div>`;
 
+    if (sample) return; // read-only: nothing to wire up
     const openForm = () => AD.deviceForm(d, (saved) => (saved ? draw() : AD.go('technology-register')));
     el.querySelector('[data-edit-dev]').onclick = openForm;
     el.querySelector('[data-reassign]').onclick = openForm;
@@ -174,7 +188,7 @@ AD.views.device = (function () {
   }
 
   return {
-    title: (arg) => ((AD.store.get('tech_devices', arg) || {}).make) || 'Device',
+    title: (arg) => ((AD.store.get('tech_devices', arg) || (AD.devices && AD.devices.sampleDevice(arg)) || {}).make) || 'Device',
     render(el, params, arg) { root = el; devId = arg || ''; draw(); },
     refresh: () => root && draw(),
     destroy: () => { root = null; }
