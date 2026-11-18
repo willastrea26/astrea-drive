@@ -18,7 +18,7 @@
 --   Dashboard > Integrations > Cron  (or Database > Cron Jobs)
 --   > Create a new job
 --     Name:     netstar-odometer-sync
---     Schedule: 0 16 * * *        (daily ~2-3am Sydney; exact hour doesn't matter)
+--     Schedule: 0 2 * * *         (daily ~1pm Sydney — after Netstar refreshes, see below)
 --     Type:     Supabase Edge Function  ->  netstar
 --     Method:   POST
 --     Body:     {"action":"sync-odometers"}
@@ -42,7 +42,10 @@ where exists (select 1 from cron.job where jobname = 'netstar-odometer-sync');
 
 select cron.schedule(
   'netstar-odometer-sync',
-  '0 16 * * *',  -- 16:00 UTC ≈ 2-3am Australia/Sydney (DST drifts an hour; fine here)
+  '0 2 * * *',   -- 02:00 UTC = 1pm AEDT / 12pm AEST. Netstar's "yesterday odometer"
+                 -- only refreshes late morning (seen between ~10:10 and 11:33), so an
+                 -- early-morning run can't see the new figure; at ~1pm it can, and the
+                 -- day's driving is added the same day. (Was 0 16 * * * — 2-3am.)
   $$
   select net.http_post(
     url                   := 'https://ysczookfayziqsnegzjc.supabase.co/functions/v1/netstar',
