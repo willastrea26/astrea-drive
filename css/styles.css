@@ -3103,10 +3103,28 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 /* Same header grid as the vehicle profile, with an initials badge in place of the photo. */
 .emp-hero { grid-template-columns: 96px auto minmax(0, 1fr) auto; }
 .emp-avatar {
-  width: 96px; height: 96px; border-radius: 50%; display: grid; place-items: center;
+  position: relative; width: 96px; height: 96px; border-radius: 50%; display: grid; place-items: center; overflow: visible;
   background: var(--mint-tint, rgba(121, 226, 195, .14)); border: 1px solid var(--rule);
   color: var(--mint, var(--ink)); font-family: var(--font-display); font-size: 32px; font-weight: 700; letter-spacing: .02em;
 }
+.emp-avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; display: block; }
+/* Drop-a-photo affordance: camera prompt on hover / drag-over */
+.emp-avatar.is-drop { cursor: pointer; transition: box-shadow .15s, border-color .15s; }
+.emp-avatar.is-drop:hover, .emp-avatar.is-drop:focus-visible, .emp-avatar.is-over { border-color: var(--mint); box-shadow: 0 0 0 3px var(--mint-tint); outline: none; }
+.emp-avatar.is-over { border-style: dashed; }
+.emp-avatar-cta {
+  position: absolute; inset: 0; border-radius: 50%; display: grid; place-content: center; justify-items: center; gap: 2px;
+  background: rgba(8, 20, 32, .62); color: #fff; font-family: var(--font-body, inherit); font-size: 11.5px; font-weight: 600; letter-spacing: 0;
+  opacity: 0; transition: opacity .15s; pointer-events: none;
+}
+.emp-avatar-cta .ico { width: 18px; height: 18px; }
+.emp-avatar.is-drop:hover .emp-avatar-cta, .emp-avatar.is-drop:focus-visible .emp-avatar-cta, .emp-avatar.is-over .emp-avatar-cta { opacity: 1; }
+.emp-photo-clear {
+  position: absolute; top: 0; right: 0; width: 24px; height: 24px; border-radius: 50%; border: 0; cursor: pointer;
+  display: grid; place-items: center; background: rgba(8, 20, 32, .85); color: #fff; opacity: 0; transition: opacity .15s; z-index: 1;
+}
+.emp-photo-clear .ico { width: 12px; height: 12px; }
+.emp-avatar:hover .emp-photo-clear, .emp-photo-clear:focus-visible { opacity: 1; }
 .emp-details { margin: 0; }
 .emp-details > div { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--rule); }
 .emp-details dt { color: var(--muted); font-size: 14px; }
@@ -3124,4 +3142,31 @@ h1, h2, h3 { letter-spacing: -0.02em; }
   .emp-hero { grid-template-columns: minmax(0, 1fr); }
   .emp-avatar { width: 72px; height: 72px; font-size: 24px; }
   .emp-details > div { grid-template-columns: 120px minmax(0, 1fr); }
+}
+/* Documents box on the employee profile */
+.emp-drop {
+  display: grid; justify-items: center; gap: 4px; padding: 22px 18px; text-align: center; cursor: pointer;
+  border: 2px dashed var(--rule-strong); border-radius: var(--r-lg); background: var(--paper);
+  transition: border-color .15s, background .15s;
+}
+.emp-drop > .ico { width: 24px; height: 24px; color: var(--faint); }
+.emp-drop:hover, .emp-drop:focus-visible, .emp-drop.is-over { border-color: var(--mint); background: var(--mint-tint); outline: none; }
+.emp-drop.is-over { border-style: solid; }
+.emp-drop.is-busy { cursor: progress; border-style: solid; }
+.emp-drop-main { color: var(--ink-2); font-size: 14.5px; }
+.emp-drop-main b { color: var(--ink); }
+.emp-drop-sub { color: var(--muted); font-size: 12.5px; }
+.emp-doc-list { list-style: none; margin: 12px 0 0; padding: 0; }
+.emp-doc-list li {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: center;
+  padding: 10px 2px; border-bottom: 1px solid var(--rule);
+}
+.emp-doc-name { min-width: 0; }
+.emp-doc-name b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.emp-doc-name .t2 { display: block; color: var(--muted); font-size: 13px; margin-top: 1px; }
+.emp-doc-actions { display: flex; gap: 4px; align-items: center; }
+.emp-doc-del:hover { color: var(--red); }
+@media (max-width: 720px) {
+  .emp-doc-list li { grid-template-columns: auto minmax(0, 1fr); }
+  .emp-doc-actions { grid-column: 2; }
 }

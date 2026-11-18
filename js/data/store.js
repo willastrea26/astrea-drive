@@ -69,7 +69,7 @@ AD.store = (function () {
     const rollingSince = new Date(Date.now() - 40 * 86400000).toISOString().slice(0, 10);
     const yearSince = new Date().getFullYear() + '-01-01';
     const dailySince = rollingSince < yearSince ? rollingSince : yearSince;
-    const [results, readings, workHours, tripStats, workDaily, fuel, vehicleCosts, syncLog, employees] = await Promise.all([
+    const [results, readings, workHours, tripStats, workDaily, fuel, vehicleCosts, syncLog, employees, employeeDocs] = await Promise.all([
       Promise.all(TABLES.map(query)),
       loadOptional('odometer_readings', (q) => q.gte('readDate', since)),
       loadOptional('vehicle_work_hours', (q) => q),
@@ -84,7 +84,9 @@ AD.store = (function () {
       // GPS sync run history (dashboard's "Telematic inputs") — most recent first.
       loadOptional('sync_log', (q) => q.order('ranAt', { ascending: false }).limit(100)),
       // Employee register — optional until create-employees.sql is run.
-      loadOptional('employees', (q) => q.order('name'))
+      loadOptional('employees', (q) => q.order('name')),
+      // Employee personal documents — optional until create-employee-documents.sql is run.
+      loadOptional('employee_documents', (q) => q.order('uploadedAt', { ascending: false }))
     ]);
     const next = {};
     results.forEach((r, i) => {
@@ -99,6 +101,7 @@ AD.store = (function () {
     next.vehicle_costs = vehicleCosts;
     next.sync_log = syncLog;
     next.employees = employees;
+    next.employee_documents = employeeDocs;
     db = next;
     emit('*');
   }
@@ -275,5 +278,38 @@ AD.store = (function () {
     await update('vehicles', vehicleId, { photos });
   }
 
-  return { load, all, get, available: (table) => !unavailable.has(table), insert, update, remove, log, on, uid, importFuel, uploadDocument, signDocumentUrl, removeDocument, renameDocumentCategory, reorderDocuments, uploadVehiclePhoto, removeVehiclePhoto };
+  /** Upload one of an employee's personal documents into the private bucket
+   *  (employees/<id>/…) and record it. If the record can't be saved, the file
+   *  is deleted again so nothing is left orphaned in storage. */
+  async function uploadEmployeeDocument(file, employeeId) {
+    const path = `employees/${employeeId}/${uid('doc')}-${safeName(file.name)}`;
+    const up = await sb().storage.from(BUCKET).upload(path, file, { contentType: file.type || 'application/octet-stream', upsert: false });
+    if (up.error) throw up.error;
+    let who = '';
+    try { const { data } = await sb().auth.getUser(); who = (data && data.user && data.user.email) || ''; } catch (e) { /* leave blank */ }
+    const rec = {
+      employeeId, name: file.name, storagePath: path, contentType: file.type || 'application/octet-stream',
+      sizeBytes: file.size || 0, uploadedAt: new Date().toISOString(), uploadedBy: who
+    };
+    try {
+      const saved = await insert('employee_documents', rec, 'edoc');
+      // Newest first, matching the load order.
+      db.employee_documents = [saved].concat(db.employee_documents.filter((d) => d.id !== saved.id));
+      return saved;
+    } catch (dbErr) {
+      try { await sb().storage.from(BUCKET).remove([path]); } catch (e) { /* best effort */ }
+      throw dbErr;
+    }
+  }
+
+  /** Delete an employee document: the file first, then its record. */
+  async function removeEmployeeDocument(doc) {
+    if (doc.storagePath) {
+      const { error } = await sb().storage.from(BUCKET).remove([doc.storagePath]);
+      if (error && error.statusCode !== '404' && error.statusCode !== 404) throw error;
+    }
+    return remove('employee_documents', doc.id);
+  }
+
+  return { load, all, get, available: (table) => !unavailable.has(table), insert, update, remove, log, on, uid, importFuel, uploadDocument, signDocumentUrl, removeDocument, renameDocumentCategory, reorderDocuments, uploadVehiclePhoto, removeVehiclePhoto, uploadEmployeeDocument, removeEmployeeDocument };
 })();

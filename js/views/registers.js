@@ -122,9 +122,13 @@ AD.views = AD.views || {};
         });
         const removeBtn = el.querySelector('[data-remove]');
         if (removeBtn) removeBtn.onclick = async () => {
-          const ok = await confirm({ title: `Remove ${e.name}?`, message: 'This permanently deletes their record from the employee register. It can’t be undone.', confirmText: 'Remove', danger: true });
+          const docs = AD.store.all('employee_documents').filter((d) => d.employeeId === e.id);
+          const docNote = docs.length ? ` and their ${docs.length} stored document${docs.length === 1 ? '' : 's'}` : '';
+          const ok = await confirm({ title: `Remove ${e.name}?`, message: `This permanently deletes their record from the employee register${docNote}. It can’t be undone.`, confirmText: 'Remove', danger: true });
           if (!ok) return;
           try {
+            // Files first, so personal documents never outlive the record.
+            for (const d of docs) await AD.store.removeEmployeeDocument(d);
             await AD.store.remove('employees', e.id);
             await AD.store.log(`${e.name} removed from the employee register`);
             toast(`${e.name} removed`);
