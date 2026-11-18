@@ -21,9 +21,22 @@
 --   increase can be measured.
 --
 --   * first reading  -> baseline recorded, mileage unchanged
---   * GPS rose since the last day -> add the increase, mark GPS-verified
---   * no rise / already synced today -> mark GPS-verified, mileage unchanged
+--   * GPS higher than any reading already counted -> add the increase,
+--     mark GPS-verified (whenever a sync sees it — any time of day)
+--   * no rise -> mark GPS-verified, mileage unchanged
+--   * a jump of more than 5,000 km in one go (e.g. a tracker moved between
+--     trucks) -> recorded as the new reading but NOT added; flagged 'suspect'
 --   * zero / missing readings and unmatched regos -> reported as skipped
+--
+-- Fixed 19 Nov 2026: this used to add distance only on the FIRST sync of
+-- each day (compared with the previous day's stored reading), while later
+-- syncs overwrote the stored reading without adding anything. Netstar's
+-- "yesterday odometer" refreshes at an unpredictable time each morning, so
+-- when the first sync ran before that refresh it added 0, and the refreshed
+-- (higher) reading was then stored by a later sync and never counted. Now
+-- the comparison is against the highest reading ever counted for the vehicle
+-- (a high-water mark), so each kilometre is added exactly once no matter
+-- when, or how often, the sync runs.
 -- =====================================================================
 
 create or replace function public.sync_odometers_from_telematics(readings jsonb)
@@ -37,8 +50,8 @@ declare
   v_vehicle     record;
   v_prev        integer;
   v_today       date := (now() at time zone 'Australia/Sydney')::date;
-  v_today_seen  boolean;
   v_delta       integer;
+  v_max_jump    constant integer := 5000;  -- bigger single jumps aren't trusted
   v_verified    integer := 0;
   v_updated     integer := 0;
   v_added       bigint  := 0;
@@ -68,28 +81,32 @@ begin
       continue;
     end if;
 
-    -- Previous raw GPS reading (before today) and whether today is already
-    -- recorded — the "today" guard keeps a repeated sync from double-counting.
-    select km into v_prev
+    -- High-water mark: the highest GPS reading already counted for this
+    -- vehicle, on any day (including earlier today). Only the part of a
+    -- reading above it is new distance, so repeated syncs can't double-count
+    -- and a late Netstar refresh can't be missed.
+    select max(km) into v_prev
     from public.odometer_readings
-    where "vehicleId" = v_vehicle.id and "readDate" < v_today
-    order by "readDate" desc limit 1;
-    select exists (select 1 from public.odometer_readings
-      where "vehicleId" = v_vehicle.id and "readDate" = v_today) into v_today_seen;
+    where "vehicleId" = v_vehicle.id;
 
-    -- Store today's raw GPS reading.
+    -- Store today's raw GPS reading (never lowering it within the day).
     insert into public.odometer_readings (id, "vehicleId", km, "readDate", at)
     values (
       'odr-' || substr(replace(gen_random_uuid()::text, '-', ''), 1, 12),
       v_vehicle.id, r.km, v_today, v_now
     )
-    on conflict ("vehicleId", "readDate") do update set km = excluded.km, at = excluded.at;
+    on conflict ("vehicleId", "readDate") do update
+      set km = greatest(public.odometer_readings.km, excluded.km), at = excluded.at;
 
     if v_prev is null then
       -- First GPS reading for this vehicle: set the baseline, leave mileage.
       v_results := v_results || jsonb_build_array(jsonb_build_object('rego', r.rego, 'status', 'baseline', 'gpsKm', r.km));
-    elsif (not v_today_seen) and r.km > v_prev then
-      -- GPS rose since the last day — add that distance to the saved odometer.
+    elsif r.km - v_prev > v_max_jump then
+      -- Implausible jump (tracker swapped, reset or bad data): take it as the
+      -- new reading so later increases count from here, but don't add it.
+      v_results := v_results || jsonb_build_array(jsonb_build_object('rego', r.rego, 'status', 'suspect', 'gpsKm', r.km, 'jumpKm', r.km - v_prev));
+    elsif r.km > v_prev then
+      -- GPS rose above everything already counted — add the new distance.
       v_delta := r.km - v_prev;
       update public.vehicles
         set odometer = coalesce(odometer, 0) + v_delta,
@@ -100,7 +117,7 @@ begin
       v_added := v_added + v_delta;
       v_results := v_results || jsonb_build_array(jsonb_build_object('rego', r.rego, 'status', 'accumulated', 'addedKm', v_delta, 'savedKm', coalesce(v_vehicle.odometer, 0) + v_delta));
     else
-      -- Already synced today, or no increase: confirm GPS-verified, no change.
+      -- No increase over what's already counted: confirm GPS-verified, no change.
       update public.vehicles
         set "odometerSource" = 'telematics',
             "odometerSyncedAt" = v_now
