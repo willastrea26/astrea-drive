@@ -3082,3 +3082,13 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 .fi-no-fuel summary { cursor: pointer; color: var(--body, #b4cadd); }
 .fi-no-fuel summary:hover { color: var(--ink, #eef5fb); }
 .fi-no-fuel p { margin: 8px 0 0; }
+
+/* ============ Registers (employee / equipment / technology) ============ */
+.reg-table td { vertical-align: middle; }
+.sample-note {
+  display: flex; align-items: flex-start; gap: 10px; margin: 0 0 16px; padding: 11px 14px;
+  border: 1px solid var(--rule); border-left: 3px solid var(--amber); border-radius: var(--r);
+  background: var(--paper); color: var(--ink-2); font-size: 14px; line-height: 1.45;
+}
+.sample-note .ico { flex: none; width: 17px; height: 17px; margin-top: 1px; color: var(--amber); }
+.sample-note b { color: var(--ink); }
