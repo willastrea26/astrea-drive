@@ -21,7 +21,12 @@ AD.views = AD.views || {};
     { route: 'cost-sheet', label: 'Cost sheet', icon: I.receipt },
     { group: 'Vac trucks' },
     { route: 'calendar', label: 'Calendar', icon: I.calendar },
-    { route: 'tracker', label: 'Tracker', icon: I.map }
+    { route: 'tracker', label: 'Tracker', icon: I.map },
+    { group: 'Registers' },
+    { route: 'fleet', label: 'Fleet register', icon: I.truck },
+    { route: 'employee-register', label: 'Employee register', icon: I.users },
+    { route: 'equipment-register', label: 'General equipment register', icon: I.box },
+    { route: 'technology-register', label: 'Technology register', icon: I.monitor }
   ];
 
   let current = null; // { name, view, params }
