@@ -46,14 +46,14 @@ AD.views = AD.views || {};
   // out from their position (TEAM_RULES, first match wins) unless the Edit
   // form sets it explicitly — so new starters land in the right group with
   // no extra data entry, and anyone who doesn't fit the rule can be moved.
-  const TEAMS = ['Management', 'Surveying', 'Locating', 'Vac trucks', 'Civil', 'Engineering & design', 'Workshop', 'Office'];
+  const TEAMS = ['Management', 'Surveying', 'Locating', 'Vac trucks', 'Civil', 'Design & drafting', 'Workshop', 'Office'];
   const TEAM_RULES = [
     [/managing director|operations manager/i, 'Management'],
     [/survey|spatial/i, 'Surveying'],
     [/\blocat/i, 'Locating'], // word start, so "Resource Allocator" isn't a locator
     [/vac truck/i, 'Vac trucks'],
-    [/civil|labourer|dilapidation|pipe ?layer|plant operator|excavator/i, 'Civil'],
-    [/engineer|draft|revit|design/i, 'Engineering & design'],
+    [/civil|engineer|labourer|dilapidation|pipe ?layer|plant operator|excavator/i, 'Civil'],
+    [/draft|revit|design|\bcad\b/i, 'Design & drafting'],
     [/mechanic|workshop|fitter/i, 'Workshop'],
     [/account|assistant|coordinator|bid|business development|allocator|admin|reception|payroll|office/i, 'Office']
   ];
