@@ -287,8 +287,8 @@ table.data { width: 100%; border-collapse: collapse; font-size: 14.5px; }
 .fleet-cell-id, .fleet-cell-rego, .fleet-cell-status { white-space: nowrap; }
 .fleet-cell-model { overflow: hidden; text-overflow: ellipsis; }
 .fleet-attn-cols {
-  display: grid; grid-template-columns: 120px 115px minmax(90px, 1fr);
-  align-items: center; column-gap: 10px; width: 100%;
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: center; column-gap: 20px; width: 100%;
 }
 .fleet-attn-cols > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 1200px) {
@@ -2292,9 +2292,9 @@ input::placeholder { color: var(--faint); }
    across every row — the eye scans straight down one column at a time. */
 .attn-row {
   display: grid;
-  grid-template-columns: 120px 115px minmax(90px, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   align-items: center;
-  column-gap: 10px; row-gap: 4px;
+  column-gap: 20px; row-gap: 4px;
 }
 .attn-chip {
   display: inline-flex; align-items: center; gap: 5px;
