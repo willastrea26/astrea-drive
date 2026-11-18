@@ -336,7 +336,7 @@ AD.views.employee = (function () {
         actions: `<button type="button" class="btn btn-ghost btn-sm" data-add-dev>${I.plus} Add device</button>`
       })}
       ${devs.length
-        ? `<ul class="emp-dev-list">${devs.map((d) => `<li data-dev="${esc(d.id)}" title="Edit ${esc(d.make)}">
+        ? `<ul class="emp-dev-list">${devs.map((d) => `<li data-dev="${esc(d.id)}" title="Open ${esc(d.make)}">
             <span class="emp-dev-name"><b>${esc(d.make)}</b><span class="t2">${esc([d.type, d.assetTag, d.mobile].filter(Boolean).join(' · '))}</span></span>
             ${badge(d.status, AD.devices.IT_TONE[d.status] || 'grey')}
           </li>`).join('')}</ul>`
@@ -438,8 +438,8 @@ AD.views.employee = (function () {
     el.querySelector('[data-edit-emp]').onclick = openForm;
     el.querySelector('[data-edit-lic]').onclick = openForm;
     el.querySelectorAll('li[data-veh]').forEach((li) => li.addEventListener('click', () => AD.go('vehicle/' + li.dataset.veh)));
-    // Devices: click one to edit it; "Add device" opens a new one already assigned to this person.
-    el.querySelectorAll('li[data-dev]').forEach((li) => li.addEventListener('click', () => AD.deviceForm(AD.store.get('tech_devices', li.dataset.dev), () => draw())));
+    // Devices: click one to open its profile; "Add device" opens a new one already assigned to this person.
+    el.querySelectorAll('li[data-dev]').forEach((li) => li.addEventListener('click', () => AD.go('device/' + li.dataset.dev)));
     const addDev = el.querySelector('[data-add-dev]');
     if (addDev) addDev.onclick = () => AD.deviceForm(null, () => draw(), { employeeId: e.id });
     bindPhoto(el, e);

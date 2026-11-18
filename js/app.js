@@ -53,7 +53,7 @@ AD.views = AD.views || {};
   };
 
   function renderNav(active) {
-    const navRoute = active === 'vehicle' ? 'fleet' : active === 'employee' ? 'employee-register' : active;
+    const navRoute = active === 'vehicle' ? 'fleet' : active === 'employee' ? 'employee-register' : active === 'device' ? 'technology-register' : active;
     $('#nav').innerHTML = NAV.map((n) => {
       if (n.group) return `<div class="nav-label">${esc(n.group)}</div>`;
       const c = n.count ? n.count() : 0;

@@ -493,10 +493,11 @@ AD.views = AD.views || {};
           + (soon ? ` · <span class="flag flag-amber">${soon} warrant${soon === 1 ? 'y' : 'ies'} ending within ${WARRANTY_SOON_DAYS} days</span>` : '')
           + (ended ? ` · ${ended} out of warranty` : '');
       },
-      add: { label: 'Add device', open: (done) => AD.deviceForm(null, done) },
+      add: { label: 'Add device', open: (done) => AD.deviceForm(null, (saved) => (saved ? AD.go('device/' + saved.id) : done())) },
       edit: (r, done) => AD.deviceForm(r, done),
+      href: (r) => '#/device/' + encodeURIComponent(r.id),
       cols: [
-        { head: 'Device', width: 240, cell: (r) => `<span class="id">${esc(r.make)}</span><span class="t2">${esc([r.assetTag, r.status === 'Retired' ? 'Retired' : ''].filter(Boolean).join(' · ') || r.type)}</span>` },
+        { head: 'Device', width: 240, cell: (r) => `<a class="id" href="#/device/${encodeURIComponent(r.id)}">${esc(r.make)}</a><span class="t2">${esc([r.assetTag, r.status === 'Retired' ? 'Retired' : ''].filter(Boolean).join(' · ') || r.type)}</span>` },
         { head: 'Serial / IMEI', width: 190, cls: 'col-opt', cell: (r) => or(r.serial) },
         { head: 'Assigned to', width: 230, cell: (r) => assigneeCell(employeeById(r.employeeId)) },
         { head: 'Mobile number', width: 140, cls: 'col-opt nowrap', cell: (r) => or(r.mobile) },
@@ -522,7 +523,7 @@ AD.views = AD.views || {};
         && (!needle || haystack(r).includes(needle)));
       const cols = reg.cols.concat(reg.edit ? [{ head: '', cls: 'col-action', cell: (r) => `<button class="btn btn-sm btn-ghost" data-edit="${esc(r.id)}">${AD.icons.edit} Edit</button>` }] : []);
       const colspan = cols.length;
-      const rowHtml = (r) => `<tr${reg.href ? ` class="row-link" data-href="${esc(reg.href(r))}" title="Open ${esc(r.name || r.id)}"` : ''}>${cols.map((c) => `<td class="${c.cls || ''}">${c.cell(r)}</td>`).join('')}</tr>`;
+      const rowHtml = (r) => `<tr${reg.href ? ` class="row-link" data-href="${esc(reg.href(r))}" title="Open ${esc(r.name || r.make || r.id)}"` : ''}>${cols.map((c) => `<td class="${c.cls || ''}">${c.cell(r)}</td>`).join('')}</tr>`;
       let body;
       if (reg.groupOf) {
         const groups = reg.groupOrder.concat([...new Set(list.map(reg.groupOf))].filter((g) => !reg.groupOrder.includes(g)));

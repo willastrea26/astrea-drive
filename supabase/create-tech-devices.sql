@@ -25,6 +25,11 @@ create table if not exists public.tech_devices (
   notes            text not null default ''
 );
 
+-- Device photo for its profile page: a small JPEG stored on the row, like the
+-- vehicle and employee photos. Added after this file was first published —
+-- re-running the whole file is safe.
+alter table public.tech_devices add column if not exists photo text not null default '';
+
 create index if not exists tech_devices_employee on public.tech_devices ("employeeId");
 
 revoke all on table public.tech_devices from anon;

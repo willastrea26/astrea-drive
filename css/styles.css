@@ -3238,3 +3238,22 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 .emp-dev-name b { display: block; font-weight: 600; }
 .emp-dev-name .t2 { display: block; color: var(--muted); font-size: 13px; margin-top: 1px; }
 .empty-tidy .empty-hint { display: block; font-size: 13px; color: var(--faint, var(--muted)); margin-top: 2px; }
+/* Device profile: square photo box (reuses the employee photo drop styles) */
+.dev-photo { width: 160px; height: 160px; }
+.dev-photo-icon { display: grid; place-items: center; color: var(--mint, var(--ink)); opacity: .85; }
+.dev-photo-icon .ico { width: 56px; height: 56px; stroke-width: 1.4; }
+/* "Assigned to" person card */
+.dev-person {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 14px; align-items: center;
+  padding: 12px 14px; border: 1px solid var(--rule); border-radius: var(--r-lg); background: var(--paper); cursor: pointer;
+}
+.dev-person:hover { background: var(--hover); }
+.dev-person-text { min-width: 0; }
+.dev-person-text .t2 { display: block; color: var(--muted); font-size: 13px; margin-top: 2px; }
+.dev-person-actions { display: flex; gap: 6px; }
+.dev-notes { margin: 0; white-space: pre-wrap; color: var(--ink-2); line-height: 1.5; }
+@media (max-width: 720px) {
+  .dev-photo { width: 128px; height: 128px; }
+  .dev-person { grid-template-columns: auto minmax(0, 1fr); }
+  .dev-person-actions { grid-column: 2; }
+}
