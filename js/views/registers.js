@@ -6,10 +6,13 @@
  * (supabase/create-employees.sql), with add / edit / remove. Staff details
  * are never kept in this file or anywhere else in the repository.
  *
- * Equipment and technology registers: SAMPLE DATA ONLY, made-up rows for a
- * fictional Sydney civil / survey / locating company, so the layout can be
- * reviewed before their real columns are agreed. Nothing for these two is
- * read from or written to Supabase.
+ * Technology register: REAL data from the Supabase "tech_devices" table
+ * (supabase/create-tech-devices.sql). Devices are assigned to employees, and
+ * each employee's profile lists the devices they hold.
+ *
+ * Equipment register: SAMPLE DATA ONLY, made-up rows for a fictional Sydney
+ * civil / survey / locating company, so the layout can be reviewed before its
+ * real columns are agreed. Nothing for it is read from or written to Supabase.
  */
 AD.views = AD.views || {};
 
@@ -189,12 +192,19 @@ AD.views = AD.views || {};
         if (removeBtn) removeBtn.onclick = async () => {
           const docs = AD.store.all('employee_documents').filter((d) => d.employeeId === e.id);
           const docNote = docs.length ? ` and their ${docs.length} stored document${docs.length === 1 ? '' : 's'}` : '';
-          const ok = await confirm({ title: `Remove ${e.name}?`, message: `This permanently deletes their record from the employee register${docNote}. It can’t be undone.`, confirmText: 'Remove', danger: true });
+          // Offboarding check: devices still assigned to them need collecting.
+          const devs = AD.store.all('tech_devices').filter((d) => d.employeeId === e.id);
+          const devNote = devs.length
+            ? `<br><br><b>They still have ${devs.length} device${devs.length === 1 ? '' : 's'}:</b> ${devs.map((d) => esc(d.make)).join(', ')}. ${devs.length === 1 ? 'It' : 'They'}’ll become unassigned in the technology register — make sure ${devs.length === 1 ? 'it’s' : 'they’re'} collected.`
+            : '';
+          const ok = await confirm({ title: `Remove ${e.name}?`, message: `This permanently deletes their record from the employee register${docNote}. It can’t be undone.${devNote}`, confirmText: 'Remove', danger: true });
           if (!ok) return;
           try {
             // Files first, so personal documents never outlive the record.
             for (const d of docs) await AD.store.removeEmployeeDocument(d);
             await AD.store.remove('employees', e.id);
+            // The database unassigns their devices (on delete set null); mirror that locally.
+            devs.forEach((d) => { d.employeeId = null; });
             await AD.store.log(`${e.name} removed from the employee register`);
             toast(`${e.name} removed`);
           } catch (err) { toast('Could not remove employee: ' + err.message, 'error'); return; }
@@ -249,7 +259,7 @@ AD.views = AD.views || {};
     });
   };
 
-  // ============================================== sample data (equipment, tech)
+  // ===================================================== sample data (equipment)
   // All names, numbers and serials below are made up.
   const EQUIPMENT = () => [
     { id: 'SUR-01', name: 'GNSS rover', category: 'Surveying', make: 'Trimble R12i', serial: '6143R00217', location: 'Wetherill Park depot', assignedTo: 'Priya Nair', status: 'In service', nextInspection: day(74) },
@@ -264,20 +274,119 @@ AD.views = AD.views || {};
     { id: 'TRF-01', name: 'Variable message sign trailer', category: 'Traffic control', make: 'Solar VMS trailer', serial: 'VMS-0452', location: 'Site — Church St, Ryde', assignedTo: '', status: 'In service', nextInspection: day(96) }
   ];
 
-  const TECHNOLOGY = () => [
-    { id: 'IT-001', type: 'Laptop', make: 'Dell Latitude 5440', serial: 'DL5440-7H2KQ', assignedTo: 'Sophie Kim', phone: '', purchased: day(-410), warranty: day(320), status: 'In use' },
-    { id: 'IT-002', type: 'Laptop', make: 'Panasonic Toughbook 40', serial: 'TB40-1123987', assignedTo: 'Priya Nair', phone: '', purchased: day(-1010), warranty: day(-280), status: 'In use' },
-    { id: 'IT-003', type: 'Field controller', make: 'Trimble TSC7', serial: 'TSC7-55031', assignedTo: 'Josh Whitfield', phone: '', purchased: day(-640), warranty: day(90), status: 'In use' },
-    { id: 'IT-004', type: 'Tablet', make: 'Samsung Galaxy Tab Active5', serial: 'IMEI 356938110041221', assignedTo: 'Mia Tanaka', phone: '0491 571 491', purchased: day(-200), warranty: day(530), status: 'In use' },
-    { id: 'IT-005', type: 'Phone', make: 'Samsung Galaxy XCover7', serial: 'IMEI 352719331802465', assignedTo: 'Liam Carter', phone: '0491 571 804', purchased: day(-150), warranty: day(580), status: 'In use' },
-    { id: 'IT-006', type: 'Phone', make: 'Apple iPhone 15', serial: 'IMEI 359812447019937', assignedTo: 'Sophie Kim', phone: '0491 572 549', purchased: day(-330), warranty: day(22), status: 'In use' },
-    { id: 'IT-007', type: 'Phone', make: 'Samsung Galaxy XCover6 Pro', serial: 'IMEI 351046228861734', assignedTo: '', phone: '', purchased: day(-900), warranty: day(-170), status: 'Spare' },
-    { id: 'IT-008', type: 'Drone', make: 'DJI Matrice 350 RTK', serial: '1ZNBJ7Q00C0093', assignedTo: 'Josh Whitfield', phone: '', purchased: day(-260), warranty: day(105), status: 'In repair' },
-    { id: 'IT-009', type: 'Site internet', make: 'Starlink Standard kit', serial: 'KIT-4F2290A1', assignedTo: '', phone: '', purchased: day(-120), warranty: day(245), status: 'In use' }
-  ];
-
   const EQ_TONE = { 'In service': 'aqua', 'Under repair': 'violet', 'Out of service': 'red' };
+
+  // ======================================================== technology register
+  // Real data from the Supabase "tech_devices" table (create-tech-devices.sql).
+  // Each device can be assigned to an employee from the Employee register, so
+  // it also shows on that person's profile (employee.js).
+  const DEVICE_TYPES = ['Laptop', 'Desktop', 'Phone', 'Tablet', 'Field controller', 'Drone', 'Site internet', 'Other'];
+  const DEVICE_STATUSES = ['In use', 'Spare', 'In repair', 'Retired'];
   const IT_TONE = { 'In use': 'blue', Spare: 'aqua', 'In repair': 'violet', Retired: 'grey muted' };
+  const WARRANTY_SOON_DAYS = 30;
+  const employeeById = (id) => (id ? AD.store.get('employees', id) : null);
+  const devicesFor = (employeeId) => AD.store.all('tech_devices').filter((d) => d.employeeId === employeeId);
+  /** Small photo/initials + name linking to the person's profile. */
+  const assigneeCell = (emp) => emp
+    ? `<span class="emp-cell">${empThumb(emp).replace('class="emp-thumb"', 'class="emp-thumb emp-thumb-sm"')}<span class="emp-cell-text"><a href="#/employee/${encodeURIComponent(emp.id)}">${esc(emp.name)}</a>${emp.position ? `<span class="t2">${esc(emp.position)}</span>` : ''}</span></span>`
+    : '<span class="muted">Unassigned</span>';
+  AD.devices = { DEVICE_TYPES, DEVICE_STATUSES, IT_TONE, devicesFor };
+
+  /** Add / edit a device. Pass null to add; `preset` pre-fills a new one
+   *  (e.g. { employeeId } when adding from an employee's profile). */
+  AD.deviceForm = function (dev, onSaved, preset = {}) {
+    const { formData, showErrors, modal, toast, confirm, options } = AD.ui;
+    const isNew = !dev;
+    const d0 = dev || Object.assign({ type: 'Laptop', make: '', assetTag: '', serial: '', employeeId: '', mobile: '', purchased: '', warrantyEnds: '', status: 'Spare', notes: '' }, preset);
+    if (isNew && d0.employeeId) d0.status = 'In use';
+    const dateVal = (v) => (v ? esc(String(v).slice(0, 10)) : '');
+    const people = AD.store.all('employees').slice().sort((a, b) => String(a.name).localeCompare(String(b.name)))
+      .map((p) => [p.id, p.position ? `${p.name} — ${p.position}` : p.name]);
+
+    modal({
+      title: isNew ? 'Add device' : `Edit ${d0.make || 'device'}`,
+      wide: true,
+      body: `
+        <form class="form-grid" novalidate>
+          <div class="form-section-title full"><b>Device</b><span>What it is and how to identify it</span></div>
+          <div class="field"><label>Device type</label><select name="type">${options(DEVICE_TYPES, d0.type || 'Other')}</select></div>
+          <div class="field"><label>Make / model <span class="req">*</span></label><input type="text" name="make" value="${esc(d0.make)}" placeholder="e.g. Apple iPhone 15"></div>
+          <div class="field"><label>Asset tag</label><input type="text" name="assetTag" value="${esc(d0.assetTag)}" placeholder="e.g. IT-004">
+            <div class="help">Your own label for it, if you use one.</div></div>
+          <div class="field"><label>Serial number / IMEI</label><input type="text" name="serial" value="${esc(d0.serial)}"></div>
+          <div class="form-section-title full"><b>Who has it</b><span>Assign it to someone from the Employee register</span></div>
+          <div class="field"><label>Assigned to</label><select name="employeeId">${options(people, d0.employeeId || '', 'Unassigned')}</select></div>
+          <div class="field"><label>Status</label><select name="status">${options(DEVICE_STATUSES, d0.status || 'In use')}</select></div>
+          <div class="field"><label>Mobile number</label><input type="text" name="mobile" value="${esc(d0.mobile)}" inputmode="tel" placeholder="For phones and tablets with a SIM"></div>
+          <div class="form-section-title full"><b>Purchase & warranty</b><span>Warranties ending within ${WARRANTY_SOON_DAYS} days are flagged</span></div>
+          <div class="field"><label>Purchase date</label><input type="date" name="purchased" value="${dateVal(d0.purchased)}"></div>
+          <div class="field"><label>Warranty ends</label><input type="date" name="warrantyEnds" value="${dateVal(d0.warrantyEnds)}"></div>
+          <div class="field full"><label>Notes</label><textarea name="notes" rows="2">${esc(d0.notes)}</textarea></div>
+        </form>
+        <div class="form-actions">
+          ${isNew ? '' : '<button class="btn btn-danger-ghost" data-remove type="button" style="margin-right:auto">Remove</button>'}
+          <button class="btn btn-ghost" data-close type="button">Cancel</button>
+          <button class="btn btn-primary" data-save type="button">${isNew ? 'Add device' : 'Save changes'}</button>
+        </div>`,
+      onMount(el, close) {
+        const form = el.querySelector('form');
+        el.querySelector('[data-close]').onclick = close;
+        // Assigning someone a spare device puts it in use; unassigning an in-use one makes it spare.
+        form.elements.employeeId.addEventListener('change', () => {
+          const st = form.elements.status;
+          if (form.elements.employeeId.value && st.value === 'Spare') st.value = 'In use';
+          else if (!form.elements.employeeId.value && st.value === 'In use') st.value = 'Spare';
+        });
+        const removeBtn = el.querySelector('[data-remove]');
+        if (removeBtn) removeBtn.onclick = async () => {
+          const ok = await confirm({ title: `Remove ${d0.make || 'this device'}?`, message: 'This permanently deletes it from the technology register. It can’t be undone. (To keep a record of an old device, set its status to Retired instead.)', confirmText: 'Remove', danger: true });
+          if (!ok) return;
+          try {
+            await AD.store.remove('tech_devices', d0.id);
+            await AD.store.log(`${d0.make || 'Device'} removed from the technology register`);
+            toast(`${d0.make || 'Device'} removed`);
+          } catch (err) { toast('Could not remove device: ' + err.message, 'error'); return; }
+          close();
+          onSaved && onSaved(null);
+        };
+        const saveBtn = el.querySelector('[data-save]');
+        saveBtn.onclick = async () => {
+          const d = formData(form);
+          const err = {};
+          if (!d.make) err.make = 'Make / model is required.';
+          if (!showErrors(form, err)) return;
+          const rec = {
+            type: d.type, make: d.make, assetTag: d.assetTag, serial: d.serial,
+            employeeId: d.employeeId || null, status: d.status, mobile: d.mobile,
+            purchased: d.purchased || null, warrantyEnds: d.warrantyEnds || null, notes: d.notes
+          };
+          const who = employeeById(rec.employeeId);
+          saveBtn.disabled = true;
+          let saved;
+          try {
+            if (isNew) {
+              saved = await AD.store.insert('tech_devices', rec, 'dev');
+              await AD.store.log(`${rec.make} added to the technology register${who ? ` (assigned to ${who.name})` : ''}`);
+              toast(`${rec.make} added`);
+            } else {
+              saved = await AD.store.update('tech_devices', d0.id, rec);
+              const moved = (d0.employeeId || null) !== rec.employeeId;
+              await AD.store.log(moved
+                ? `${rec.make} ${who ? `assigned to ${who.name}` : 'unassigned'}`
+                : `${rec.make} device details updated`);
+              toast(`${rec.make} saved`);
+            }
+          } catch (err2) {
+            saveBtn.disabled = false;
+            toast('Could not save device: ' + err2.message, 'error');
+            return;
+          }
+          close();
+          onSaved && onSaved(saved);
+        };
+      }
+    });
+  };
 
   /** Filter dropdown matching the register's grouping (only groups in use). */
   const groupFilter = (label, groupOf, order) => ({
@@ -361,21 +470,38 @@ AD.views = AD.views || {};
       ]
     },
     {
-      route: 'technology-register', title: 'Technology register', noun: 'device', sample: true,
-      rows: TECHNOLOGY, groupOf: (r) => r.type, groupOrder: ['Laptop', 'Tablet', 'Phone', 'Field controller', 'Drone', 'Site internet'],
-      search: ['id', 'type', 'make', 'serial', 'assignedTo', 'phone'],
-      filters: [groupFilter('All device types', (r) => r.type, ['Laptop', 'Tablet', 'Phone', 'Field controller', 'Drone', 'Site internet'])],
+      route: 'technology-register', title: 'Technology register', noun: 'device',
+      table: 'tech_devices', setupFile: 'supabase/create-tech-devices.sql',
+      // assignee (the person's name) is added so search finds devices by who has them.
+      rows: () => AD.store.all('tech_devices')
+        .map((d) => Object.assign({}, d, { type: d.type || 'Other', assignee: (employeeById(d.employeeId) || {}).name || '' }))
+        .sort((a, b) => String(a.make).localeCompare(String(b.make))),
+      groupOf: (r) => r.type, groupOrder: DEVICE_TYPES,
+      search: ['make', 'type', 'assetTag', 'serial', 'assignee', 'mobile', 'status', 'notes'],
+      filters: [
+        groupFilter('All device types', (r) => r.type, DEVICE_TYPES),
+        { label: 'Any status', options: (rows) => DEVICE_STATUSES.filter((s) => rows.some((r) => r.status === s)), match: (r, v) => r.status === v },
+        { label: 'Assigned or not', options: () => [['yes', 'Assigned to someone'], ['no', 'Unassigned']], match: (r, v) => (v === 'yes') === !!employeeById(r.employeeId) }
+      ],
       summary: (rows) => {
-        const w = rows.filter((r) => dueState(r.warranty) === 'soon').length;
-        return `${rows.length} devices · ${rows.filter((r) => r.status === 'In use').length} in use${w ? ` · <span class="flag flag-amber">${w} warrant${w === 1 ? 'y' : 'ies'} ending within 30 days</span>` : ''}`;
+        if (!rows.length) return 'No devices recorded yet';
+        const inUse = rows.filter((r) => r.status === 'In use').length;
+        const spare = rows.filter((r) => r.status === 'Spare').length;
+        const ended = rows.filter((r) => r.status !== 'Retired' && dueState(r.warrantyEnds, WARRANTY_SOON_DAYS) === 'overdue').length;
+        const soon = rows.filter((r) => r.status !== 'Retired' && dueState(r.warrantyEnds, WARRANTY_SOON_DAYS) === 'soon').length;
+        return `${plural(rows.length, 'device')} · ${inUse} in use · ${spare} spare`
+          + (soon ? ` · <span class="flag flag-amber">${soon} warrant${soon === 1 ? 'y' : 'ies'} ending within ${WARRANTY_SOON_DAYS} days</span>` : '')
+          + (ended ? ` · ${ended} out of warranty` : '');
       },
+      add: { label: 'Add device', open: (done) => AD.deviceForm(null, done) },
+      edit: (r, done) => AD.deviceForm(r, done),
       cols: [
-        { head: 'Device', width: 240, cell: (r) => `<span class="id">${esc(r.make)}</span><span class="t2">${esc(r.id)}</span>` },
-        { head: 'Serial / IMEI', width: 200, cls: 'col-opt', cell: (r) => esc(r.serial) },
-        { head: 'Assigned to', width: 160, cell: (r) => r.assignedTo ? esc(r.assignedTo) : '<span class="muted">Unassigned</span>' },
-        { head: 'Mobile number', width: 140, cls: 'col-opt nowrap', cell: (r) => or(r.phone) },
-        { head: 'Purchased', width: 110, cls: 'col-opt col-wide nowrap', cell: (r) => AD.time.fmtKey(r.purchased) },
-        { head: 'Warranty', width: 150, cls: 'col-opt', cell: (r) => dueCell(r.warranty, { past: (n) => `Ended ${n}d ago`, future: 'Ends in' }) },
+        { head: 'Device', width: 240, cell: (r) => `<span class="id">${esc(r.make)}</span><span class="t2">${esc([r.assetTag, r.status === 'Retired' ? 'Retired' : ''].filter(Boolean).join(' · ') || r.type)}</span>` },
+        { head: 'Serial / IMEI', width: 190, cls: 'col-opt', cell: (r) => or(r.serial) },
+        { head: 'Assigned to', width: 230, cell: (r) => assigneeCell(employeeById(r.employeeId)) },
+        { head: 'Mobile number', width: 140, cls: 'col-opt nowrap', cell: (r) => or(r.mobile) },
+        { head: 'Purchased', width: 110, cls: 'col-opt col-wide nowrap', cell: (r) => fmtDate(r.purchased) },
+        { head: 'Warranty', width: 150, cls: 'col-opt', cell: (r) => (r.warrantyEnds ? dueCell(String(r.warrantyEnds).slice(0, 10), { soon: WARRANTY_SOON_DAYS, past: (n) => `Ended ${n}d ago`, future: 'Ends in' }) : AD.ui.dash) },
         { head: 'Status', width: 120, cell: (r) => AD.ui.badge(r.status, IT_TONE[r.status] || 'grey') }
       ]
     }

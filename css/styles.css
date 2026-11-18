@@ -3223,3 +3223,18 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 
 /* Dashboard: staff licence alerts (photo/initials in the first column) */
 .rows li.emp-attn { grid-template-columns: 54px minmax(0, 1fr) auto; align-items: center; }
+
+/* ============ Technology register ============ */
+.emp-thumb.emp-thumb-sm { width: 32px; height: 32px; font-size: 11.5px; }
+/* Employee profile: devices they hold */
+.emp-devices { margin-top: 34px; }
+.emp-dev-list { list-style: none; margin: 0; padding: 0; }
+.emp-dev-list li {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center;
+  padding: 10px 6px; margin: 0 -6px; border-bottom: 1px solid var(--rule); border-radius: var(--r); cursor: pointer;
+}
+.emp-dev-list li:hover { background: var(--hover); }
+.emp-dev-name { min-width: 0; }
+.emp-dev-name b { display: block; font-weight: 600; }
+.emp-dev-name .t2 { display: block; color: var(--muted); font-size: 13px; margin-top: 1px; }
+.empty-tidy .empty-hint { display: block; font-size: 13px; color: var(--faint, var(--muted)); margin-top: 2px; }

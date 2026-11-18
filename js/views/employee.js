@@ -322,6 +322,28 @@ AD.views.employee = (function () {
     }));
   }
 
+  // ----------------------------------------------------------- devices
+  /** Devices this person holds, from the Technology register. Hidden until
+   *  that register's table exists (create-tech-devices.sql). */
+  function devicesSection(e) {
+    if (!AD.devices || !AD.store.available('tech_devices')) return '';
+    const devs = AD.devices.devicesFor(e.id).slice().sort((a, b) => String(a.type).localeCompare(String(b.type)) || String(a.make).localeCompare(String(b.make)));
+    return `<div class="emp-devices">
+      ${sectionHead({
+        title: 'Devices',
+        meta: devs.length ? `${devs.length} from the technology register` : '',
+        level: 3,
+        actions: `<button type="button" class="btn btn-ghost btn-sm" data-add-dev>${I.plus} Add device</button>`
+      })}
+      ${devs.length
+        ? `<ul class="emp-dev-list">${devs.map((d) => `<li data-dev="${esc(d.id)}" title="Edit ${esc(d.make)}">
+            <span class="emp-dev-name"><b>${esc(d.make)}</b><span class="t2">${esc([d.type, d.assetTag, d.mobile].filter(Boolean).join(' · '))}</span></span>
+            ${badge(d.status, AD.devices.IT_TONE[d.status] || 'grey')}
+          </li>`).join('')}</ul>`
+        : `<div class="empty-tidy">${I.monitor}No devices assigned to ${esc(firstName(e.name))}.</div>`}
+    </div>`;
+  }
+
   // -------------------------------------------------------------- page
   function draw() {
     const el = root;
@@ -381,6 +403,7 @@ AD.views.employee = (function () {
         <section class="section">
           ${sectionHead({ title: 'Contact & personal details', level: 3 })}
           <dl class="emp-details">${details.map(([dt, dd]) => `<div><dt>${esc(dt)}</dt><dd>${dd}</dd></div>`).join('')}</dl>
+          ${devicesSection(e)}
         </section>
         <section class="section">
           ${sectionHead({
@@ -405,7 +428,7 @@ AD.views.employee = (function () {
                 <span class="what">${esc(v.make || '')} ${esc((v.model || '').split(' — ')[0])}<span class="t2">${esc(v.rego || '')} · ${esc(v.type || '')}</span></span>
                 <span class="when">${vehicleBadge(v.status)}</span>
               </li></ul>${i < 3 ? liveBox(v) : ''}`).join('')
-            : `<div class="empty-tidy">${I.truck}No fleet vehicles are assigned to ${esc(firstName(e.name))}.<span class="t2">&nbsp;Set them as the Assigned driver on a vehicle in the Fleet register to see it here, with its live location.</span></div>`}
+            : `<div class="empty-tidy">${I.truck}<span>No fleet vehicles are assigned to ${esc(firstName(e.name))}.<span class="empty-hint">Set them as the Assigned driver on a vehicle in the Fleet register to see it here, with its live location.</span></span></div>`}
         </section>
       </div>
 
@@ -415,6 +438,10 @@ AD.views.employee = (function () {
     el.querySelector('[data-edit-emp]').onclick = openForm;
     el.querySelector('[data-edit-lic]').onclick = openForm;
     el.querySelectorAll('li[data-veh]').forEach((li) => li.addEventListener('click', () => AD.go('vehicle/' + li.dataset.veh)));
+    // Devices: click one to edit it; "Add device" opens a new one already assigned to this person.
+    el.querySelectorAll('li[data-dev]').forEach((li) => li.addEventListener('click', () => AD.deviceForm(AD.store.get('tech_devices', li.dataset.dev), () => draw())));
+    const addDev = el.querySelector('[data-add-dev]');
+    if (addDev) addDev.onclick = () => AD.deviceForm(null, () => draw(), { employeeId: e.id });
     bindPhoto(el, e);
     bindDocs(el, e);
     bindLive(el);

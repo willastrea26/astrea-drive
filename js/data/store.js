@@ -69,7 +69,7 @@ AD.store = (function () {
     const rollingSince = new Date(Date.now() - 40 * 86400000).toISOString().slice(0, 10);
     const yearSince = new Date().getFullYear() + '-01-01';
     const dailySince = rollingSince < yearSince ? rollingSince : yearSince;
-    const [results, readings, workHours, tripStats, workDaily, fuel, vehicleCosts, syncLog, employees, employeeDocs] = await Promise.all([
+    const [results, readings, workHours, tripStats, workDaily, fuel, vehicleCosts, syncLog, employees, employeeDocs, techDevices] = await Promise.all([
       Promise.all(TABLES.map(query)),
       loadOptional('odometer_readings', (q) => q.gte('readDate', since)),
       loadOptional('vehicle_work_hours', (q) => q),
@@ -86,7 +86,9 @@ AD.store = (function () {
       // Employee register — optional until create-employees.sql is run.
       loadOptional('employees', (q) => q.order('name')),
       // Employee personal documents — optional until create-employee-documents.sql is run.
-      loadOptional('employee_documents', (q) => q.order('uploadedAt', { ascending: false }))
+      loadOptional('employee_documents', (q) => q.order('uploadedAt', { ascending: false })),
+      // Technology register — optional until create-tech-devices.sql is run.
+      loadOptional('tech_devices', (q) => q)
     ]);
     const next = {};
     results.forEach((r, i) => {
@@ -102,6 +104,7 @@ AD.store = (function () {
     next.sync_log = syncLog;
     next.employees = employees;
     next.employee_documents = employeeDocs;
+    next.tech_devices = techDevices;
     db = next;
     emit('*');
   }
