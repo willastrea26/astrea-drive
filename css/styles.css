@@ -269,6 +269,31 @@ table.data { width: 100%; border-collapse: collapse; font-size: 14.5px; }
 .fleet-thumb-icon { display: flex; align-items: center; justify-content: center; width: 100%; aspect-ratio: 2 / 1; color: var(--muted); }
 .fleet-thumb-icon .ico { width: 20px; height: 20px; }
 @media (max-width: 640px) { .col-thumb { display: none; } }
+.fleet-table { table-layout: fixed; }
+.fleet-table-owned { min-width: 1450px; }
+.fleet-table-hired { min-width: 1180px; }
+.fleet-table .fleet-col-thumb { width: 64px; }
+.fleet-table .fleet-col-id { width: 88px; }
+.fleet-table .fleet-col-rego { width: 120px; }
+.fleet-table .fleet-col-model { width: 257px; }
+.fleet-table .fleet-col-type { width: 123px; }
+.fleet-table .fleet-col-driver { width: 225px; }
+.fleet-table .fleet-col-odo { width: 145px; }
+.fleet-table .fleet-col-status { width: 160px; }
+.fleet-table .fleet-col-action { width: 80px; }
+.fleet-table .fleet-col-company { width: 190px; }
+.fleet-table .fleet-col-docs { width: 150px; }
+.fleet-table .fleet-col-attn { width: auto; }
+.fleet-cell-id, .fleet-cell-rego, .fleet-cell-status { white-space: nowrap; }
+.fleet-cell-model { overflow: hidden; text-overflow: ellipsis; }
+.fleet-attn-cols {
+  display: grid; grid-template-columns: 120px 115px minmax(90px, 1fr);
+  align-items: center; column-gap: 10px; width: 100%;
+}
+.fleet-attn-cols > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 1200px) {
+  table.fleet-table { table-layout: auto; min-width: 0; }
+}
 .data .t2 { display: block; font-size: 13.5px; color: var(--muted); margin-top: 1px; }
 .site-name { color: var(--ink-2); font-weight: 600; }
 .data .num { text-align: right; white-space: nowrap; }
@@ -2267,7 +2292,7 @@ input::placeholder { color: var(--faint); }
    across every row — the eye scans straight down one column at a time. */
 .attn-row {
   display: grid;
-  grid-template-columns: 120px 115px auto;
+  grid-template-columns: 120px 115px minmax(90px, 1fr);
   align-items: center;
   column-gap: 10px; row-gap: 4px;
 }

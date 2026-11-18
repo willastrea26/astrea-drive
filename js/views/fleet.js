@@ -207,6 +207,18 @@ AD.views.fleet = (function () {
     const actions = isHired
       ? `<button class="btn btn-secondary" id="import-docs">${I.file} Import documents from folder</button><button class="btn btn-primary" id="add-veh">${I.plus} Add hired vehicle</button>`
       : `<button class="btn btn-secondary" id="sync-odo">${I.gauge} Sync GPS data</button><button class="btn btn-link" id="sync-full" title="Pulls the full 30-day history instead of just the last few days — takes up to about a minute">${I.gauge} Full 30-day resync</button><button class="btn btn-primary" id="add-veh">${I.plus} Add vehicle</button>`;
+    const tableColumns = isHired
+      ? `<colgroup>
+          <col class="fleet-col-thumb"><col class="fleet-col-id"><col class="fleet-col-rego col-opt">
+          <col class="fleet-col-model"><col class="fleet-col-type col-opt col-wide"><col class="fleet-col-company col-opt col-wide">
+          <col class="fleet-col-status"><col class="fleet-col-docs col-opt"><col class="fleet-col-action col-opt col-wide">
+        </colgroup>`
+      : `<colgroup>
+          <col class="fleet-col-thumb"><col class="fleet-col-id"><col class="fleet-col-rego col-opt">
+          <col class="fleet-col-model"><col class="fleet-col-type col-opt col-wide"><col class="fleet-col-driver col-opt">
+          <col class="fleet-col-odo col-opt col-wide"><col class="fleet-col-status"><col class="fleet-col-attn col-opt">
+          <col class="fleet-col-action col-opt col-wide">
+        </colgroup>`;
 
     root.innerHTML = `
       ${AD.ui.pageHeader({ title, sub, actions })}
@@ -223,18 +235,19 @@ AD.views.fleet = (function () {
           : `<select id="f-flag" aria-label="Alerts">${options([['service', 'Service due or overdue'], ['rego', 'Rego due or expired'], ['defects', 'Has open defects']], st.flag, 'Any alerts')}</select>`}
         <span class="count" id="f-count"></span>
       </div>
-      <div class="table-wrap"><table class="data">
+      <div class="table-wrap"><table class="data fleet-table ${isHired ? 'fleet-table-hired' : 'fleet-table-owned'}">
+        ${tableColumns}
         <thead><tr>
           <th class="col-thumb" aria-hidden="true"></th>
-          <th style="width:110px">Fleet ID</th>
-          <th class="col-opt">Registration</th>
+          <th class="fleet-head-id">Fleet ID</th>
+          <th class="col-opt fleet-head-rego">Registration</th>
           <th class="col-model">Make / model</th>
           <th class="col-opt col-wide">Type</th>
           ${isHired
             ? '<th class="col-opt col-wide">Hire company</th>'
             : '<th class="col-opt">Assigned driver</th><th class="num col-opt col-wide">Odometer</th>'}
           <th>Status</th>
-          ${isHired ? '<th class="col-opt" style="min-width:140px">Documents</th>' : '<th class="col-opt" style="min-width:360px">Needs attention</th>'}
+          ${isHired ? '<th class="col-opt">Documents</th>' : `<th class="col-opt fleet-attn-head"><span class="sr-only">Needs attention:</span><span class="fleet-attn-cols" aria-hidden="true"><span>Service</span><span>Registration</span><span>Defects</span></span></th>`}
           <th class="col-action col-opt col-wide"><span class="hide">Actions</span></th>
         </tr></thead>
         <tbody id="f-body"></tbody>
@@ -422,18 +435,18 @@ AD.views.fleet = (function () {
       const docCount = allDocs.filter((d) => d.vehicleId === v.id && d.storagePath).length;
       return `<tr class="row-link" data-id="${v.id}" title="Open ${v.id}">
         <td class="col-thumb"><span class="fleet-thumb">${art}</span></td>
-        <td><a class="id" href="#/vehicle/${v.id}">${esc(v.id)}</a><span class="t2 only-mobile">${esc(v.rego)}</span></td>
-        <td class="col-opt">${esc(v.rego)}</td>
-        <td>${esc(v.make || '')} ${esc(model || '')}<span class="t2">${esc(v.year || '')}${spec ? ' · ' + esc(spec) : ''}</span>${alerts ? `<span class="t2 only-mobile">${alerts}</span>` : ''}</td>
+        <td class="fleet-cell-id"><a class="id" href="#/vehicle/${v.id}">${esc(v.id)}</a><span class="t2 only-mobile">${esc(v.rego)}</span></td>
+        <td class="col-opt fleet-cell-rego">${esc(v.rego)}</td>
+        <td class="fleet-cell-model">${esc(v.make || '')} ${esc(model || '')}<span class="t2">${esc(v.year || '')}${spec ? ' · ' + esc(spec) : ''}</span>${alerts ? `<span class="t2 only-mobile">${alerts}</span>` : ''}</td>
         <td class="col-opt col-wide">${esc(v.type)}</td>
         ${isHired
           ? `<td class="col-opt col-wide">${esc(v.hireCompany || '—')}</td>`
           : `<td class="col-opt">${v.driverId ? esc(L.driverName(v.driverId)) : '<span class="muted">Unassigned</span>'}</td>
              <td class="num col-opt col-wide">${L.fmtKm(v.odometer)}${v.odometerSource === 'telematics' ? `<span class="odo-src" title="From GPS${v.odometerSyncedAt ? ' · synced ' + new Date(v.odometerSyncedAt).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''}">GPS</span>` : ''}</td>`}
-        <td>${vehicleBadge(v.status)}</td>
+        <td class="fleet-cell-status">${vehicleBadge(v.status)}</td>
         ${isHired
           ? `<td class="col-opt">${docCount ? `<span class="flag flag-muted">${docCount} file${docCount === 1 ? '' : 's'}</span>` : '<span class="muted">None</span>'}</td>`
-          : `<td class="col-opt">${alerts || AD.ui.dash}</td>`}
+          : `<td class="col-opt col-attn">${alerts || AD.ui.dash}</td>`}
         <td class="col-action col-opt col-wide">
           <button class="btn btn-ghost btn-sm" data-edit="${v.id}" title="Edit ${esc(v.id)}" aria-label="Edit ${esc(v.id)}">${I.edit} Edit</button>
         </td></tr>`;
