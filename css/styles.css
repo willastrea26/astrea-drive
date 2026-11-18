@@ -3098,3 +3098,30 @@ h1, h2, h3 { letter-spacing: -0.02em; }
   background: rgba(255, 255, 255, .06); border: 1px solid var(--rule); color: var(--ink-2);
 }
 .sample-note code { font-size: 12.5px; padding: 1px 5px; border-radius: 4px; background: rgba(255, 255, 255, .07); }
+
+/* ============ Employee profile ============ */
+/* Same header grid as the vehicle profile, with an initials badge in place of the photo. */
+.emp-hero { grid-template-columns: 96px auto minmax(0, 1fr) auto; }
+.emp-avatar {
+  width: 96px; height: 96px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--mint-tint, rgba(121, 226, 195, .14)); border: 1px solid var(--rule);
+  color: var(--mint, var(--ink)); font-family: var(--font-display); font-size: 32px; font-weight: 700; letter-spacing: .02em;
+}
+.emp-details { margin: 0; }
+.emp-details > div { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--rule); }
+.emp-details dt { color: var(--muted); font-size: 14px; }
+.emp-details dd { margin: 0; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.emp-details dd .t2 { display: block; font-weight: 400; color: var(--muted); font-size: 13.5px; margin-top: 2px; }
+.emp-details dd .muted { color: var(--muted); font-weight: 400; }
+.emp-tags { gap: 6px; padding-top: 4px; }
+.emp-tags .reg-tag { font-size: 13.5px; padding: 3px 11px; }
+.section > .section-head ~ .section-head { margin-top: 34px; }
+.emp-vehicles li { grid-template-columns: 70px minmax(0, 1fr) auto; }
+@media (max-width: 1240px) {
+  .emp-hero { grid-template-columns: 96px minmax(0, 1fr); }
+}
+@media (max-width: 720px) {
+  .emp-hero { grid-template-columns: minmax(0, 1fr); }
+  .emp-avatar { width: 72px; height: 72px; font-size: 24px; }
+  .emp-details > div { grid-template-columns: 120px minmax(0, 1fr); }
+}

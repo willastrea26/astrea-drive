@@ -59,6 +59,8 @@ AD.views = AD.views || {};
   ];
   const teamFor = (position) => (TEAM_RULES.find(([re]) => re.test(position || '')) || [])[1] || '';
   const teamOf = (r) => r.team || teamFor(r.position) || 'Unassigned';
+  // Shared with the employee profile page (employee.js).
+  AD.employees = { TEAMS, teamFor, teamOf, listOf };
 
   /** Insert/update an employee; if the "team" column hasn't been added to the
    *  table yet, save everything else instead of failing. */
@@ -227,10 +229,11 @@ AD.views = AD.views || {};
         const noPhone = rows.filter((r) => !r.mobile).length;
         return `${rows.length} staff · ${withLic} with licences or tickets recorded${noPhone ? ` · ${noPhone} without a mobile number` : ''}`;
       },
-      add: { label: 'Add employee', open: (done) => AD.employeeForm(null, done) },
+      add: { label: 'Add employee', open: (done) => AD.employeeForm(null, (saved) => (saved ? AD.go('employee/' + saved.id) : done())) },
       edit: (r, done) => AD.employeeForm(r, done),
+      href: (r) => '#/employee/' + encodeURIComponent(r.id),
       cols: [
-        { head: 'Employee', width: 220, cell: (r) => `<span class="id">${esc(r.name)}</span><span class="t2">${or(r.position)}</span>` },
+        { head: 'Employee', width: 220, cell: (r) => `<a class="id" href="#/employee/${encodeURIComponent(r.id)}">${esc(r.name)}</a><span class="t2">${or(r.position)}</span>` },
         { head: 'Licences applied', width: 130, cls: 'col-opt col-wide', cell: (r) => or(r.licencesApplied) },
         { head: 'Contact', width: 230, cls: 'col-opt', cell: (r) => `${r.mobile ? `<span class="nowrap">${esc(r.mobile)}</span>` : '<span class="muted">No mobile</span>'}${r.email ? `<span class="t2"><a href="mailto:${esc(r.email)}">${esc(r.email)}</a></span>` : ''}` },
         { head: 'Date of birth', width: 115, cls: 'col-opt col-wide nowrap', cell: (r) => fmtDate(r.dateOfBirth) },
@@ -295,7 +298,7 @@ AD.views = AD.views || {};
         && (!needle || haystack(r).includes(needle)));
       const cols = reg.cols.concat(reg.edit ? [{ head: '', cls: 'col-action', cell: (r) => `<button class="btn btn-sm btn-ghost" data-edit="${esc(r.id)}">${AD.icons.edit} Edit</button>` }] : []);
       const colspan = cols.length;
-      const rowHtml = (r) => `<tr>${cols.map((c) => `<td class="${c.cls || ''}">${c.cell(r)}</td>`).join('')}</tr>`;
+      const rowHtml = (r) => `<tr${reg.href ? ` class="row-link" data-href="${esc(reg.href(r))}" title="Open ${esc(r.name || r.id)}"` : ''}>${cols.map((c) => `<td class="${c.cls || ''}">${c.cell(r)}</td>`).join('')}</tr>`;
       let body;
       if (reg.groupOf) {
         const groups = reg.groupOrder.concat([...new Set(list.map(reg.groupOf))].filter((g) => !reg.groupOrder.includes(g)));
@@ -313,6 +316,11 @@ AD.views = AD.views || {};
       root.querySelectorAll('[data-edit]').forEach((b) => {
         b.onclick = () => reg.edit(AD.store.get(reg.table, b.dataset.edit), () => draw());
       });
+      // Clicking anywhere on a row opens its profile (links and buttons keep their own action).
+      root.querySelectorAll('tr[data-href]').forEach((tr) => tr.addEventListener('click', (e) => {
+        if (e.target.closest('a, button')) return;
+        location.hash = tr.dataset.href;
+      }));
     }
 
     function draw() {
