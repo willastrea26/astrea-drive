@@ -3092,3 +3092,9 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 }
 .sample-note .ico { flex: none; width: 17px; height: 17px; margin-top: 1px; color: var(--amber); }
 .sample-note b { color: var(--ink); }
+.reg-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.reg-tag {
+  display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 12px; line-height: 1.5; white-space: nowrap;
+  background: rgba(255, 255, 255, .06); border: 1px solid var(--rule); color: var(--ink-2);
+}
+.sample-note code { font-size: 12.5px; padding: 1px 5px; border-radius: 4px; background: rgba(255, 255, 255, .07); }

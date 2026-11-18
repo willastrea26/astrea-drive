@@ -44,11 +44,17 @@ AD.store = (function () {
   // and tolerantly: the table may not exist yet on older databases, and a
   // missing table must not break the rest of the app's data load.
   const ODO_READING_DAYS = 45;
+  // Optional tables that failed to load (usually: migration not run yet),
+  // so a page can say "run the setup SQL" instead of failing on save.
+  const unavailable = new Set();
   async function loadOptional(table, build) {
     try {
       const { data, error } = await build(sb().from(table).select('*'));
-      return error ? [] : (data || []);
+      if (error) { unavailable.add(table); return []; }
+      unavailable.delete(table);
+      return data || [];
     } catch (e) {
+      unavailable.add(table);
       return [];
     }
   }
@@ -63,7 +69,7 @@ AD.store = (function () {
     const rollingSince = new Date(Date.now() - 40 * 86400000).toISOString().slice(0, 10);
     const yearSince = new Date().getFullYear() + '-01-01';
     const dailySince = rollingSince < yearSince ? rollingSince : yearSince;
-    const [results, readings, workHours, tripStats, workDaily, fuel, vehicleCosts, syncLog] = await Promise.all([
+    const [results, readings, workHours, tripStats, workDaily, fuel, vehicleCosts, syncLog, employees] = await Promise.all([
       Promise.all(TABLES.map(query)),
       loadOptional('odometer_readings', (q) => q.gte('readDate', since)),
       loadOptional('vehicle_work_hours', (q) => q),
@@ -76,7 +82,9 @@ AD.store = (function () {
       // as the table exists.
       loadOptional('vehicle_costs', (q) => q),
       // GPS sync run history (dashboard's "Telematic inputs") — most recent first.
-      loadOptional('sync_log', (q) => q.order('ranAt', { ascending: false }).limit(100))
+      loadOptional('sync_log', (q) => q.order('ranAt', { ascending: false }).limit(100)),
+      // Employee register — optional until create-employees.sql is run.
+      loadOptional('employees', (q) => q.order('name'))
     ]);
     const next = {};
     results.forEach((r, i) => {
@@ -90,6 +98,7 @@ AD.store = (function () {
     next.fuel_entries = fuel;
     next.vehicle_costs = vehicleCosts;
     next.sync_log = syncLog;
+    next.employees = employees;
     db = next;
     emit('*');
   }
@@ -112,7 +121,7 @@ AD.store = (function () {
   }
 
   function all(coll) { return db[coll] || []; }
-  function get(coll, id) { return db[coll].find((r) => r.id === id) || null; }
+  function get(coll, id) { return (db[coll] || []).find((r) => r.id === id) || null; }
 
   async function insert(coll, row, prefix) {
     const rec = Object.assign({ id: row.id || uid(prefix || coll.slice(0, 3)) }, row);
@@ -266,5 +275,5 @@ AD.store = (function () {
     await update('vehicles', vehicleId, { photos });
   }
 
-  return { load, all, get, insert, update, remove, log, on, uid, importFuel, uploadDocument, signDocumentUrl, removeDocument, renameDocumentCategory, reorderDocuments, uploadVehiclePhoto, removeVehiclePhoto };
+  return { load, all, get, available: (table) => !unavailable.has(table), insert, update, remove, log, on, uid, importFuel, uploadDocument, signDocumentUrl, removeDocument, renameDocumentCategory, reorderDocuments, uploadVehiclePhoto, removeVehiclePhoto };
 })();
