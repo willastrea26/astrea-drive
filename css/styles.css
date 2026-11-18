@@ -3183,3 +3183,43 @@ h1, h2, h3 { letter-spacing: -0.02em; }
   font-family: var(--font-display); font-size: 14px; font-weight: 700; letter-spacing: .02em;
 }
 .emp-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center 25%; }
+
+/* ============ Licence & ticket expiry ============ */
+/* Edit form: one row per licence — name, expiry date, remove */
+.lic-editor { display: grid; gap: 6px; }
+.lic-head, .lic-row { display: grid; grid-template-columns: minmax(0, 1fr) 170px 34px; gap: 8px; align-items: center; }
+.lic-head span { font-size: 13px; font-weight: 600; color: var(--muted); }
+.lic-row .lic-del { width: 34px; height: 34px; padding: 0; justify-content: center; color: var(--muted); }
+.lic-row .lic-del:hover { color: var(--red); }
+.lic-row .lic-del .ico { width: 14px; height: 14px; }
+.lic-add { justify-self: start; margin-top: 2px; }
+/* Register tags: expired / expiring licences stand out */
+.reg-tag-red { color: var(--red); border-color: currentColor; background: var(--red-tint); font-weight: 600; }
+.reg-tag-amber { color: var(--amber); border-color: currentColor; background: var(--amber-tint); font-weight: 600; }
+/* Profile: licence list with expiry dates */
+.emp-lic-list { list-style: none; margin: 0; padding: 0; }
+.emp-lic-list li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--rule); }
+.emp-lic-name { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.emp-lic-exp { display: flex; align-items: center; gap: 10px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.emp-lic-list li.is-red .emp-lic-name { color: var(--red); }
+.emp-lic-list li.is-amber .emp-lic-name { color: var(--amber); }
+
+/* Profile: live location of the assigned vehicle */
+.emp-veh-live { margin: 10px 0 18px; border: 1px solid var(--rule); border-radius: var(--r-lg); overflow: hidden; background: var(--paper); }
+.emp-veh-map-wrap { position: relative; height: 210px; }
+.emp-veh-map { position: absolute; inset: 0; }
+.emp-veh-loading { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 13.5px; z-index: 500; pointer-events: none; }
+.emp-veh-status { padding: 10px 14px 12px; border-top: 1px solid var(--rule); }
+.emp-veh-map-wrap + .emp-veh-status:empty { display: none; }
+.emp-veh-status:only-child { border-top: 0; }
+.emp-veh-where { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.emp-veh-status .t2 { display: block; color: var(--muted); font-size: 13px; margin-top: 4px; }
+.emp-veh-pin { background: none; border: 0; }
+.emp-veh-pin-inner { filter: drop-shadow(0 2px 4px rgba(0, 0, 0, .55)); }
+.emp-veh-pin-inner svg { display: block; width: 64px; height: auto; }
+.emp-veh-pin-inner.no-art { width: 34px; height: 34px; border-radius: 50%; background: var(--mint); color: #08222b; display: grid; place-items: center; }
+.emp-veh-pin-inner.no-art .ico { width: 18px; height: 18px; }
+.emp-vehicles + .emp-vehicles { margin-top: 8px; }
+
+/* Dashboard: staff licence alerts (photo/initials in the first column) */
+.rows li.emp-attn { grid-template-columns: 54px minmax(0, 1fr) auto; align-items: center; }

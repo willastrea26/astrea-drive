@@ -1,5 +1,5 @@
 -- ==========================================================================
--- Employee profile photos and personal documents
+-- Employee profile photos, licence expiry dates and personal documents
 -- Run ONCE in the Supabase SQL Editor, after create-employees.sql. Safe to re-run.
 --
 -- * Profile photo: a small JPEG stored on the employee's own row (like the
@@ -13,6 +13,11 @@
 BEGIN;
 
 alter table public.employees add column if not exists photo text not null default '';
+
+-- Licence & ticket expiry dates: { "<licence name>": "YYYY-MM-DD" }. A licence
+-- with no entry doesn't expire (e.g. White Card). Added after this file was
+-- first published — re-running the whole file is safe.
+alter table public.employees add column if not exists "licenceExpiries" jsonb not null default '{}'::jsonb;
 
 create table if not exists public.employee_documents (
   id              text primary key,

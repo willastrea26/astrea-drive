@@ -54,6 +54,128 @@ AD.views.employee = (function () {
     return AD.store.all('vehicles').filter((v) => driverIds.has(v.driverId)).sort((a, b) => a.id.localeCompare(b.id));
   }
 
+  // ------------------------------------------- live location of their vehicle
+  // Looks up ONE vehicle's GPS position: the tracker list once (to find this
+  // vehicle's device), then just that device's latest status. Two small calls,
+  // instead of the Tracker's whole-fleet load, and cached so opening profiles
+  // and the background refresh don't keep hitting Netstar's rate limit.
+  const POS_TTL = 2 * 60 * 1000;      // re-check a vehicle's position at most every 2 min
+  const DEV_TTL = 30 * 60 * 1000;     // the tracker list barely changes
+  const STALE_HOURS = 24;             // no report for this long = offline (same as the Tracker)
+  const LIVE_WORD = { moving: 'Moving', idling: 'Idling', parked: 'Parked', offline: 'Offline' };
+  const LIVE_TONE = { moving: 'green', idling: 'amber', parked: 'blue', offline: 'grey ring' };
+  let devices = null, devicesAt = 0, maps = [];
+  const posCache = new Map(), pending = new Map();
+
+  async function netstar(body) {
+    const { data, error } = await AD.sb.functions.invoke('netstar', { body });
+    if (error) throw error;
+    if (data && data.error) throw new Error(data.error);
+    return data || {};
+  }
+
+  async function deviceFor(v) {
+    if (!devices || Date.now() - devicesAt > DEV_TTL) {
+      devices = (await netstar({ action: 'vehicles' })).vehicles || [];
+      devicesAt = Date.now();
+    }
+    const A = AD.netstarAliases;
+    const want = new Set([A.normalise(v.rego), A.aliasForVehicle(v)].filter(Boolean));
+    return devices.find((d) => d.imei && (want.has(A.normalise(d.rego)) || want.has(A.fleetRegoForDevice(d.rego)))) || null;
+  }
+
+  /** { pos } with the latest status, { none } if the vehicle has no tracker, or { error }. */
+  function livePosition(v) {
+    const cached = posCache.get(v.id);
+    if (cached && Date.now() - cached.at < POS_TTL) return Promise.resolve(cached);
+    if (pending.has(v.id)) return pending.get(v.id);
+    const job = (async () => {
+      let out;
+      try {
+        const dev = await deviceFor(v);
+        out = dev
+          ? { at: Date.now(), pos: ((await netstar({ action: 'positions', imeis: [dev.imei] })).positions || [])[0] || null }
+          : { at: Date.now(), none: true };
+      } catch (e) {
+        out = { at: Date.now(), error: (e && e.message) || 'Could not reach the tracker service' };
+      }
+      posCache.set(v.id, out);
+      pending.delete(v.id);
+      return out;
+    })();
+    pending.set(v.id, job);
+    return job;
+  }
+
+  /** Netstar reports "dd-MM-yyyy HH:mm:ss" in Sydney time. */
+  function nsTime(s) {
+    const m = /^(\d{2})-(\d{2})-(\d{4})\s+(\d{2}):(\d{2}):(\d{2})/.exec(String(s || ''));
+    if (!m) return null;
+    const t = Date.parse(`${m[3]}-${m[2]}-${m[1]}T${m[4]}:${m[5]}:${m[6]}+11:00`);
+    return Number.isFinite(t) ? t : null;
+  }
+  function ago(ms) {
+    const mins = Math.max(0, Math.round((Date.now() - ms) / 60000));
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins} min ago`;
+    const h = Math.round(mins / 60);
+    return h < 48 ? `${h} h ago` : `${Math.round(h / 24)} days ago`;
+  }
+  function liveCat(p) {
+    const seen = nsTime(p.lastData);
+    if (seen != null && Date.now() - seen > STALE_HOURS * 3600000) return 'offline';
+    const on = String(p.ignition || '').toLowerCase() === 'on';
+    return on && (p.speed || 0) > 0 ? 'moving' : on ? 'idling' : 'parked';
+  }
+
+  const liveBox = (v) => `<div class="emp-veh-live" data-live="${esc(v.id)}">
+      <div class="emp-veh-map-wrap"><div class="emp-veh-map"></div><span class="emp-veh-loading">Finding ${esc(v.id)}…</span></div>
+      <div class="emp-veh-status"></div>
+    </div>`;
+
+  function destroyMaps() {
+    maps.forEach((m) => { try { m.remove(); } catch (e) { /* already gone */ } });
+    maps = [];
+  }
+
+  function paintLive(box, v, res) {
+    if (!box.isConnected) return; // the page moved on while we were waiting
+    const wrap = box.querySelector('.emp-veh-map-wrap');
+    const status = box.querySelector('.emp-veh-status');
+    const noMap = (html) => { wrap.remove(); status.innerHTML = html; };
+    if (res.error) return noMap(`<span class="flag flag-amber">Live location unavailable</span><span class="t2">${esc(res.error)}</span>`);
+    if (res.none) return noMap(`<span class="muted">${esc(v.id)} doesn’t have a GPS tracker linked, so its location isn’t available.</span>`);
+    const p = res.pos;
+    if (!p || p.lat == null || p.lng == null) return noMap(`<span class="muted">${esc(v.id)}’s tracker hasn’t reported a GPS fix yet.</span>`);
+
+    const cat = liveCat(p);
+    const seen = nsTime(p.lastData);
+    const where = [p.location, p.city].filter(Boolean).join(', ');
+    status.innerHTML = `<span class="emp-veh-where">${badge(LIVE_WORD[cat], LIVE_TONE[cat])}<b>${esc(where || 'Location found')}</b></span>
+      <span class="t2">${seen != null ? `Last report ${esc(ago(seen))}` : 'Last report time unknown'}${cat === 'moving' && p.speed ? ` · ${Math.round(p.speed)} km/h` : ''} ·
+        <a href="https://www.google.com/maps?q=${encodeURIComponent(p.lat + ',' + p.lng)}" target="_blank" rel="noopener">Open in Google Maps</a></span>`;
+    const loading = box.querySelector('.emp-veh-loading');
+    if (loading) loading.remove();
+
+    const map = AD.maps.create(box.querySelector('.emp-veh-map'), wrap, { style: 'dark', zoomControl: false, scrollWheelZoom: false });
+    if (!map) return; // AD.maps already explained (e.g. no internet for the map library)
+    maps.push(map);
+    map.setView([p.lat, p.lng], 15, { animate: false });
+    const art = AD.art.forVehicle(v, 58) || '';
+    window.L.marker([p.lat, p.lng], {
+      keyboard: false,
+      icon: window.L.divIcon({ className: 'emp-veh-pin', html: `<div class="emp-veh-pin-inner${art ? '' : ' no-art'}">${art || I.truck}</div>`, iconSize: [64, 36], iconAnchor: [32, 30] })
+    }).addTo(map);
+    setTimeout(() => { if (box.isConnected) map.invalidateSize(); }, 60);
+  }
+
+  function bindLive(el) {
+    el.querySelectorAll('[data-live]').forEach((box) => {
+      const v = AD.store.get('vehicles', box.dataset.live);
+      if (v) livePosition(v).then((res) => paintLive(box, v, res));
+    });
+  }
+
   // ------------------------------------------------------------- photo
   function avatar(e) {
     if (!docsReady()) return `<div class="emp-avatar" aria-hidden="true"><span class="emp-initials">${esc(initials(e.name))}</span></div>`;
@@ -203,6 +325,7 @@ AD.views.employee = (function () {
   // -------------------------------------------------------------- page
   function draw() {
     const el = root;
+    destroyMaps(); // the old page's maps are about to be replaced
     const back = `<nav class="crumbs" aria-label="Breadcrumb"><a href="#/employee-register">Employee register</a>${I.chevR}<span aria-current="page">${esc((AD.store.get('employees', empId) || {}).name || 'Employee')}</span></nav>`;
     if (!AD.store.available('employees')) {
       el.innerHTML = `${back}<p class="empty">The employee register hasn’t been set up yet. Run <code>supabase/create-employees.sql</code> in the Supabase SQL Editor, then refresh.</p>`;
@@ -213,9 +336,11 @@ AD.views.employee = (function () {
       el.innerHTML = `${back}<p class="empty">This employee wasn’t found. They may have been removed from the register.</p>`;
       return;
     }
-    const { teamOf, listOf } = AD.employees;
+    const { teamOf, licenceStates, licenceRel, LIC_TONE } = AD.employees;
     const team = teamOf(e);
-    const licences = listOf(e.licenceRegister);
+    const licences = licenceStates(e);
+    const expiredN = licences.filter((l) => l.state === 'expired').length;
+    const soonN = licences.filter((l) => l.state === 'soon').length;
     const vehicles = vehiclesFor(e);
     const today = T.todayKey();
     const telHref = e.mobile ? 'tel:' + e.mobile.replace(/[^\d+]/g, '') : '';
@@ -242,7 +367,7 @@ AD.views.employee = (function () {
         <dl class="veh-facts">
           <div><dt>Commenced</dt><dd>${e.startDate ? T.fmtKey(e.startDate) : dash}</dd></div>
           <div><dt>With Astrea</dt><dd>${e.startDate ? esc(tenure(e.startDate)) : dash}</dd></div>
-          <div><dt>Licences & tickets</dt><dd>${licences.length}</dd></div>
+          <div><dt>Licences & tickets</dt><dd>${licences.length}${expiredN ? ` <span class="flag flag-red">${expiredN} expired</span>` : soonN ? ` <span class="flag flag-amber">${soonN} expiring</span>` : ''}</dd></div>
           ${docsReady() ? `<div><dt>Documents</dt><dd>${docsFor(e.id).length}</dd></div>` : ''}
         </dl>
         <div class="veh-actions">
@@ -258,34 +383,48 @@ AD.views.employee = (function () {
           <dl class="emp-details">${details.map(([dt, dd]) => `<div><dt>${esc(dt)}</dt><dd>${dd}</dd></div>`).join('')}</dl>
         </section>
         <section class="section">
-          ${sectionHead({ title: 'Licences & tickets', meta: licences.length ? `${licences.length} recorded` : '', level: 3 })}
+          ${sectionHead({
+            title: 'Licences & tickets',
+            meta: [licences.length ? `${licences.length} recorded` : '', expiredN ? `<span class="flag flag-red">${expiredN} expired</span>` : '', soonN ? `<span class="flag flag-amber">${soonN} expiring soon</span>` : ''].filter(Boolean).join(' · '),
+            level: 3,
+            actions: `<button type="button" class="btn btn-ghost btn-sm" data-edit-lic>${I.edit} Edit</button>`
+          })}
           ${licences.length
-            ? `<div class="reg-tags emp-tags">${licences.map((x) => `<span class="reg-tag">${esc(x)}</span>`).join('')}</div>`
+            ? `<ul class="emp-lic-list">${licences.map((l) => `<li class="${LIC_TONE[l.state] ? 'is-' + LIC_TONE[l.state] : ''}">
+                <span class="emp-lic-name">${esc(l.name)}</span>
+                <span class="emp-lic-exp">${l.expiry
+                  ? `${T.fmtKey(l.expiry)}${LIC_TONE[l.state] ? `<span class="flag flag-${LIC_TONE[l.state]}">${esc(licenceRel(l))}</span>` : ''}`
+                  : '<span class="muted">No expiry</span>'}</span>
+              </li>`).join('')}</ul>`
             : `<div class="empty-tidy">${I.file}No licences or tickets recorded for ${esc(firstName(e.name))} yet.</div>`}
 
-          ${sectionHead({ title: 'Assigned vehicles', meta: vehicles.length ? `${vehicles.length} in the fleet` : '', level: 3 })}
+          ${sectionHead({ title: 'Assigned vehicles', meta: vehicles.length ? `${vehicles.length} in the fleet · live location from GPS` : '', level: 3 })}
           ${vehicles.length
-            ? `<ul class="rows emp-vehicles">${vehicles.map((v) => `<li class="link" data-veh="${esc(v.id)}">
+            ? vehicles.map((v, i) => `<ul class="rows emp-vehicles"><li class="link" data-veh="${esc(v.id)}">
                 <span class="id">${esc(v.id)}</span>
                 <span class="what">${esc(v.make || '')} ${esc((v.model || '').split(' — ')[0])}<span class="t2">${esc(v.rego || '')} · ${esc(v.type || '')}</span></span>
                 <span class="when">${vehicleBadge(v.status)}</span>
-              </li>`).join('')}</ul>`
-            : `<div class="empty-tidy">${I.truck}No fleet vehicles are assigned to ${esc(firstName(e.name))}.</div>`}
+              </li></ul>${i < 3 ? liveBox(v) : ''}`).join('')
+            : `<div class="empty-tidy">${I.truck}No fleet vehicles are assigned to ${esc(firstName(e.name))}.<span class="t2">&nbsp;Set them as the Assigned driver on a vehicle in the Fleet register to see it here, with its live location.</span></div>`}
         </section>
       </div>
 
       ${documentsSection(e)}`;
 
-    el.querySelector('[data-edit-emp]').onclick = () => AD.employeeForm(e, (saved) => (saved ? draw() : AD.go('employee-register')));
+    const openForm = () => AD.employeeForm(e, (saved) => (saved ? draw() : AD.go('employee-register')));
+    el.querySelector('[data-edit-emp]').onclick = openForm;
+    el.querySelector('[data-edit-lic]').onclick = openForm;
     el.querySelectorAll('li[data-veh]').forEach((li) => li.addEventListener('click', () => AD.go('vehicle/' + li.dataset.veh)));
     bindPhoto(el, e);
     bindDocs(el, e);
+    bindLive(el);
   }
 
   return {
     title: (arg) => (AD.store.get('employees', arg) || {}).name || 'Employee',
     render(el, params, arg) { root = el; empId = arg || ''; uploading = ''; draw(); },
     // Don't redraw mid-upload (the progress text lives in the drop zone).
-    refresh: () => root && !uploading && draw()
+    refresh: () => root && !uploading && draw(),
+    destroy: () => { destroyMaps(); root = null; }
   };
 })();

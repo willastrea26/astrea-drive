@@ -613,6 +613,8 @@ AD.views.dashboard = (function () {
         </section>
       </div>
 
+      ${staffLicences()}
+
       <section class="section">
         ${sectionHead({ title: 'Recent activity', meta: 'Latest 6 changes' })}
         <ul class="rows activity">
@@ -676,6 +678,10 @@ AD.views.dashboard = (function () {
     el.querySelectorAll('.rows li[data-veh]').forEach((li) => li.addEventListener('click', (e) => {
       if (e.target.closest('a')) return;
       AD.go('vehicle/' + li.dataset.veh);
+    }));
+    el.querySelectorAll('.rows li[data-emp]').forEach((li) => li.addEventListener('click', (e) => {
+      if (e.target.closest('a')) return;
+      AD.go('employee/' + li.dataset.emp);
     }));
     el.querySelectorAll('tr[data-href]').forEach((tr) => tr.addEventListener('click', (e) => {
       const menu = e.target.closest('[data-edit]');
@@ -811,6 +817,33 @@ AD.views.dashboard = (function () {
       <span class="what"><span class="${tone ? 'flag flag-' + tone : ''}">${esc(issue)}</span><span class="t2">${detail}</span></span>
       <span class="when">${deadline}<span class="t2">${rel}</span></span>
     </li>`;
+  }
+
+  /**
+   * Staff licences & tickets that have expired or expire within the warning
+   * window, most urgent first — the people-side twin of Registration renewals.
+   * Hidden until at least one expiry date has been recorded in the Employee
+   * register, so it doesn't sit empty before that data exists.
+   */
+  function staffLicences() {
+    const E = AD.employees;
+    if (!E || !AD.store.available('employees')) return '';
+    const staff = AD.store.all('employees');
+    const anyDates = staff.some((p) => E.licenceStates(p).some((l) => l.expiry));
+    if (!anyDates) return '';
+    const items = staff.flatMap((p) => E.licenceIssues(p).map((l) => ({ p, l }))).sort((a, b) => a.l.days - b.l.days);
+    const expired = items.filter((x) => x.l.state === 'expired').length;
+    const initials = (n) => String(n || '?').trim().split(/\s+/).map((s) => s[0]).slice(0, 2).join('').toUpperCase();
+    const row = ({ p, l }) => `<li class="link emp-attn" data-emp="${esc(p.id)}" title="Open ${esc(p.name)}">
+        <span class="emp-thumb" aria-hidden="true">${p.photo ? `<img src="${esc(p.photo)}" alt="">` : esc(initials(p.name))}</span>
+        <span class="what"><span class="flag flag-${E.LIC_TONE[l.state]}">${esc(l.name)} ${l.state === 'expired' ? 'expired' : 'expiring'}</span><span class="t2"><a href="#/employee/${encodeURIComponent(p.id)}">${esc(p.name)}</a>${p.position ? ' · ' + esc(p.position) : ''}</span></span>
+        <span class="when">${T.fmtKey(l.expiry)}<span class="t2">${esc(E.licenceRel(l))}</span></span>
+      </li>`;
+    return `<section class="section">
+      ${sectionHead({ title: 'Staff licences & tickets', meta: items.length ? [expired ? `<span class="flag flag-red">${expired} expired</span>` : '', `${items.length - expired} expiring within ${E.LIC_SOON_DAYS} days`].filter(Boolean).join(' · ') : '' })}
+      ${items.length ? `<ul class="rows">${items.slice(0, LIST_MAX).map(row).join('')}</ul>` : `<p class="empty">No staff licences or tickets expiring in the next ${E.LIC_SOON_DAYS} days.</p>`}
+      <p class="section-foot"><a href="#/employee-register">View employee register${items.length > LIST_MAX ? ` (${items.length} to action)` : ''}</a></p>
+    </section>`;
   }
 
   // ---------- Today's vac truck schedule ----------

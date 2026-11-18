@@ -59,27 +59,63 @@ AD.views = AD.views || {};
   ];
   const teamFor = (position) => (TEAM_RULES.find(([re]) => re.test(position || '')) || [])[1] || '';
   const teamOf = (r) => r.team || teamFor(r.position) || 'Unassigned';
-  // Shared with the employee profile page (employee.js).
-  AD.employees = { TEAMS, teamFor, teamOf, listOf };
+  // ---- Licence & ticket expiry ---------------------------------------------
+  // Expiry dates live in licenceExpiries: { "<licence name>": "YYYY-MM-DD" }.
+  // A licence with no date simply doesn't expire (e.g. a White Card).
+  const LIC_SOON_DAYS = 60; // same warning window the Dashboard uses for rego renewals
+  /** Every licence this person holds, with its expiry state:
+   *  'expired' | 'soon' (within LIC_SOON_DAYS) | 'ok' | 'none' (no expiry recorded). */
+  function licenceStates(r) {
+    const exp = r && r.licenceExpiries && typeof r.licenceExpiries === 'object' ? r.licenceExpiries : {};
+    const today = AD.time.todayKey();
+    return listOf(r && r.licenceRegister).map((name) => {
+      const expiry = exp[name] ? String(exp[name]).slice(0, 10) : '';
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(expiry)) return { name, expiry: '', state: 'none', days: null };
+      const days = AD.time.daysBetween(today, expiry);
+      return { name, expiry, days, state: days < 0 ? 'expired' : days <= LIC_SOON_DAYS ? 'soon' : 'ok' };
+    });
+  }
+  /** Licences that need attention, most urgent first. */
+  const licenceIssues = (r) => licenceStates(r).filter((l) => l.state === 'expired' || l.state === 'soon').sort((a, b) => a.days - b.days);
+  /** "Expired 6d ago" / "Expires in 18d" / "Expires today". */
+  const licenceRel = (l) => (l.days < 0 ? `Expired ${-l.days}d ago` : l.days === 0 ? 'Expires today' : `Expires in ${l.days}d`);
+  const LIC_TONE = { expired: 'red', soon: 'amber' };
+
+  // Shared with the employee profile page (employee.js) and the Dashboard.
+  AD.employees = { TEAMS, teamFor, teamOf, listOf, licenceStates, licenceIssues, licenceRel, LIC_SOON_DAYS, LIC_TONE };
 
   /** Small round photo for register rows (like the fleet's vehicle thumbnails);
    *  initials when no photo has been added yet. */
   const initialsOf = (name) => String(name || '?').trim().split(/\s+/).filter(Boolean).map((p) => p[0]).slice(0, 2).join('').toUpperCase();
   const empThumb = (r) => `<span class="emp-thumb" aria-hidden="true">${r.photo ? `<img src="${esc(r.photo)}" alt="" loading="lazy">` : esc(initialsOf(r.name))}</span>`;
 
-  /** Insert/update an employee; if the "team" column hasn't been added to the
-   *  table yet, save everything else instead of failing. */
+  /** Insert/update an employee. Columns added by later SQL files (team,
+   *  licence expiry dates) may not exist yet — if the database rejects one,
+   *  save everything else and say which SQL file to run. */
+  const LATER_COLUMNS = [
+    ['team', 'supabase/create-employees.sql'],
+    ['licenceExpiries', 'supabase/create-employee-documents.sql']
+  ];
   async function saveEmployee(fn, rec) {
     try {
       return await fn(rec);
     } catch (e) {
       const msg = String((e && (e.message || e.details || e.hint)) || e);
-      if (!('team' in rec) || !/pgrst204|42703|schema cache|could not find|team/i.test(msg)) throw e;
-      const { team, ...rest } = rec;
-      AD.ui.toast('Saved, but the team couldn’t be stored yet — run supabase/create-employees.sql again to add the Team column.', 'error');
+      if (!/pgrst204|42703|schema cache|could not find/i.test(msg)) throw e;
+      const missing = LATER_COLUMNS.filter(([col]) => col in rec && msg.toLowerCase().includes(col.toLowerCase()));
+      const strip = missing.length ? missing : LATER_COLUMNS.filter(([col]) => col in rec);
+      if (!strip.length) throw e;
+      const rest = Object.assign({}, rec);
+      strip.forEach(([col]) => delete rest[col]);
+      AD.ui.toast(`Saved, but some details couldn’t be stored yet — run ${[...new Set(strip.map(([, file]) => file))].join(' and ')} in the Supabase SQL Editor.`, 'error');
       return fn(rest);
     }
   }
+
+  /** Suggestions for the licence name box: everything already used across the
+   *  register first (so names stay consistent), then common civil tickets. */
+  const COMMON_LICENCES = ['White Card', 'C Licence', 'LR Licence', 'MR Licence', 'HR Licence', 'HC Licence', 'First Aid', 'CPR', 'Confined Space Card', 'Gas Test Atmospheres', 'Working at Heights', 'RIW Card', 'Traffic Control', 'Working With Children Check', 'EWP Yellow Card', 'Forklift Licence', 'BYDA Certified Locator', 'Drone (RePL)'];
+  const licenceSuggestions = () => [...new Set(AD.store.all('employees').flatMap((r) => listOf(r.licenceRegister)).concat(COMMON_LICENCES))].sort((a, b) => a.localeCompare(b));
 
   /** Add / edit an employee. Pass null to add. */
   AD.employeeForm = function (emp, onSaved) {
@@ -88,6 +124,12 @@ AD.views = AD.views || {};
     const e = emp || { name: '', team: '', licencesApplied: '', position: '', mobile: '', email: '', dateOfBirth: '', startDate: '', address: '', suburb: '', state: 'NSW', postcode: '', licenceRegister: '' };
     const dateVal = (v) => (v ? esc(String(v).slice(0, 10)) : '');
     const autoLabel = (position) => `Automatic — ${teamFor(position) || 'Unassigned'}`;
+    // One editable row per licence: name (with suggestions) + optional expiry date.
+    const licRow = (name = '', expiry = '') => `<div class="lic-row">
+        <input type="text" class="lic-name" list="lic-names" value="${esc(name)}" placeholder="e.g. HR Licence" aria-label="Licence, ticket or card">
+        <input type="date" class="lic-exp" value="${esc(expiry)}" aria-label="Expiry date">
+        <button type="button" class="btn btn-ghost btn-sm lic-del" title="Remove" aria-label="Remove this licence">${AD.icons.x}</button>
+      </div>`;
 
     modal({
       title: isNew ? 'Add employee' : `Edit ${e.name}`,
@@ -108,10 +150,14 @@ AD.views = AD.views || {};
           <div class="field"><label>Suburb</label><input type="text" name="suburb" value="${esc(e.suburb)}"></div>
           <div class="field"><label>State</label><input type="text" name="state" value="${esc(e.state)}" maxlength="3"></div>
           <div class="field"><label>Postcode</label><input type="text" name="postcode" value="${esc(e.postcode)}" maxlength="4" inputmode="numeric"></div>
-          <div class="form-section-title full"><b>Licences</b><span>Separate each one with a comma</span></div>
+          <div class="form-section-title full"><b>Licences & tickets</b><span>Add an expiry date to be warned ${LIC_SOON_DAYS} days before it runs out. Leave it blank if it doesn’t expire.</span></div>
           <div class="field"><label>Licences applied</label><input type="text" name="licencesApplied" value="${esc(e.licencesApplied)}" placeholder="e.g. Full, Mobility"></div>
-          <div class="field full"><label>Licence register</label><input type="text" name="licenceRegister" value="${esc(e.licenceRegister)}" placeholder="e.g. C Licence, RIW Card, White Card">
-            <div class="help">Driver licences, tickets and cards this person holds.</div></div>
+          <div class="field full lic-editor">
+            <div class="lic-head" aria-hidden="true"><span>Licence, ticket or card</span><span>Expiry date</span><span></span></div>
+            <div id="lic-rows">${licenceStates(e).map((l) => licRow(l.name, l.expiry)).join('')}</div>
+            <button type="button" class="btn btn-ghost btn-sm lic-add" id="lic-add">${AD.icons.plus} Add licence or ticket</button>
+            <datalist id="lic-names">${licenceSuggestions().map((n) => `<option value="${esc(n)}">`).join('')}</datalist>
+          </div>
         </form>
         <div class="form-actions">
           ${isNew ? '' : '<button class="btn btn-danger-ghost" data-remove type="button" style="margin-right:auto">Remove</button>'}
@@ -124,6 +170,20 @@ AD.views = AD.views || {};
         // Keep the "Automatic — <team>" option in step with the position typed.
         form.elements.position.addEventListener('input', () => {
           form.elements.team.options[0].textContent = autoLabel(form.elements.position.value);
+        });
+        // Licence rows: add / remove; always leave one row to type into.
+        const licRows = el.querySelector('#lic-rows');
+        const addLic = (focus) => {
+          licRows.insertAdjacentHTML('beforeend', licRow());
+          if (focus) licRows.lastElementChild.querySelector('.lic-name').focus();
+        };
+        if (!licRows.children.length) addLic(false);
+        el.querySelector('#lic-add').onclick = () => addLic(true);
+        licRows.addEventListener('click', (ev) => {
+          const del = ev.target.closest('.lic-del');
+          if (!del) return;
+          del.closest('.lic-row').remove();
+          if (!licRows.children.length) addLic(false);
         });
         const removeBtn = el.querySelector('[data-remove]');
         if (removeBtn) removeBtn.onclick = async () => {
@@ -149,11 +209,21 @@ AD.views = AD.views || {};
           if (d.postcode && !/^\d{4}$/.test(d.postcode)) err.postcode = 'Use a 4-digit postcode.';
           if (!showErrors(form, err)) return;
           const tidyList = (s) => listOf(s).join(', ');
+          // Collect licence rows: skip blanks, merge repeats (keeping the first
+          // expiry given). Commas would split a name in the stored list, so drop them.
+          const licences = [], licenceExpiries = {};
+          el.querySelectorAll('.lic-row').forEach((row) => {
+            const name = row.querySelector('.lic-name').value.replace(/,/g, ' ').replace(/\s+/g, ' ').trim();
+            const exp = row.querySelector('.lic-exp').value;
+            if (!name) return;
+            if (!licences.includes(name)) licences.push(name);
+            if (exp && !licenceExpiries[name]) licenceExpiries[name] = exp;
+          });
           const rec = {
             name: d.name, team: d.team, position: d.position, mobile: d.mobile, email: d.email,
             dateOfBirth: d.dateOfBirth || null, startDate: d.startDate || null,
             address: d.address, suburb: d.suburb, state: d.state.toUpperCase(), postcode: d.postcode,
-            licencesApplied: tidyList(d.licencesApplied), licenceRegister: tidyList(d.licenceRegister)
+            licencesApplied: tidyList(d.licencesApplied), licenceRegister: licences.join(', '), licenceExpiries
           };
           saveBtn.disabled = true;
           let saved;
@@ -230,13 +300,27 @@ AD.views = AD.views || {};
           label: 'Any licence or ticket',
           options: (rows) => [...new Set(rows.flatMap((r) => listOf(r.licenceRegister)))].sort((a, b) => a.localeCompare(b)),
           match: (r, v) => listOf(r.licenceRegister).includes(v)
+        },
+        {
+          label: 'Any licence status',
+          options: () => [['expired', 'Has an expired licence'], ['soon', `Expiring within ${LIC_SOON_DAYS} days`], ['nodates', 'No expiry dates recorded']],
+          match: (r, v) => {
+            const states = licenceStates(r);
+            if (v === 'nodates') return states.length > 0 && states.every((l) => l.state === 'none');
+            return states.some((l) => l.state === v);
+          }
         }
       ],
       summary: (rows) => {
         if (!rows.length) return 'No staff recorded yet';
         const withLic = rows.filter((r) => listOf(r.licenceRegister).length).length;
         const noPhone = rows.filter((r) => !r.mobile).length;
-        return `${rows.length} staff · ${withLic} with licences or tickets recorded${noPhone ? ` · ${noPhone} without a mobile number` : ''}`;
+        const all = rows.flatMap(licenceStates);
+        const expired = all.filter((l) => l.state === 'expired').length;
+        const soon = all.filter((l) => l.state === 'soon').length;
+        return `${rows.length} staff · ${withLic} with licences or tickets recorded${noPhone ? ` · ${noPhone} without a mobile number` : ''}`
+          + (expired ? ` · <span class="flag flag-red">${plural(expired, 'licence')} expired</span>` : '')
+          + (soon ? ` · <span class="flag flag-amber">${soon} expiring within ${LIC_SOON_DAYS} days</span>` : '');
       },
       add: { label: 'Add employee', open: (done) => AD.employeeForm(null, (saved) => (saved ? AD.go('employee/' + saved.id) : done())) },
       edit: (r, done) => AD.employeeForm(r, done),
@@ -248,7 +332,12 @@ AD.views = AD.views || {};
         { head: 'Date of birth', width: 115, cls: 'col-opt col-wide nowrap', cell: (r) => fmtDate(r.dateOfBirth) },
         { head: 'Commenced', width: 110, cls: 'col-opt nowrap', cell: (r) => fmtDate(r.startDate) },
         { head: 'Address', width: 220, cls: 'col-opt col-wide', cell: (r) => (r.address || r.suburb) ? `${or(r.address)}<span class="t2">${esc([r.suburb, r.state, r.postcode].filter(Boolean).join(' '))}</span>` : AD.ui.dash },
-        { head: 'Licence register', cls: 'col-opt', cell: (r) => listOf(r.licenceRegister).length ? `<span class="reg-tags">${listOf(r.licenceRegister).map((x) => `<span class="reg-tag">${esc(x)}</span>`).join('')}</span>` : AD.ui.dash }
+        { head: 'Licence register', cls: 'col-opt', cell: (r) => {
+          const ls = licenceStates(r);
+          if (!ls.length) return AD.ui.dash;
+          // Expired / expiring licences are coloured, with the date on hover.
+          return `<span class="reg-tags">${ls.map((l) => `<span class="reg-tag${LIC_TONE[l.state] ? ' reg-tag-' + LIC_TONE[l.state] : ''}"${l.expiry ? ` title="${esc(`${l.name} — ${l.state === 'expired' ? 'expired' : 'expires'} ${AD.time.fmtKey(l.expiry)}`)}"` : ''}>${esc(l.name)}</span>`).join('')}</span>`;
+        } }
       ]
     },
     {
@@ -338,7 +427,8 @@ AD.views = AD.views || {};
       const all = reg.rows();
       const opts = reg.filters.map((f) => f.options(all));
       // Drop a filter choice that no longer exists (e.g. its last row was removed).
-      picks = reg.filters.map((f, i) => (picks[i] && opts[i].includes(picks[i]) ? picks[i] : ''));
+      const optValue = (o) => (Array.isArray(o) ? o[0] : o); // options may be plain values or [value, label]
+      picks = reg.filters.map((f, i) => (picks[i] && opts[i].some((o) => optValue(o) === picks[i]) ? picks[i] : ''));
       const note = reg.sample
         ? `<div class="sample-note">${I.alert}<div><b>Sample data.</b> These rows are made up for a fictional company, ${esc(COMPANY)}, so you can see how this register will look. Nothing here is saved, and your fleet data isn’t touched.</div></div>`
         : missing()
