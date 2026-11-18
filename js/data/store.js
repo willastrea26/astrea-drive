@@ -69,7 +69,7 @@ AD.store = (function () {
     const rollingSince = new Date(Date.now() - 40 * 86400000).toISOString().slice(0, 10);
     const yearSince = new Date().getFullYear() + '-01-01';
     const dailySince = rollingSince < yearSince ? rollingSince : yearSince;
-    const [results, readings, workHours, tripStats, workDaily, fuel, vehicleCosts, syncLog, employees, employeeDocs, techDevices] = await Promise.all([
+    const [results, readings, workHours, tripStats, workDaily, fuel, vehicleCosts, syncLog, employees, employeeDocs, techDevices, equipment] = await Promise.all([
       Promise.all(TABLES.map(query)),
       loadOptional('odometer_readings', (q) => q.gte('readDate', since)),
       loadOptional('vehicle_work_hours', (q) => q),
@@ -88,7 +88,9 @@ AD.store = (function () {
       // Employee personal documents — optional until create-employee-documents.sql is run.
       loadOptional('employee_documents', (q) => q.order('uploadedAt', { ascending: false })),
       // Technology register — optional until create-tech-devices.sql is run.
-      loadOptional('tech_devices', (q) => q)
+      loadOptional('tech_devices', (q) => q),
+      // Equipment register — optional until create-equipment.sql is run.
+      loadOptional('equipment', (q) => q)
     ]);
     const next = {};
     results.forEach((r, i) => {
@@ -105,6 +107,7 @@ AD.store = (function () {
     next.employees = employees;
     next.employee_documents = employeeDocs;
     next.tech_devices = techDevices;
+    next.equipment = equipment;
     db = next;
     emit('*');
   }

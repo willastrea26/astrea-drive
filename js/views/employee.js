@@ -344,6 +344,34 @@ AD.views.employee = (function () {
     </div>`;
   }
 
+  /** Equipment this person is responsible for, from the Equipment register.
+   *  Hidden until that register's table exists (create-equipment.sql). */
+  function equipmentSection(e) {
+    if (!AD.equipment || !AD.store.available('equipment')) return '';
+    const soon = AD.equipment.INSPECT_SOON_DAYS || 30;
+    const today = T.todayKey();
+    const items = AD.equipment.equipmentFor(e.id).slice().sort((a, b) => String(a.category).localeCompare(String(b.category)) || String(a.name).localeCompare(String(b.name)));
+    const due = (x) => {
+      if (!x.nextInspection) return '';
+      const days = T.daysBetween(today, String(x.nextInspection).slice(0, 10));
+      return days < 0 ? ` · <span class="flag flag-red">Inspection overdue ${-days}d</span>` : days <= soon ? ` · <span class="flag flag-amber">Inspection due in ${days}d</span>` : '';
+    };
+    return `<div class="emp-devices">
+      ${sectionHead({
+        title: 'Equipment',
+        meta: items.length ? `${items.length} from the equipment register` : '',
+        level: 3,
+        actions: `<button type="button" class="btn btn-ghost btn-sm" data-add-eq>${I.plus} Add equipment</button>`
+      })}
+      ${items.length
+        ? `<ul class="emp-dev-list">${items.map((x) => `<li data-eq="${esc(x.id)}" title="Open ${esc(x.name)}">
+            <span class="emp-dev-name"><b>${esc(x.name)}</b><span class="t2">${esc([x.make, x.assetTag].filter(Boolean).join(' · ') || x.category)}${due(x)}</span></span>
+            ${badge(x.status, AD.equipment.EQ_TONE[x.status] || 'grey')}
+          </li>`).join('')}</ul>`
+        : `<div class="empty-tidy">${I.box}No equipment assigned to ${esc(firstName(e.name))}.</div>`}
+    </div>`;
+  }
+
   // -------------------------------------------------------------- page
   function draw() {
     const el = root;
@@ -404,6 +432,7 @@ AD.views.employee = (function () {
           ${sectionHead({ title: 'Contact & personal details', level: 3 })}
           <dl class="emp-details">${details.map(([dt, dd]) => `<div><dt>${esc(dt)}</dt><dd>${dd}</dd></div>`).join('')}</dl>
           ${devicesSection(e)}
+          ${equipmentSection(e)}
         </section>
         <section class="section">
           ${sectionHead({
@@ -442,6 +471,10 @@ AD.views.employee = (function () {
     el.querySelectorAll('li[data-dev]').forEach((li) => li.addEventListener('click', () => AD.go('device/' + li.dataset.dev)));
     const addDev = el.querySelector('[data-add-dev]');
     if (addDev) addDev.onclick = () => AD.deviceForm(null, () => draw(), { employeeId: e.id });
+    // Equipment: same pattern — click to open the item's profile, or add one already assigned here.
+    el.querySelectorAll('li[data-eq]').forEach((li) => li.addEventListener('click', () => AD.go('equipment/' + li.dataset.eq)));
+    const addEq = el.querySelector('[data-add-eq]');
+    if (addEq) addEq.onclick = () => AD.equipmentForm(null, () => draw(), { employeeId: e.id });
     bindPhoto(el, e);
     bindDocs(el, e);
     bindLive(el);

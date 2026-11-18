@@ -10,9 +10,12 @@
  * (supabase/create-tech-devices.sql). Devices are assigned to employees, and
  * each employee's profile lists the devices they hold.
  *
- * Equipment register: SAMPLE DATA ONLY, made-up rows for a fictional Sydney
- * civil / survey / locating company, so the layout can be reviewed before its
- * real columns are agreed. Nothing for it is read from or written to Supabase.
+ * Equipment register: REAL data from the Supabase "equipment" table
+ * (supabase/create-equipment.sql). Items are assigned to employees (or left in
+ * the depot pool), and each employee's profile lists the equipment they hold.
+ *
+ * Both the technology and equipment registers show read-only SAMPLE rows
+ * (defined here, never saved) until their first real record is added.
  */
 AD.views = AD.views || {};
 
@@ -192,10 +195,12 @@ AD.views = AD.views || {};
         if (removeBtn) removeBtn.onclick = async () => {
           const docs = AD.store.all('employee_documents').filter((d) => d.employeeId === e.id);
           const docNote = docs.length ? ` and their ${docs.length} stored document${docs.length === 1 ? '' : 's'}` : '';
-          // Offboarding check: devices still assigned to them need collecting.
+          // Offboarding check: devices and equipment still assigned to them need collecting.
           const devs = AD.store.all('tech_devices').filter((d) => d.employeeId === e.id);
-          const devNote = devs.length
-            ? `<br><br><b>They still have ${devs.length} device${devs.length === 1 ? '' : 's'}:</b> ${devs.map((d) => esc(d.make)).join(', ')}. ${devs.length === 1 ? 'It' : 'They'}’ll become unassigned in the technology register — make sure ${devs.length === 1 ? 'it’s' : 'they’re'} collected.`
+          const gear = AD.store.all('equipment').filter((x) => x.employeeId === e.id);
+          const held = devs.map((d) => d.make).concat(gear.map((x) => x.name));
+          const devNote = held.length
+            ? `<br><br><b>They still have ${held.length} item${held.length === 1 ? '' : 's'}:</b> ${held.map(esc).join(', ')}. ${held.length === 1 ? 'It' : 'They'}’ll become unassigned in the registers — make sure ${held.length === 1 ? 'it’s' : 'they’re'} collected.`
             : '';
           const ok = await confirm({ title: `Remove ${e.name}?`, message: `This permanently deletes their record from the employee register${docNote}. It can’t be undone.${devNote}`, confirmText: 'Remove', danger: true });
           if (!ok) return;
@@ -203,8 +208,8 @@ AD.views = AD.views || {};
             // Files first, so personal documents never outlive the record.
             for (const d of docs) await AD.store.removeEmployeeDocument(d);
             await AD.store.remove('employees', e.id);
-            // The database unassigns their devices (on delete set null); mirror that locally.
-            devs.forEach((d) => { d.employeeId = null; });
+            // The database unassigns their devices and equipment (on delete set null); mirror that locally.
+            devs.concat(gear).forEach((d) => { d.employeeId = null; });
             await AD.store.log(`${e.name} removed from the employee register`);
             toast(`${e.name} removed`);
           } catch (err) { toast('Could not remove employee: ' + err.message, 'error'); return; }
@@ -259,22 +264,124 @@ AD.views = AD.views || {};
     });
   };
 
-  // ===================================================== sample data (equipment)
-  // All names, numbers and serials below are made up.
-  const EQUIPMENT = () => [
-    { id: 'SUR-01', name: 'GNSS rover', category: 'Surveying', make: 'Trimble R12i', serial: '6143R00217', location: 'Wetherill Park depot', assignedTo: 'Priya Nair', status: 'In service', nextInspection: day(74) },
-    { id: 'SUR-02', name: 'Robotic total station', category: 'Surveying', make: 'Leica TS16', serial: '1873402', location: 'Site — Parramatta Rd, Granville', assignedTo: 'Josh Whitfield', status: 'In service', nextInspection: day(12) },
-    { id: 'SUR-03', name: 'Rotating laser level', category: 'Surveying', make: 'Topcon RL-H5A', serial: 'TP-55120', location: 'Wetherill Park depot', assignedTo: '', status: 'Under repair', nextInspection: day(-9) },
-    { id: 'LOC-01', name: 'Cable & pipe locator', category: 'Locating', make: 'Radiodetection RD8200', serial: 'RD-8200-41187', location: 'Ute UTE-04', assignedTo: 'Mia Tanaka', status: 'In service', nextInspection: day(160) },
-    { id: 'LOC-02', name: 'Ground penetrating radar', category: 'Locating', make: 'Leica DS2000', serial: 'DS2-00938', location: 'Site — Church St, Ryde', assignedTo: 'Sam Haddad', status: 'In service', nextInspection: day(25) },
-    { id: 'LOC-03', name: 'Sewer inspection camera', category: 'Locating', make: 'Envirosight ROVVER X', serial: 'RVX-2291', location: 'Wetherill Park depot', assignedTo: '', status: 'In service', nextInspection: day(203) },
-    { id: 'CIV-01', name: 'Trench shield (3.0 m)', category: 'Civil', make: 'Aluminium box shield', serial: 'TS-3000-07', location: 'Site — Parramatta Rd, Granville', assignedTo: 'Liam Carter', status: 'In service', nextInspection: day(48) },
-    { id: 'SAF-01', name: '4-gas detector', category: 'Safety', make: 'Honeywell BW MicroClip X3', serial: 'MCX3-60814', location: 'Ute UTE-02', assignedTo: 'Ben O’Connor', status: 'In service', nextInspection: day(-3) },
-    { id: 'SAF-02', name: 'Confined space tripod & winch', category: 'Safety', make: 'Tripod rescue kit', serial: 'CS-TRI-114', location: 'Wetherill Park depot', assignedTo: '', status: 'Out of service', nextInspection: day(-41) },
-    { id: 'TRF-01', name: 'Variable message sign trailer', category: 'Traffic control', make: 'Solar VMS trailer', serial: 'VMS-0452', location: 'Site — Church St, Ryde', assignedTo: '', status: 'In service', nextInspection: day(96) }
-  ];
-
+  // ========================================================= equipment register
+  // Real data from the Supabase "equipment" table (create-equipment.sql). Each
+  // item can be assigned to someone from the Employee register, so it also
+  // shows on that person's profile (employee.js), and has its own profile
+  // page (equipment.js).
+  const EQ_CATEGORIES = ['Surveying', 'Locating', 'Civil', 'Safety', 'Traffic control', 'Other'];
+  const EQ_STATUSES = ['In service', 'Under repair', 'Out of service'];
   const EQ_TONE = { 'In service': 'aqua', 'Under repair': 'violet', 'Out of service': 'red' };
+  const INSPECT_SOON_DAYS = 30;
+
+  // SAMPLE EQUIPMENT — shown ONLY while the register has no real items (same
+  // rules as the sample devices): never written to Supabase, read-only,
+  // labelled, and gone as soon as the first real item is added. All names,
+  // numbers and serials are made up.
+  const SAMPLE_EQUIPMENT = () => [
+    { id: 'sample-SUR-01', sample: true, assetTag: 'SUR-01', name: 'GNSS rover', category: 'Surveying', make: 'Trimble R12i', serial: '6143R00217', location: 'Wetherill Park depot', sampleAssignee: { name: 'Priya Nair', position: 'Registered surveyor' }, status: 'In service', lastInspection: day(-291), nextInspection: day(74), notes: 'Annual calibration with the Trimble dealer.' },
+    { id: 'sample-SUR-02', sample: true, assetTag: 'SUR-02', name: 'Robotic total station', category: 'Surveying', make: 'Leica TS16', serial: '1873402', location: 'Site — Parramatta Rd, Granville', sampleAssignee: { name: 'Josh Whitfield', position: 'Survey technician' }, status: 'In service', lastInspection: day(-353), nextInspection: day(12), notes: '' },
+    { id: 'sample-SUR-03', sample: true, assetTag: 'SUR-03', name: 'Rotating laser level', category: 'Surveying', make: 'Topcon RL-H5A', serial: 'TP-55120', location: 'Wetherill Park depot', sampleAssignee: null, status: 'Under repair', lastInspection: day(-374), nextInspection: day(-9), notes: 'Dropped on site — sent for repair and recalibration.' },
+    { id: 'sample-LOC-01', sample: true, assetTag: 'LOC-01', name: 'Cable & pipe locator', category: 'Locating', make: 'Radiodetection RD8200', serial: 'RD-8200-41187', location: 'Ute UTE-04', sampleAssignee: { name: 'Mia Tanaka', position: 'Utility locator' }, status: 'In service', lastInspection: day(-205), nextInspection: day(160), notes: '' },
+    { id: 'sample-LOC-02', sample: true, assetTag: 'LOC-02', name: 'Ground penetrating radar', category: 'Locating', make: 'Leica DS2000', serial: 'DS2-00938', location: 'Site — Church St, Ryde', sampleAssignee: { name: 'Sam Haddad', position: 'Utility locator' }, status: 'In service', lastInspection: day(-340), nextInspection: day(25), notes: '' },
+    { id: 'sample-LOC-03', sample: true, assetTag: 'LOC-03', name: 'Sewer inspection camera', category: 'Locating', make: 'Envirosight ROVVER X', serial: 'RVX-2291', location: 'Wetherill Park depot', sampleAssignee: null, status: 'In service', lastInspection: day(-162), nextInspection: day(203), notes: '' },
+    { id: 'sample-CIV-01', sample: true, assetTag: 'CIV-01', name: 'Trench shield (3.0 m)', category: 'Civil', make: 'Aluminium box shield', serial: 'TS-3000-07', location: 'Site — Parramatta Rd, Granville', sampleAssignee: { name: 'Liam Carter', position: 'Site supervisor' }, status: 'In service', lastInspection: day(-132), nextInspection: day(48), notes: '' },
+    { id: 'sample-SAF-01', sample: true, assetTag: 'SAF-01', name: '4-gas detector', category: 'Safety', make: 'Honeywell BW MicroClip X3', serial: 'MCX3-60814', location: 'Ute UTE-02', sampleAssignee: { name: 'Ben O’Connor', position: 'Pipe layer' }, status: 'In service', lastInspection: day(-183), nextInspection: day(-3), notes: 'Bump test before every confined space entry.' },
+    { id: 'sample-SAF-02', sample: true, assetTag: 'SAF-02', name: 'Confined space tripod & winch', category: 'Safety', make: 'Tripod rescue kit', serial: 'CS-TRI-114', location: 'Wetherill Park depot', sampleAssignee: null, status: 'Out of service', lastInspection: day(-406), nextInspection: day(-41), notes: 'Tagged out — winch cable frayed. Do not use.' },
+    { id: 'sample-TRF-01', sample: true, assetTag: 'TRF-01', name: 'Variable message sign trailer', category: 'Traffic control', make: 'Solar VMS trailer', serial: 'VMS-0452', location: 'Site — Church St, Ryde', sampleAssignee: null, status: 'In service', lastInspection: day(-89), nextInspection: day(96), notes: '' }
+  ];
+  const showingSampleEquipment = () => !AD.store.all('equipment').length;
+  const sampleEquipment = (id) => (showingSampleEquipment() ? SAMPLE_EQUIPMENT().find((x) => x.id === id) || null : null);
+  const equipmentFor = (employeeId) => AD.store.all('equipment').filter((x) => x.employeeId === employeeId);
+  AD.equipment = { EQ_CATEGORIES, EQ_STATUSES, EQ_TONE, INSPECT_SOON_DAYS, equipmentFor, sampleEquipment };
+
+  /** Add / edit an equipment item. Pass null to add; `preset` pre-fills a new
+   *  one (e.g. { employeeId } when adding from an employee's profile). */
+  AD.equipmentForm = function (item, onSaved, preset = {}) {
+    const { formData, showErrors, modal, toast, confirm, options } = AD.ui;
+    const isNew = !item;
+    const x = item || Object.assign({ name: '', category: 'Surveying', make: '', assetTag: '', serial: '', location: '', employeeId: '', status: 'In service', lastInspection: '', nextInspection: '', notes: '' }, preset);
+    const dateVal = (v) => (v ? esc(String(v).slice(0, 10)) : '');
+    const people = AD.store.all('employees').slice().sort((a, b) => String(a.name).localeCompare(String(b.name)))
+      .map((p) => [p.id, p.position ? `${p.name} — ${p.position}` : p.name]);
+
+    modal({
+      title: isNew ? 'Add equipment' : `Edit ${x.name || 'equipment'}`,
+      wide: true,
+      body: `
+        <form class="form-grid" novalidate>
+          <div class="form-section-title full"><b>Item</b><span>What it is and how to identify it</span></div>
+          <div class="field"><label>Item <span class="req">*</span></label><input type="text" name="name" value="${esc(x.name)}" placeholder="e.g. GNSS rover"></div>
+          <div class="field"><label>Category</label><select name="category">${options(EQ_CATEGORIES, x.category || 'Other')}</select></div>
+          <div class="field"><label>Make / model</label><input type="text" name="make" value="${esc(x.make)}" placeholder="e.g. Trimble R12i"></div>
+          <div class="field"><label>Asset tag</label><input type="text" name="assetTag" value="${esc(x.assetTag)}" placeholder="e.g. SUR-01">
+            <div class="help">Your own label for it, if you use one.</div></div>
+          <div class="field"><label>Serial number</label><input type="text" name="serial" value="${esc(x.serial)}"></div>
+          <div class="field"><label>Status</label><select name="status">${options(EQ_STATUSES, x.status || 'In service')}</select></div>
+          <div class="form-section-title full"><b>Where it is and who has it</b><span>Assign it to someone from the Employee register, or leave it in the depot pool</span></div>
+          <div class="field"><label>Assigned to</label><select name="employeeId">${options(people, x.employeeId || '', 'Depot pool (not assigned)')}</select></div>
+          <div class="field"><label>Location</label><input type="text" name="location" value="${esc(x.location)}" placeholder="e.g. Wetherill Park depot, a site, or a ute"></div>
+          <div class="form-section-title full"><b>Inspection & calibration</b><span>Items due within ${INSPECT_SOON_DAYS} days are flagged amber, overdue red</span></div>
+          <div class="field"><label>Last inspection</label><input type="date" name="lastInspection" value="${dateVal(x.lastInspection)}"></div>
+          <div class="field"><label>Next inspection / calibration</label><input type="date" name="nextInspection" value="${dateVal(x.nextInspection)}"></div>
+          <div class="field full"><label>Notes</label><textarea name="notes" rows="2">${esc(x.notes)}</textarea></div>
+        </form>
+        <div class="form-actions">
+          ${isNew ? '' : '<button class="btn btn-danger-ghost" data-remove type="button" style="margin-right:auto">Remove</button>'}
+          <button class="btn btn-ghost" data-close type="button">Cancel</button>
+          <button class="btn btn-primary" data-save type="button">${isNew ? 'Add equipment' : 'Save changes'}</button>
+        </div>`,
+      onMount(el, close) {
+        const form = el.querySelector('form');
+        el.querySelector('[data-close]').onclick = close;
+        const removeBtn = el.querySelector('[data-remove]');
+        if (removeBtn) removeBtn.onclick = async () => {
+          const ok = await confirm({ title: `Remove ${x.name || 'this item'}?`, message: 'This permanently deletes it from the equipment register. It can’t be undone. (To keep a record of an item that’s been tagged out, set its status to Out of service instead.)', confirmText: 'Remove', danger: true });
+          if (!ok) return;
+          try {
+            await AD.store.remove('equipment', x.id);
+            await AD.store.log(`${x.name || 'Item'} removed from the equipment register`);
+            toast(`${x.name || 'Item'} removed`);
+          } catch (err) { toast('Could not remove item: ' + err.message, 'error'); return; }
+          close();
+          onSaved && onSaved(null);
+        };
+        const saveBtn = el.querySelector('[data-save]');
+        saveBtn.onclick = async () => {
+          const d = formData(form);
+          const err = {};
+          if (!d.name) err.name = 'Item is required.';
+          if (!showErrors(form, err)) return;
+          const rec = {
+            name: d.name, category: d.category, make: d.make, assetTag: d.assetTag, serial: d.serial,
+            status: d.status, employeeId: d.employeeId || null, location: d.location,
+            lastInspection: d.lastInspection || null, nextInspection: d.nextInspection || null, notes: d.notes
+          };
+          const who = employeeById(rec.employeeId);
+          saveBtn.disabled = true;
+          let saved;
+          try {
+            if (isNew) {
+              saved = await AD.store.insert('equipment', rec, 'eq');
+              await AD.store.log(`${rec.name} added to the equipment register${who ? ` (assigned to ${who.name})` : ''}`);
+              toast(`${rec.name} added`);
+            } else {
+              saved = await AD.store.update('equipment', x.id, rec);
+              const moved = (x.employeeId || null) !== rec.employeeId;
+              await AD.store.log(moved ? `${rec.name} ${who ? `assigned to ${who.name}` : 'returned to the depot pool'}` : `${rec.name} equipment details updated`);
+              toast(`${rec.name} saved`);
+            }
+          } catch (err2) {
+            saveBtn.disabled = false;
+            toast('Could not save item: ' + err2.message, 'error');
+            return;
+          }
+          close();
+          onSaved && onSaved(saved);
+        };
+      }
+    });
+  };
 
   // ======================================================== technology register
   // Real data from the Supabase "tech_devices" table (create-tech-devices.sql).
@@ -472,23 +579,46 @@ AD.views = AD.views || {};
       ]
     },
     {
-      route: 'equipment-register', title: 'Equipment register', noun: 'item', sample: true,
-      rows: EQUIPMENT, groupOf: (r) => r.category, groupOrder: ['Surveying', 'Locating', 'Civil', 'Safety', 'Traffic control'],
-      search: ['id', 'name', 'category', 'make', 'serial', 'location', 'assignedTo'],
-      filters: [groupFilter('All categories', (r) => r.category, ['Surveying', 'Locating', 'Civil', 'Safety', 'Traffic control'])],
+      route: 'equipment-register', title: 'Equipment register', noun: 'item',
+      table: 'equipment', setupFile: 'supabase/create-equipment.sql',
+      // Until the first real item exists, the sample equipment stands in.
+      rows: () => (showingSampleEquipment() ? SAMPLE_EQUIPMENT() : AD.store.all('equipment'))
+        .map((x) => Object.assign({}, x, {
+          category: x.category || 'Other',
+          nextInspection: x.nextInspection ? String(x.nextInspection).slice(0, 10) : null,
+          assignee: (employeeById(x.employeeId) || x.sampleAssignee || {}).name || ''
+        }))
+        .sort((a, b) => String(a.assetTag || a.name).localeCompare(String(b.assetTag || b.name))),
+      sample: showingSampleEquipment,
+      sampleNote: () => `<b>Sample equipment.</b> These items are made up to show how the equipment register — and each item’s profile — will look. They’re not saved anywhere and disappear as soon as you add your first real item.${!AD.store.available('equipment') ? ' To start adding your own, run <code>supabase/create-equipment.sql</code> in the Supabase SQL Editor.' : ''}`,
+      groupOf: (r) => r.category, groupOrder: EQ_CATEGORIES,
+      search: ['name', 'category', 'make', 'assetTag', 'serial', 'location', 'assignee', 'status', 'notes'],
+      filters: [
+        groupFilter('All categories', (r) => r.category, EQ_CATEGORIES),
+        { label: 'Any status', options: (rows) => EQ_STATUSES.filter((s) => rows.some((r) => r.status === s)), match: (r, v) => r.status === v },
+        { label: 'Inspection status', options: () => [['overdue', 'Overdue for inspection'], ['soon', `Due within ${INSPECT_SOON_DAYS} days`]], match: (r, v) => dueState(r.nextInspection, INSPECT_SOON_DAYS) === v },
+        { label: 'Assigned or not', options: () => [['yes', 'Assigned to someone'], ['no', 'Depot pool']], match: (r, v) => (v === 'yes') === !!r.assignee }
+      ],
       summary: (rows) => {
-        const over = rows.filter((r) => dueState(r.nextInspection) === 'overdue').length;
-        const soon = rows.filter((r) => dueState(r.nextInspection) === 'soon').length;
-        return `${rows.length} items${over ? ` · <span class="flag flag-red">${over} overdue for inspection</span>` : ''}${soon ? ` · <span class="flag flag-amber">${soon} due within 30 days</span>` : ''}`;
+        if (!rows.length) return 'No equipment recorded yet';
+        const over = rows.filter((r) => dueState(r.nextInspection, INSPECT_SOON_DAYS) === 'overdue').length;
+        const soon = rows.filter((r) => dueState(r.nextInspection, INSPECT_SOON_DAYS) === 'soon').length;
+        const out = rows.filter((r) => r.status === 'Out of service').length;
+        return `${plural(rows.length, 'item')}${out ? ` · ${out} out of service` : ''}`
+          + (over ? ` · <span class="flag flag-red">${over} overdue for inspection</span>` : '')
+          + (soon ? ` · <span class="flag flag-amber">${soon} due within ${INSPECT_SOON_DAYS} days</span>` : '');
       },
+      add: { label: 'Add equipment', open: (done) => AD.equipmentForm(null, (saved) => (saved ? AD.go('equipment/' + saved.id) : done())) },
+      edit: (r, done) => AD.equipmentForm(r, done),
+      href: (r) => '#/equipment/' + encodeURIComponent(r.id),
       cols: [
-        { head: 'Item', width: 230, cell: (r) => `<span class="id">${esc(r.name)}</span><span class="t2">${esc(r.id)}</span>` },
-        { head: 'Make / model', width: 200, cls: 'col-opt', cell: (r) => esc(r.make) },
-        { head: 'Serial #', width: 140, cls: 'col-opt col-wide', cell: (r) => esc(r.serial) },
-        { head: 'Location', cls: 'col-opt', cell: (r) => esc(r.location) },
-        { head: 'Assigned to', width: 150, cls: 'col-opt col-wide', cell: (r) => r.assignedTo ? esc(r.assignedTo) : '<span class="muted">Depot pool</span>' },
+        { head: 'Item', width: 230, cell: (r) => `<a class="id" href="#/equipment/${encodeURIComponent(r.id)}">${esc(r.name)}</a><span class="t2">${esc(r.assetTag || r.category)}</span>` },
+        { head: 'Make / model', width: 200, cls: 'col-opt', cell: (r) => or(r.make) },
+        { head: 'Serial #', width: 140, cls: 'col-opt col-wide', cell: (r) => or(r.serial) },
+        { head: 'Location', cls: 'col-opt', cell: (r) => or(r.location) },
+        { head: 'Assigned to', width: 220, cls: 'col-opt col-wide', cell: (r) => (r.sampleAssignee ? sampleAssigneeCell(r.sampleAssignee) : r.employeeId && employeeById(r.employeeId) ? assigneeCell(employeeById(r.employeeId)) : '<span class="muted">Depot pool</span>') },
         { head: 'Status', width: 140, cell: (r) => AD.ui.badge(r.status, EQ_TONE[r.status] || 'grey') },
-        { head: 'Inspection / calibration', width: 170, cell: (r) => dueCell(r.nextInspection) }
+        { head: 'Inspection / calibration', width: 170, cell: (r) => dueCell(r.nextInspection, { soon: INSPECT_SOON_DAYS }) }
       ]
     },
     {
