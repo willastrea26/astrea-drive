@@ -922,7 +922,7 @@ AD.views.dashboard = (function () {
           <thead><tr>
             <th style="width:108px">Truck</th><th class="col-opt" style="width:132px">Driver</th><th>Job / site</th>
             <th class="col-opt" style="width:128px">Booking time</th><th style="width:140px">Status</th>
-            <th class="col-opt col-attn" style="width:170px">Needs attention</th>
+            <th class="col-opt col-attn" style="min-width:380px">Needs attention</th>
             <th class="col-opt col-action"><span class="hide">Actions</span></th>
           </tr></thead>
           <tbody>${body || emptyRow}</tbody>

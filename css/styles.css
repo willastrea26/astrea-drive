@@ -2293,7 +2293,13 @@ input::placeholder { color: var(--faint); }
    across every row — the eye scans straight down one column at a time. */
 .attn-row {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  /* max-content, not 0, as the track minimum: a nowrap chip's track must
+     never shrink smaller than the chip itself, or the chip overflows its
+     track and visually overlaps the next column's chip (the bug on the
+     Dashboard's vac truck schedule, where the containing cell was too
+     narrow for three chips). With a real minimum, a too-narrow container
+     makes the row overflow outward instead of the chips overlapping. */
+  grid-template-columns: repeat(3, minmax(max-content, 1fr));
   align-items: center;
   column-gap: 20px; row-gap: 4px;
 }
