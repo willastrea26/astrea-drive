@@ -136,6 +136,12 @@ AD.views['cost-sheet'] = (function () {
   };
   const vehHref = (id) => `#/vehicle/${encodeURIComponent(id)}`;
   const changeTone = (n) => n > 0.005 ? 'cs-delta-worse' : n < -0.005 ? 'cs-delta-better' : '';
+  // For a vehicle with GPS data but no fuel in that window: when its latest
+  // imported fill was, so "no fuel" never reads as "no fuel ever".
+  const lastFillNote = (v) => {
+    const f = L.fuelFor(v);
+    return f && f.lastDate ? ` · latest fill on record ${T.fmtKey(f.lastDate)}` : ` · no fuel-card fills on record for this vehicle`;
+  };
 
   function render(el, params) {
     root = el;
@@ -780,7 +786,7 @@ AD.views['cost-sheet'] = (function () {
     const quietRows = noSpend.concat(idle).map((l, i) => `<a class="cs-row cs-row-art cs-row-muted cs-fuelkm-row" href="${vehHref(l.v.id)}" style="--i:${rated.length + i}" ${tip(l)}>
         ${idCell(l.v)}
         <span class="cs-row-nofuel">${l.use > 0
-          ? `${fmtUse(l.use)} over ${range(l)}, but no fuel, servicing or repairs recorded in those days`
+          ? `${fmtUse(l.use)} over ${range(l)}, but no fuel, servicing or repairs recorded in those days${lastFillNote(l.v)}`
           : `No ${perHr ? 'engine hours' : 'distance'} recorded over ${range(l)}`}</span>
         <span class="cs-row-val">—</span>
       </a>`).join('');
@@ -910,7 +916,7 @@ AD.views['cost-sheet'] = (function () {
     // Tracked vehicles with GPS distance but no fuel-card spend in the same days.
     const noFuelRows = noFuel.map((l, i) => `<a class="cs-row cs-row-art cs-row-muted cs-fuelkm-row" href="${vehHref(l.v.id)}" style="--i:${rated.length + i}" ${tip(l)}>
         ${idCell(l.v)}
-        <span class="cs-row-nofuel">${km0(l.fe.kmTotal)} km driven over ${l.fe.kmDaysWithData} days (${shortRange(l.fe)}), but no fuel-card transactions dated in those days</span>
+        <span class="cs-row-nofuel">${km0(l.fe.kmTotal)} km driven over ${l.fe.kmDaysWithData} days (${shortRange(l.fe)}), but no fuel-card transactions dated in those days${lastFillNote(l.v)}</span>
         <span class="cs-row-val">—</span>
       </a>`).join('');
 
