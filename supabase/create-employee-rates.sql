@@ -1,31 +1,22 @@
 -- ==========================================================================
--- Employee rates (salary / hourly pay rate / charge-out rate) — RESTRICTED
+-- Employee rates (salary / hourly pay rate / charge-out rate)
 -- Run ONCE in the Supabase SQL Editor, after create-employees.sql. Safe to re-run.
 --
--- Pay is more sensitive than anything else in Astrea Drive, so unlike every
--- other table (open to all approved users), rates are readable and editable
--- ONLY by people on the rates_viewers list. Everyone else gets no rows back at
--- all — the numbers never reach their browser — and the app shows the Rates
--- tab as restricted.
+-- CURRENTLY OPEN: every approved Astrea Drive user can see and edit rates,
+-- the same as the other registers. This is deliberate while the app is still
+-- being set up.
 --
--- After running this, give yourself (and anyone else who should see pay)
--- access — one line per person, using the email they sign in with:
---     insert into public.rates_viewers (email) values ('name@astrea.com.au');
--- To take access away again:
---     delete from public.rates_viewers where lower(email) = lower('name@astrea.com.au');
+-- BEFORE THE APP GOES OUT TO ALL EMPLOYEES, run lock-employee-rates.sql.
+-- That restricts rates to a short list of named people; everyone else then
+-- gets no rows back at all and the app shows the Rates tab as restricted.
+-- No app changes are needed — the app asks the database (can_view_rates)
+-- whether the signed-in user may see rates.
 -- ==========================================================================
 
 BEGIN;
 
--- 1. Who may see rates. Locked down completely (RLS on, no policies), like
---    approved_users: nobody can read it directly, only can_view_rates() can.
-create table if not exists public.rates_viewers (
-  email text primary key
-);
-alter table public.rates_viewers enable row level security;
-
--- 2. True only for an approved user whose email is on the rates list.
---    SECURITY DEFINER so it can read rates_viewers when nothing else can.
+-- 1. Who may see rates. For now: any approved user.
+--    lock-employee-rates.sql replaces this with a named list.
 create or replace function public.can_view_rates()
 returns boolean
 language sql
@@ -33,15 +24,12 @@ security definer
 set search_path = public
 stable
 as $$
-  select is_approved() and exists (
-    select 1 from public.rates_viewers
-    where lower(email) = lower(auth.jwt() ->> 'email')
-  );
+  select is_approved();
 $$;
 revoke all on function public.can_view_rates() from public;
 grant execute on function public.can_view_rates() to authenticated;
 
--- 3. One row per employee (id = the employee's id).
+-- 2. One row per employee (id = the employee's id).
 create table if not exists public.employee_rates (
   id               text primary key,
   "employeeId"     text not null unique references public.employees(id) on delete cascade,
@@ -61,6 +49,8 @@ grant select, insert, update, delete on table public.employee_rates to authentic
 
 alter table public.employee_rates enable row level security;
 
+-- The policy always goes through can_view_rates(), so locking later only
+-- means changing that function — this policy stays as it is.
 drop policy if exists "rates viewers only" on public.employee_rates;
 create policy "rates viewers only" on public.employee_rates
   for all to authenticated using (can_view_rates()) with check (can_view_rates());

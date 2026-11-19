@@ -1,11 +1,12 @@
 /*
  * Employee profile — Rates tab: salary / hourly pay rate / charge-out rate.
  *
- * RESTRICTED. Rates live in their own table (create-employee-rates.sql) that
- * only people on the rates_viewers list can read or write; for everyone else
- * the database returns nothing, so the numbers never reach their browser. The
- * tab asks the database once per session (can_view_rates) whether this user
- * is on the list, and shows a "restricted" message if not.
+ * Rates live in their own table (create-employee-rates.sql). Who can see them
+ * is decided by the database function can_view_rates(): for now that's every
+ * approved user; lock-employee-rates.sql later narrows it to a named list, and
+ * everyone else then gets no rows back at all. The tab asks the database once
+ * per session whether this user may see rates, and shows a "restricted"
+ * message if not — so locking needs no app change.
  *
  * Derived figures: a salary's hourly equivalent (38-hour week, 52 weeks), cost
  * per hour including super, and the margin between charge-out and cost.
@@ -46,7 +47,7 @@ AD.employeeRates = (function () {
     const I = AD.icons;
     const { sectionHead } = AD.ui;
     if (!AD.store.available('employee_rates')) {
-      return `<section class="section"><div class="sample-note">${I.alert}<div><b>Rates aren’t set up yet.</b> Run <code>supabase/create-employee-rates.sql</code> in the Supabase SQL Editor, add yourself to the rates access list (instructions at the top of that file), then refresh.</div></div></section>`;
+      return `<section class="section"><div class="sample-note">${I.alert}<div><b>Rates aren’t set up yet.</b> Run <code>supabase/create-employee-rates.sql</code> in the Supabase SQL Editor, then refresh.</div></div></section>`;
     }
     if (access === null) return `<section class="section"><p class="empty">Checking access…</p></section>`;
     if (!access) {
@@ -83,7 +84,7 @@ AD.employeeRates = (function () {
       ['Last updated', r.updatedAt ? `${AD.time.fmtKey(String(r.updatedAt).slice(0, 10))}${who ? ` by ${esc(who)}` : ''}` : notRec]
     ];
     return `<section class="section">
-      ${sectionHead({ title: 'Pay & charge-out rates', meta: 'Restricted — only people on the rates access list can see this', level: 3, actions: `<button type="button" class="btn btn-ghost btn-sm" data-edit-rates>${I.edit} Edit rates</button>` })}
+      ${sectionHead({ title: 'Pay & charge-out rates', level: 3, actions: `<button type="button" class="btn btn-ghost btn-sm" data-edit-rates>${I.edit} Edit rates</button>` })}
       <div class="cost-kpis rate-kpis">
         ${payKpi}
         ${kpi('Charge-out rate', f.charge != null ? money2(f.charge) : '—', 'per hour, charged to clients')}
