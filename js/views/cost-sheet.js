@@ -696,12 +696,17 @@ AD.views['cost-sheet'] = (function () {
       const planned = sumKind(maint, PLANNED), unplanned = sumKind(maint, UNPLANNED);
       const fuel = fuelRows().filter((r) => r.vehicleId === v.id && r.date >= fromKey && r.date <= toKey).reduce((n, r) => n + r.cost, 0);
       const spend = fuel + planned + unplanned;
-      return { v, days: days.length, fromKey, toKey, use, perDay: use / days.length,
+      // Measured over the calendar span first→last reading — the same days the
+      // spend is counted over. Some days have no Netstar reading (the gaps line
+      // up mostly with weekends, so likely days the vehicle didn't run), and
+      // counting only days WITH a reading held most of the fleet back for weeks.
+      const span = T.daysBetween(fromKey, toKey) + 1;
+      return { v, days: span, readings: days.length, fromKey, toKey, use, perDay: use / span,
                fuel, planned, unplanned, spend, rate: use > 0 ? spend / use : null,
-               thin: days.length < THIN_DAYS };
+               thin: span < THIN_DAYS };
     }).filter(Boolean);
 
-    // At least MIN_DAYS of readings before a vehicle is shown at all.
+    // At least MIN_DAYS of span before a vehicle is shown at all.
     const tracked = all.filter((l) => l.days >= MIN_DAYS);
     const rated = tracked.filter((l) => l.use > 0 && l.spend > 0).sort((a, b) => b.rate - a.rate);
     const noSpend = tracked.filter((l) => l.use > 0 && !(l.spend > 0));
@@ -737,6 +742,7 @@ AD.views['cost-sheet'] = (function () {
       ...(l.unplanned ? [['Repairs', L.fmtAUD(l.unplanned), COLOR_UNPLANNED]] : []),
       [perHr ? 'Engine hours (GPS)' : 'Distance (GPS)', fmtUse(l.use), 'var(--muted)'],
       ['Over', `${l.days} days · ${T.fmtKey(l.fromKey)}–${T.fmtKey(l.toKey)}`, 'var(--muted)'],
+      ...(l.readings < l.days ? [['GPS readings', `${l.readings} of those days`, 'var(--muted)']] : []),
       ...(l.rate != null && l.spend > 0 ? [[`= ${L.fmtAUD(l.spend)} ÷ ${fmtUse(l.use)}`, `${fmtRate(l.rate)}/${unit}`, 'var(--ink)']] : [])
     ]);
 
