@@ -127,7 +127,7 @@ AD.views['cost-sheet'] = (function () {
     return `<small class="cs-delta cs-delta-${tone}">${arrow} ${Math.abs(pct)}% · ${fmt(avg)} avg</small>`;
   }
 
-  const TONE_VAR = { worse: 'var(--red)', better: 'var(--green)' };
+  const TONE_VAR = { worse: 'var(--red)', better: 'var(--green)', fuel: 'var(--cs-blue)', planned: 'var(--mint)' };
   const kpi = (label, value, foot, tone) => `<div class="cs-kpi"${tone ? ` style="--cs-tone:${TONE_VAR[tone]}"` : ''}><span>${esc(label)}</span><strong>${value}</strong>${foot}</div>`;
   const fmtChange = (n) => Math.abs(n) < 0.005 ? '—' : (n > 0 ? '+' : '−') + L.fmtAUD(Math.abs(n));
   const median = (nums) => {
@@ -177,6 +177,16 @@ AD.views['cost-sheet'] = (function () {
     const shareFoot = !spend ? '<small class="cs-delta">Nothing recorded</small>'
       : `<small class="cs-delta${shareTone ? ' cs-delta-' + shareTone : ''}">${L.fmtAUD(unplanned)} of ${L.fmtAUD(spend)}${haveBaseline && avgSpend ? ` · ${Math.round(avgShare)}% avg` : ''}</small>`;
 
+    // Fuel and planned servicing: the other two slices of the same total, so the
+    // three shares add to 100%. Not judged better/worse — a rising fuel share
+    // just means a busier period, and more planned servicing is no bad thing.
+    const fuelNow = fuelBetween(start, end), planned = sumKind(now, PLANNED);
+    const avgFuel = avgOf(base.map((w) => fuelBetween(w.from, w.to)));
+    const avgPlanned = avgOf(base.map((w) => sumKind(w.rows, PLANNED)));
+    const pctOf = (n) => (spend ? (n / spend) * 100 : 0);
+    const sliceFoot = (amt, avgAmt) => !spend ? '<small class="cs-delta">Nothing recorded</small>'
+      : `<small class="cs-delta">${L.fmtAUD(amt)} of ${L.fmtAUD(spend)}${haveBaseline && avgSpend ? ` · ${Math.round((avgAmt / avgSpend) * 100)}% avg` : ''}</small>`;
+
     // Projected rest-of-year spend for the KPI — not meaningful once you're
     // already looking at a whole year, so it only appears in week/month view.
     const projForKpi = scope === 'year' ? [] : projectedMonths(end);
@@ -210,9 +220,11 @@ AD.views['cost-sheet'] = (function () {
           <input type="date" id="w-jump" class="cs-jump" value="${start}" aria-label="Go to ${cfg.label}">`
       })}
 
-      <div class="cs-kpis" role="group" aria-label="This ${cfg.label} against the average ${cfg.label}">
+      <div class="cs-kpis" style="--cs-kpi-n:${restOfYearMonths.length ? 5 : 4}" role="group" aria-label="This ${cfg.label} against the average ${cfg.label}">
         ${kpi('Total spend', L.fmtAUD(spend), delta(spend, avgSpend, haveBaseline, L.fmtAUD, true), trendTone(spend, avgSpend, haveBaseline, true))}
         ${kpi('Unplanned share', `${Math.round(share)}%`, shareFoot, shareTone)}
+        ${kpi('Fuel share', `${Math.round(pctOf(fuelNow))}%`, sliceFoot(fuelNow, avgFuel), 'fuel')}
+        ${kpi('Planned servicing share', `${Math.round(pctOf(planned))}%`, sliceFoot(planned, avgPlanned), 'planned')}
         ${restOfYearMonths.length ? kpi('Projected to year-end', L.fmtAUD(projRestTotal), `<small class="cs-delta">${restOfYearMonths.length} month${restOfYearMonths.length === 1 ? '' : 's'} remaining · ${L.fmtAUD(projMonthAvg)}/mo avg</small>`) : ''}
       </div>
 
@@ -229,7 +241,7 @@ AD.views['cost-sheet'] = (function () {
 
       ${costVsUsage()}
 
-      <p class="section-foot muted small">Spend is recorded services plus resolved defects, counted on the day the service was recorded or the defect was resolved; imported fuel-card spend is shown as its own band on Spend over time, folded into Cost vs usage, and broken out on its own in Fuel cost per km. Planned is scheduled servicing; unplanned is a defect repair. The KPIs above cover maintenance only, for the ${cfg.label} on screen, against the average of the ${cfg.baselineN} ${cfg.baselineN === 1 ? cfg.label : cfg.plural} before. Running cost divides a vehicle's spend by the distance or hours covered between its first and last service in the window, so it needs at least two services to show a rate.</p>
+      <p class="section-foot muted small">Spend is recorded services plus resolved defects, counted on the day the service was recorded or the defect was resolved; imported fuel-card spend is shown as its own band on Spend over time, folded into Cost vs usage, and broken out on its own in Fuel cost per km. Planned is scheduled servicing; unplanned is a defect repair. The KPIs above cover servicing, repairs and fuel for the ${cfg.label} on screen, against the average of the ${cfg.baselineN} ${cfg.baselineN === 1 ? cfg.label : cfg.plural} before. Running cost divides a vehicle's spend by the distance or hours covered between its first and last service in the window, so it needs at least two services to show a rate.</p>
 
       ${projection(end)}`;
 
