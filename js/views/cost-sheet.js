@@ -673,6 +673,12 @@ AD.views['cost-sheet'] = (function () {
     const MIN_SPAN_DAYS = MIN_USAGE_SPAN_DAYS, THIN_SPAN_DAYS = THIN_USAGE_SPAN_DAYS;
     const maxWindowDays = RUN_WEEKS * 7;
     const fmtKmRate = (n) => '$' + (n >= 10 ? Math.round(n).toLocaleString('en-AU') : n.toFixed(2));
+    // The usage data runs up to today, so the spend window must too. On the
+    // year/month view `end` is the last day of the period (e.g. 31/12), and
+    // counting back from there would measure spend over days that haven't
+    // happened yet — always $0.
+    const today = T.todayKey();
+    const until = end && end < today ? end : today;
 
     // Per vehicle, measure over its OWN honest window — the span we actually
     // have data for — rather than extrapolating a short GPS sample out to 52
@@ -691,11 +697,11 @@ AD.views['cost-sheet'] = (function () {
         : u ? kmSpan : hrSpan;
       if (span < MIN_SPAN_DAYS) return null;                        // not enough data to trust a rate
 
-      const from = T.addDays(end, -(span - 1));
-      const maintRows = rowsBetween(from, end).filter((r) => r.vehicleId === v.id);
+      const from = T.addDays(until, -(span - 1));
+      const maintRows = rowsBetween(from, until).filter((r) => r.vehicleId === v.id);
       const maintSpend = maintRows.reduce((n, r) => n + r.cost, 0);
       const unplanned = maintRows.filter((r) => r.kind === UNPLANNED).reduce((n, r) => n + r.cost, 0);
-      const fuel = fuelRows().filter((r) => r.vehicleId === v.id && r.date >= from && r.date <= end).reduce((n, r) => n + r.cost, 0);
+      const fuel = fuelRows().filter((r) => r.vehicleId === v.id && r.date >= from && r.date <= until).reduce((n, r) => n + r.cost, 0);
       const spend = maintSpend + fuel;
 
       let perKm = null, windowKm = null;
