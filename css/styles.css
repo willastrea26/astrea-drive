@@ -3277,3 +3277,33 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 .rates-lock-ico svg { width: 20px; height: 20px; }
 @media (max-width: 900px) { .rate-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 520px) { .rate-kpis { grid-template-columns: minmax(0, 1fr); } }
+
+/* Rates tab — shift picker, whole-shift totals and the all-shifts table */
+.rate-calc-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px 18px; flex-wrap: wrap; margin-bottom: 14px; }
+.rate-calc-bar .seg { max-width: 100%; overflow-x: auto; }
+.rate-calc-bar .seg button { white-space: nowrap; }
+.rate-hours { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); font-weight: 600; }
+.rate-hours input { width: 78px; height: 36px; text-align: right; }
+.rate-shift-total {
+  display: grid; grid-template-columns: minmax(0, 1.3fr) repeat(3, minmax(0, 1fr)); gap: 12px; align-items: center;
+  padding: 14px 18px; margin-bottom: 18px; border-radius: var(--r-lg);
+  border: 1px solid var(--rule); background: var(--paper-2);
+}
+.rate-shift-total > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.rate-shift-total small { color: var(--muted); font-size: 12px; font-weight: 600; }
+.rate-shift-total b { font-family: var(--font-display); font-size: 20px; color: var(--ink); letter-spacing: -.01em; }
+.rate-shift-total .rate-shift-what { font-weight: 700; color: var(--ink); font-size: 15px; }
+.rate-shift-total .is-negative b, .rate-shift-table .is-negative { color: var(--red); }
+.rate-shift-total.is-empty { display: flex; gap: 10px; color: var(--muted); }
+.rate-shift-total.is-empty svg { width: 18px; height: 18px; flex: none; }
+.rate-shift-wrap { margin-bottom: 22px; }
+.rate-shift-table tbody tr { cursor: pointer; }
+.rate-shift-table tbody tr.is-on td { background: var(--blue-tint); font-weight: 600; }
+.rate-shift-table .t2-inline { color: var(--muted); font-weight: 400; font-size: 12.5px; margin-left: 4px; }
+.rate-shift-grid { display: grid; grid-template-columns: minmax(110px, auto) minmax(0, 1fr) minmax(0, 1fr); gap: 8px 12px; align-items: center; margin-top: 4px; }
+.rate-shift-h { font-size: 12.5px; color: var(--muted); font-weight: 600; }
+.rate-shift-name { font-weight: 600; color: var(--ink-2); font-size: 14px; }
+@media (max-width: 700px) {
+  .rate-shift-total { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .rate-shift-total .rate-shift-what { grid-column: 1 / -1; }
+}
