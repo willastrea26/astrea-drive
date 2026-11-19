@@ -293,7 +293,20 @@ AD.views = AD.views || {};
   const showingSampleEquipment = () => !AD.store.all('equipment').length;
   const sampleEquipment = (id) => (showingSampleEquipment() ? SAMPLE_EQUIPMENT().find((x) => x.id === id) || null : null);
   const equipmentFor = (employeeId) => AD.store.all('equipment').filter((x) => x.employeeId === employeeId);
-  AD.equipment = { EQ_CATEGORIES, EQ_STATUSES, EQ_TONE, INSPECT_SOON_DAYS, equipmentFor, sampleEquipment };
+  /** "Edit" on a sample item: sample items aren't stored anywhere, so this opens
+   *  the Add form pre-filled with the sample's details; saving creates a real
+   *  item. The sample's made-up person isn't carried over (they aren't in the
+   *  Employee register), so who has it is chosen afresh. */
+  function editSampleEquipment(x, onSaved) {
+    if (!AD.store.available('equipment')) {
+      AD.ui.toast('Run supabase/create-equipment.sql in the Supabase SQL Editor first — then items can be saved.', 'error');
+      return;
+    }
+    const { id, sample, sampleAssignee, assignee, ...fields } = x;
+    AD.equipmentForm(null, onSaved, Object.assign({}, fields, { employeeId: '', fromSample: true }));
+  }
+
+  AD.equipment = { EQ_CATEGORIES, EQ_STATUSES, EQ_TONE, INSPECT_SOON_DAYS, equipmentFor, sampleEquipment, editSample: editSampleEquipment };
 
   /** Add / edit an equipment item. Pass null to add; `preset` pre-fills a new
    *  one (e.g. { employeeId } when adding from an employee's profile). */
@@ -306,9 +319,10 @@ AD.views = AD.views || {};
       .map((p) => [p.id, p.position ? `${p.name} — ${p.position}` : p.name]);
 
     modal({
-      title: isNew ? 'Add equipment' : `Edit ${x.name || 'equipment'}`,
+      title: x.fromSample ? `Edit ${x.name || 'equipment'}` : isNew ? 'Add equipment' : `Edit ${x.name || 'equipment'}`,
       wide: true,
       body: `
+        ${x.fromSample ? `<div class="sample-note">${AD.icons.alert}<div><b>This is a sample item.</b> Saving adds it to your equipment register as a <b>real item</b> — check the details match your actual equipment and choose who has it. Once you’ve saved your first real item, the other sample items are hidden.</div></div>` : ''}
         <form class="form-grid" novalidate>
           <div class="form-section-title full"><b>Item</b><span>What it is and how to identify it</span></div>
           <div class="field"><label>Item <span class="req">*</span></label><input type="text" name="name" value="${esc(x.name)}" placeholder="e.g. GNSS rover"></div>
@@ -329,7 +343,7 @@ AD.views = AD.views || {};
         <div class="form-actions">
           ${isNew ? '' : '<button class="btn btn-danger-ghost" data-remove type="button" style="margin-right:auto">Remove</button>'}
           <button class="btn btn-ghost" data-close type="button">Cancel</button>
-          <button class="btn btn-primary" data-save type="button">${isNew ? 'Add equipment' : 'Save changes'}</button>
+          <button class="btn btn-primary" data-save type="button">${x.fromSample ? 'Save as real item' : isNew ? 'Add equipment' : 'Save changes'}</button>
         </div>`,
       onMount(el, close) {
         const form = el.querySelector('form');
@@ -590,7 +604,7 @@ AD.views = AD.views || {};
         }))
         .sort((a, b) => String(a.assetTag || a.name).localeCompare(String(b.assetTag || b.name))),
       sample: showingSampleEquipment,
-      sampleNote: () => `<b>Sample equipment.</b> These items are made up to show how the equipment register — and each item’s profile — will look. They’re not saved anywhere and disappear as soon as you add your first real item.${!AD.store.available('equipment') ? ' To start adding your own, run <code>supabase/create-equipment.sql</code> in the Supabase SQL Editor.' : ''}`,
+      sampleNote: () => `<b>Sample equipment.</b> These items are made up to show how the equipment register — and each item’s profile — will look. They’re not saved anywhere. Use <b>Edit</b> on one to turn it into a real item with your own details, or <b>Add equipment</b> to start fresh; the samples disappear once your first real item is saved.${!AD.store.available('equipment') ? ' To start adding your own, run <code>supabase/create-equipment.sql</code> in the Supabase SQL Editor.' : ''}`,
       groupOf: (r) => r.category, groupOrder: EQ_CATEGORIES,
       search: ['name', 'category', 'make', 'assetTag', 'serial', 'location', 'assignee', 'status', 'notes'],
       filters: [
@@ -610,6 +624,8 @@ AD.views = AD.views || {};
       },
       add: { label: 'Add equipment', open: (done) => AD.equipmentForm(null, (saved) => (saved ? AD.go('equipment/' + saved.id) : done())) },
       edit: (r, done) => AD.equipmentForm(r, done),
+      // Editing a sample saves it as a real item, then opens its profile.
+      editSample: (r, done) => editSampleEquipment(r, (saved) => (saved ? AD.go('equipment/' + saved.id) : done())),
       href: (r) => '#/equipment/' + encodeURIComponent(r.id),
       cols: [
         { head: 'Item', width: 230, cell: (r) => `<a class="id" href="#/equipment/${encodeURIComponent(r.id)}">${esc(r.name)}</a><span class="t2">${esc(r.assetTag || r.category)}</span>` },
@@ -676,8 +692,12 @@ AD.views = AD.views || {};
       const needle = q.trim().toLowerCase();
       const list = all.filter((r) => reg.filters.every((f, i) => !picks[i] || f.match(r, picks[i]))
         && (!needle || haystack(r).includes(needle)));
-      // Sample rows are read-only, so they get no Edit button.
-      const cols = reg.cols.concat(reg.edit ? [{ head: '', cls: 'col-action', cell: (r) => (r.sample ? '' : `<button class="btn btn-sm btn-ghost" data-edit="${esc(r.id)}">${AD.icons.edit} Edit</button>`) }] : []);
+      // Sample rows get an Edit button only where the register supports turning
+      // a sample into a real record (reg.editSample); otherwise they're read-only.
+      const editBtn = (r) => (r.sample
+        ? (reg.editSample ? `<button class="btn btn-sm btn-ghost" data-edit-sample="${esc(r.id)}">${AD.icons.edit} Edit</button>` : '')
+        : `<button class="btn btn-sm btn-ghost" data-edit="${esc(r.id)}">${AD.icons.edit} Edit</button>`);
+      const cols = reg.cols.concat(reg.edit ? [{ head: '', cls: 'col-action', cell: editBtn }] : []);
       const colspan = cols.length;
       const rowHtml = (r) => `<tr${reg.href ? ` class="row-link" data-href="${esc(reg.href(r))}" title="Open ${esc(r.name || r.make || r.id)}"` : ''}>${cols.map((c) => `<td class="${c.cls || ''}">${c.cell(r)}</td>`).join('')}</tr>`;
       let body;
@@ -696,6 +716,9 @@ AD.views = AD.views || {};
       root.querySelector('#reg-body').innerHTML = body || `<tr><td colspan="${colspan}" class="empty">${empty}</td></tr>`;
       root.querySelectorAll('[data-edit]').forEach((b) => {
         b.onclick = () => reg.edit(AD.store.get(reg.table, b.dataset.edit), () => draw());
+      });
+      root.querySelectorAll('[data-edit-sample]').forEach((b) => {
+        b.onclick = () => reg.editSample(all.find((r) => r.id === b.dataset.editSample), () => draw());
       });
       // Clicking anywhere on a row opens its profile (links and buttons keep their own action).
       root.querySelectorAll('tr[data-href]').forEach((tr) => tr.addEventListener('click', (e) => {

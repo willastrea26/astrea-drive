@@ -118,7 +118,7 @@ AD.views.equipment = (function () {
 
     el.innerHTML = `
       ${back}
-      ${sample ? `<div class="sample-note">${I.alert}<div><b>Sample item.</b> Made up to show how an equipment profile looks — it isn’t saved anywhere, can’t be edited, and disappears once you add your first real item to the equipment register.</div></div>` : ''}
+      ${sample ? `<div class="sample-note">${I.alert}<div><b>Sample item.</b> Made up to show how an equipment profile looks — it isn’t saved anywhere. Use <b>Edit item</b> to turn it into a real item with your own details; the other samples are hidden once your first real item is saved.</div></div>` : ''}
       <header class="veh-hero emp-hero">
         ${photoBox(x)}
         <div class="veh-ident">
@@ -132,7 +132,9 @@ AD.views.equipment = (function () {
           <div><dt>Next inspection</dt><dd>${next.html}${next.flag ? ` ${next.flag}` : ''}</dd></div>
         </dl>
         <div class="veh-actions">
-          ${sample ? '' : `<button class="btn btn-primary" data-edit-eq>${I.edit} Edit item</button>`}
+          ${sample
+            ? `<button class="btn btn-primary" data-edit-sample>${I.edit} Edit item</button>`
+            : `<button class="btn btn-primary" data-edit-eq>${I.edit} Edit item</button>`}
         </div>
       </header>
 
@@ -167,7 +169,11 @@ AD.views.equipment = (function () {
         </section>
       </div>`;
 
-    if (sample) return; // read-only: nothing to wire up
+    if (sample) {
+      // Samples aren't stored, so "Edit" saves a real copy and opens its profile.
+      el.querySelector('[data-edit-sample]').onclick = () => AD.equipment.editSample(x, (saved) => { if (saved) AD.go('equipment/' + saved.id); });
+      return;
+    }
     const openForm = () => AD.equipmentForm(x, (saved) => (saved ? draw() : AD.go('equipment-register')));
     el.querySelector('[data-edit-eq]').onclick = openForm;
     el.querySelector('[data-reassign]').onclick = openForm;
