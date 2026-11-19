@@ -46,8 +46,8 @@ create table if not exists public.employee_rates (
 
 -- Night / Saturday / Sunday / public-holiday rates, added later (re-running
 -- this file is safe). One entry per shift, e.g.
---   {"night": {"charge": 150, "payX": 1.25}, "sunday": {"charge": 220, "payX": 2}}
--- charge = charge-out $ per hour; payX = pay multiplier (blank = same as day).
+--   {"night": {"chargeX": 1}, "saturday": {"chargeX": 1.5}, "sunday": {"chargeX": 2}}
+-- chargeX = multiplier on the day charge-out rate (no entry = not charged).
 alter table public.employee_rates add column if not exists "shiftRates" jsonb not null default '{}'::jsonb;
 
 revoke all on table public.employee_rates from anon;

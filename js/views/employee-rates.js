@@ -12,11 +12,12 @@
  * week, 52 weeks (1,976 hours a year).
  *
  * Shifts: the day charge-out rate plus optional night, Saturday, Sunday and
- * public-holiday rates (stored in "shiftRates"). Each shift can also carry a
- * pay multiplier (e.g. 1.5 = time-and-a-half) so its cost and margin are real.
- * Nothing is assumed: a blank multiplier means pay doesn't change, a blank
- * charge-out means that shift isn't charged. The shift buttons at the top of
- * the tab show what a shift actually comes to — charge, cost and margin.
+ * public-holiday rates (stored in "shiftRates" as { chargeX }). Each shift's
+ * charge-out is the day rate × its multiplier (e.g. $250 × 2 = $500 an hour),
+ * and the dollar figure is shown everywhere so nobody has to do the sum. Pay
+ * (the cost side) is the same on every shift. A blank multiplier means that
+ * shift isn't charged. The shift buttons at the top of the tab show what a
+ * shift actually comes to — charge, cost and margin.
  *
  * Activity-log entries say that rates changed, never what they are.
  */
@@ -62,16 +63,27 @@ AD.employeeRates = (function () {
     return { salary, hourly, sup, payHour, salaryEquiv: hourly != null && salary == null ? hourly * HOURS_PER_YEAR : null };
   }
 
-  /** Charge, pay multiplier, cost and margin per hour for one shift. */
-  function shiftFig(r, base, key) {
+  /** A shift's charge-out multiplier (× the day rate), or null if not set. */
+  function chargeXOf(r, key) {
+    if (key === 'day') return 1;
     const sr = (r.shiftRates && r.shiftRates[key]) || {};
-    const charge = key === 'day' ? num(r.chargeOutRate) : num(sr.charge);
-    const setX = key === 'day' ? null : num(sr.payX);
-    const payX = setX != null ? setX : 1;
-    const payHour = base.payHour != null ? base.payHour * payX : null;
-    const costHour = payHour != null ? payHour * (1 + (base.sup || 0) / 100) : null;
+    const x = num(sr.chargeX);
+    if (x != null) return x;
+    // Rates saved before multipliers applied to the charge-out: { charge, payX }.
+    const legacyX = num(sr.payX);
+    if (legacyX != null) return legacyX;
+    const c = num(sr.charge), day = num(r.chargeOutRate);
+    return c != null && day ? c / day : null;
+  }
+
+  /** Charge-out (day rate × multiplier), cost and margin per hour for one shift. */
+  function shiftFig(r, base, key) {
+    const day = num(r.chargeOutRate);
+    const chargeX = chargeXOf(r, key);
+    const charge = day != null && chargeX != null ? day * chargeX : null;
+    const costHour = base.payHour != null ? base.payHour * (1 + (base.sup || 0) / 100) : null;
     const margin = charge != null && costHour != null ? charge - costHour : null;
-    return { charge, payX, setX, payHour, costHour, margin, pct: margin != null && charge ? Math.round((margin / charge) * 100) : null };
+    return { day, chargeX, charge, costHour, margin, pct: margin != null && charge ? Math.round((margin / charge) * 100) : null };
   }
 
   // ---------------------------------------------------------------- panel
@@ -132,7 +144,8 @@ AD.employeeRates = (function () {
     const payKpi = r.payType === 'Hourly'
       ? kpi('Hourly pay rate', base.hourly != null ? money2(base.hourly) : '—', base.salaryEquiv != null ? `≈ ${money(base.salaryEquiv)} a year (7.6-hr days)` : 'Hourly')
       : kpi('Annual salary', base.salary != null ? money(base.salary) : '—', base.payHour != null ? `≈ ${money2(base.payHour)}/hr (7.6-hr days)` : 'Salary');
-    const costSub = [f.setX != null && f.setX !== 1 ? `pay ${xText(f.setX)}` : 'pay', base.sup != null ? `+ ${base.sup}% super` : '(no super % recorded)'].join(' ');
+    const costSub = base.sup != null ? `pay + ${base.sup}% super` : 'pay only (no super % recorded)';
+    const chargeSub = s.key !== 'day' && f.charge != null ? `${money2(f.day)} day rate ${xText(f.chargeX)}` : 'per hour, charged to clients';
     const tot = (n) => (n != null ? money2(n * hours) : '—');
     const total = f.charge == null
       ? `<div class="rate-shift-total is-empty">${AD.icons.alert}<span>No ${esc(s.label)} charge-out rate set for this person yet. Use <b>Edit rates</b> to add one.</span></div>`
@@ -146,8 +159,8 @@ AD.employeeRates = (function () {
       const g = shiftFig(r, base, x.key);
       return `<tr data-shift="${x.key}" class="${x.key === s.key ? 'is-on' : ''}" title="Show ${esc(x.label)} figures">
         <td>${esc(x.label)}</td>
-        <td class="num">${g.charge != null ? money2(g.charge) : '<span class="muted">Not set</span>'}</td>
-        <td class="num">${x.key === 'day' ? '<span class="muted">Base</span>' : g.setX != null ? xText(g.setX) : '<span class="muted">Same as day</span>'}</td>
+        <td class="num">${x.key === 'day' ? '<span class="muted">Base</span>' : g.chargeX != null ? xText(g.chargeX) : '<span class="muted">Not set</span>'}</td>
+        <td class="num"><b>${g.charge != null ? money2(g.charge) : '<span class="muted">—</span>'}</b></td>
         <td class="num">${g.costHour != null ? money2(g.costHour) : '—'}</td>
         <td class="num${g.margin != null && g.margin < 0 ? ' is-negative' : ''}">${g.margin != null ? `${money2(g.margin)}${g.pct != null ? ` <span class="t2-inline">${g.pct}%</span>` : ''}` : '—'}</td>
       </tr>`;
@@ -155,13 +168,13 @@ AD.employeeRates = (function () {
     return `
       <div class="cost-kpis rate-kpis">
         ${payKpi}
-        ${kpi(`${s.label} charge-out`, f.charge != null ? money2(f.charge) : '—', 'per hour, charged to clients')}
+        ${kpi(`${s.label} charge-out`, f.charge != null ? money2(f.charge) : '—', chargeSub)}
         ${kpi(`${s.label} cost per hour`, f.costHour != null ? money2(f.costHour) : '—', costSub)}
         ${kpi(`${s.label} margin per hour`, f.margin != null ? money2(f.margin) : '—', f.pct != null ? `${f.pct}% of the charge-out rate` : 'needs a charge-out rate and a pay rate', f.margin != null && f.margin < 0 ? ' is-negative' : '')}
       </div>
       ${total}
       <div class="table-wrap rate-shift-wrap"><table class="data rate-shift-table">
-        <thead><tr><th>Shift</th><th class="num">Charge-out /hr</th><th class="num">Pay rate</th><th class="num">Cost /hr</th><th class="num">Margin /hr</th></tr></thead>
+        <thead><tr><th>Shift</th><th class="num">Rate</th><th class="num">Charge-out /hr</th><th class="num">Cost /hr</th><th class="num">Margin /hr</th></tr></thead>
         <tbody>${rows}</tbody>
       </table></div>`;
   }
@@ -215,13 +228,16 @@ AD.employeeRates = (function () {
           <div class="field full">
             <label>Night, weekend &amp; public holiday rates</label>
             <div class="rate-shift-grid">
-              <span></span><span class="rate-shift-h">Charge-out ($ per hour)</span><span class="rate-shift-h">Pay rate ×</span>
-              ${EXTRA_SHIFTS.map((s) => `
+              <span></span><span class="rate-shift-h">Day rate ×</span><span class="rate-shift-h">Charge-out ($ per hour)</span>
+              ${EXTRA_SHIFTS.map((s) => {
+                const cx = r ? chargeXOf(x, s.key) : null;
+                return `
                 <span class="rate-shift-name">${esc(s.label)}</span>
-                <input type="number" name="sr_${s.key}_charge" value="${val(sr[s.key] && sr[s.key].charge)}" min="0" step="0.01" inputmode="decimal" aria-label="${esc(s.label)} charge-out rate">
-                <input type="number" name="sr_${s.key}_payX" value="${val(sr[s.key] && sr[s.key].payX)}" min="0" step="0.05" inputmode="decimal" placeholder="1" aria-label="${esc(s.label)} pay multiplier">`).join('')}
+                <input type="number" name="sr_${s.key}_chargeX" value="${cx != null ? esc(Number(cx.toFixed(3))) : ''}" min="0" step="0.05" inputmode="decimal" placeholder="e.g. 1.5" aria-label="${esc(s.label)} charge-out multiplier">
+                <span class="rate-shift-dollar" data-shift-dollar="${s.key}"></span>`;
+              }).join('')}
             </div>
-            <div class="help"><b>Pay rate ×</b> is how much more this person is paid on that shift — e.g. 1.5 for time-and-a-half, 2 for double time. Leave it blank if their pay doesn’t change. Leave a charge-out rate blank if you don’t charge that shift.</div>
+            <div class="help">Multiplies the <b>day charge-out rate</b> — e.g. 1 for the same rate, 1.5 for time-and-a-half, 2 for double time. The dollar amount works itself out. Leave it blank if you don’t charge that shift.</div>
           </div>
           <div class="field full"><label>Notes</label><textarea name="notes" rows="2" placeholder="e.g. Award level, allowances, next review date">${esc(x.notes || '')}</textarea></div>
         </form>
@@ -250,10 +266,19 @@ AD.employeeRates = (function () {
         pt.addEventListener('change', sync);
         sal.addEventListener('input', sync);
         sync();
+        // Each shift's dollar charge-out, worked out live from the day rate × multiplier.
+        const dollars = () => EXTRA_SHIFTS.forEach((s) => {
+          const day = num(f.elements.chargeOutRate.value), mx = num(f.elements[`sr_${s.key}_chargeX`].value);
+          el.querySelector(`[data-shift-dollar="${s.key}"]`).innerHTML = mx == null ? '<span class="muted">Not charged</span>'
+            : day == null ? '<span class="muted">Enter the day charge-out rate first</span>'
+            : `<span class="muted">${money2(day)} × ${Number(mx.toFixed(3))} =</span> <b>${money2(day * mx)}</b>`;
+        });
+        f.addEventListener('input', dollars);
+        dollars();
         saveBtn.onclick = async () => {
           const d = formData(f);
           const err = {};
-          const shiftKeys = EXTRA_SHIFTS.flatMap((s) => [`sr_${s.key}_charge`, `sr_${s.key}_payX`]);
+          const shiftKeys = EXTRA_SHIFTS.map((s) => `sr_${s.key}_chargeX`);
           ['annualSalary', 'hourlyRate', 'chargeOutRate', 'superPercent', ...shiftKeys].forEach((k) => {
             if (d[k] !== '' && d[k] != null && !(Number(d[k]) >= 0)) err[k] = 'Enter a number (0 or more).';
           });
@@ -262,13 +287,13 @@ AD.employeeRates = (function () {
           if (d.payType === 'Salary' && d.annualSalary === '') err.annualSalary = 'Enter the annual salary.';
           if (!showErrors(f, err)) {
             const bad = shiftKeys.find((k) => err[k]);
-            if (bad) toast('Check the night, weekend & public holiday rates — each must be a number (0 or more).', 'error');
+            if (bad) toast('Check the night, weekend & public holiday multipliers — each must be a number (0 or more).', 'error');
             return;
           }
           const shiftRates = {};
           EXTRA_SHIFTS.forEach((s) => {
-            const charge = num(d[`sr_${s.key}_charge`]), payX = num(d[`sr_${s.key}_payX`]);
-            if (charge != null || payX != null) shiftRates[s.key] = { charge, payX };
+            const chargeX = num(d[`sr_${s.key}_chargeX`]);
+            if (chargeX != null) shiftRates[s.key] = { chargeX };
           });
           const salaried = d.payType === 'Salary';
           const rec = {

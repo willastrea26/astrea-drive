@@ -3307,3 +3307,5 @@ h1, h2, h3 { letter-spacing: -0.02em; }
   .rate-shift-total { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .rate-shift-total .rate-shift-what { grid-column: 1 / -1; }
 }
+.rate-shift-dollar { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rate-shift-dollar b { color: var(--ink); font-size: 15px; }
