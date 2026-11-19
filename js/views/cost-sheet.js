@@ -835,27 +835,51 @@ AD.views['cost-sheet'] = (function () {
       ]);
     };
 
-    const rows = lines.map((l, i) => {
+    // Vehicle cell: the cartoon vehicle, its ID and rego (same as Fuel purchased by vehicle).
+    const idCell = (v) => {
+      const art = (AD.art && AD.art.forVehicle(v, 44)) || '';
+      return `<span class="id">${art ? `<span class="cs-veh-art">${art}</span>` : ''}<span class="cs-id-text">${esc(v.id)}${v.rego ? `<small class="cs-rego">${esc(v.rego)}</small>` : ''}</span></span>`;
+    };
+    const shortRange = (fe) => `${T.fmtKey(fe.fromKey).slice(0, 5)}–${T.fmtKey(fe.toKey).slice(0, 5)}`;
+    const HIGH = 1.3; // 30% above the median is called out
+
+    const rated = lines.filter((l) => l.fe.hasFuel && l.fe.costPerKm != null);
+    const noFuel = lines.filter((l) => !(l.fe.hasFuel && l.fe.costPerKm != null));
+
+    const rows = rated.map((l, i) => {
       const fe = l.fe;
-      if (!fe.hasFuel || fe.costPerKm == null) {
-        return `<a class="cs-row cs-row-muted" href="${vehHref(l.v.id)}" style="--i:${i}" ${tip(l)}>
-          <span class="id">${esc(l.v.id)}</span>
-          <span class="cs-hbar"></span>
-          <span class="cs-row-val">—</span>
-          <span class="cs-row-meta">No fuel in the GPS window · ${km0(fe.kmTotal)} km over ${fe.kmDaysWithData} days</span>
-        </a>`;
-      }
-      const costly = medKm > 0 && fe.costPerKm > medKm * 1.3;
-      const flag = l.thin ? '<span class="cs-flag cs-flag-soft">Thin data</span>'
-        : costly ? '<span class="cs-flag">High fuel/km</span>' : '';
-      const econ = fe.litresPer100 != null ? ` · ${fmtL100(fe.litresPer100)}` : '';
-      return `<a class="cs-row" href="${vehHref(l.v.id)}" style="--i:${i}" ${tip(l)}>
-        <span class="id">${esc(l.v.id)}</span>
+      const costly = medKm > 0 && fe.costPerKm > medKm * HIGH;
+      const chips = [
+        costly ? `<span class="cs-chip cs-chip-amber">${fe.costPerKm / medKm >= 2 ? `${(fe.costPerKm / medKm).toFixed(1)}× the median` : `${Math.round((fe.costPerKm / medKm - 1) * 100)}% above median`}</span>` : '',
+        l.thin ? '<span class="cs-chip">Thin data</span>' : ''
+      ].join('');
+      return `<a class="cs-row cs-row-art cs-fuelkm-row" href="${vehHref(l.v.id)}" style="--i:${i}" ${tip(l)}>
+        ${idCell(l.v)}
         <span class="cs-hbar"><i${costly ? ' class="cs-high-fuel"' : ' class="cs-fuel"'} style="width:${(fe.costPerKm / top) * 100}%"></i>${medKm > 0 ? `<b class="cs-median" style="left:${(medKm / top) * 100}%"></b>` : ''}</span>
-        <span class="cs-row-val">${fmtFuelRate(fe.costPerKm)}<small>/km</small></span>
-        <span class="cs-row-meta">${flag ? flag + ' · ' : ''}${L.fmtAUD(fe.fuelCost)} fuel over ${km0(fe.kmTotal)} km${econ}</span>
+        <span class="cs-row-val">${fmtFuelRate(fe.costPerKm)}<small>/km</small>${fe.litresPer100 != null ? `<span class="cs-row-sub">${fmtL100(fe.litresPer100)}</span>` : ''}</span>
+        <span class="cs-row-meta">${chips}${L.fmtAUD(fe.fuelCost)} fuel · ${km0(fe.kmTotal)} km · ${fe.kmDaysWithData} days (${shortRange(fe)})</span>
       </a>`;
     }).join('');
+
+    // Tracked vehicles with GPS distance but no fuel-card spend in the same days.
+    const noFuelRows = noFuel.map((l, i) => `<a class="cs-row cs-row-art cs-row-muted cs-fuelkm-row" href="${vehHref(l.v.id)}" style="--i:${rated.length + i}" ${tip(l)}>
+        ${idCell(l.v)}
+        <span class="cs-row-nofuel">${km0(l.fe.kmTotal)} km driven over ${l.fe.kmDaysWithData} days (${shortRange(l.fe)}), but no fuel-card transactions dated in those days</span>
+        <span class="cs-row-val">—</span>
+      </a>`).join('');
+
+    // Headline figures across the vehicles that have a rate.
+    const econs = rated.map((l) => l.fe.litresPer100).filter((n) => n != null);
+    const medEcon = econs.length ? median(econs) : null;
+    const fuelSum = rated.reduce((n, l) => n + l.fe.fuelCost, 0);
+    const kmSum = rated.reduce((n, l) => n + l.fe.kmTotal, 0);
+    const kpi = (label, value, sub) => `<div class="cost-kpi"><span>${esc(label)}</span><strong>${value}</strong><small>${sub}</small></div>`;
+    const kpis = rated.length ? `<div class="cost-kpis cs-fuelkm-kpis">
+        ${kpi('Median fuel cost', `${fmtFuelRate(medKm)}<small class="cs-kpi-unit">/km</small>`, `across ${rated.length} vehicle${rated.length === 1 ? '' : 's'} with fuel data`)}
+        ${kpi('Median economy', medEcon != null ? `${medEcon.toFixed(1)}<small class="cs-kpi-unit"> L/100km</small>` : '—', 'litres per 100 km')}
+        ${kpi('Fuel matched to GPS', L.fmtAUD(fuelSum), `over ${km0(kmSum)} km driven`)}
+        ${kpi('Days of GPS data', (() => { const d = lines.map((l) => l.fe.kmDaysWithData); const a = Math.min(...d), b = Math.max(...d); return a === b ? `${a}` : `${a}–${b}`; })(), `per vehicle · ${THIN_DAYS}+ days is a steady figure`)}
+      </div>` : '';
 
     const tableRows = lines.map((l) => {
       const fe = l.fe;
@@ -873,10 +897,20 @@ AD.views['cost-sheet'] = (function () {
     const dayLabel = dMin === dMax ? `${dMin} days` : `${dMin}–${dMax} days`;
 
     return `<section class="section">
-      ${sectionHead({ title: 'Fuel cost per km', meta: `${lines.length} GPS-tracked vehicle${lines.length === 1 ? '' : 's'} · real fuel ÷ real distance driven, matched day-for-day (${dayLabel} of data) · the tick marks the median` })}
+      ${sectionHead({ title: 'Fuel cost per km', meta: `${lines.length} GPS-tracked vehicle${lines.length === 1 ? '' : 's'} · real fuel ÷ real distance, matched day-for-day (${dayLabel} of data)` })}
       <figure class="viz-card">
-        <figcaption><span class="viz-sub">Fuel-card spend divided by the distance the GPS actually recorded over the same days — no estimated kilometres. Hover any row to see the full working: the fuel, the distance, the days, and the division. Litres per 100km is the truer efficiency measure, since it ignores fuel-price swings.</span></figcaption>
-        <div class="cs-rows">${rows}</div>
+        <figcaption><span class="viz-sub">Fuel-card spend ÷ the distance the GPS recorded over the same days. Hover a vehicle for the full working.</span></figcaption>
+        ${kpis}
+        ${rated.length ? `<div class="cs-rows">${rows}</div>
+        <p class="cs-legend">
+          <span><b class="cs-legend-tick"></b>Median (${fmtFuelRate(medKm)}/km)</span>
+          <span><i class="cs-legend-swatch cs-fuel"></i>Fuel cost per km</span>
+          <span><i class="cs-legend-swatch cs-high-fuel"></i>30%+ above the median</span>
+          <span><span class="cs-chip">Thin data</span>under ${THIN_DAYS} days of GPS distance, so the figure may still move</span>
+        </p>` : ''}
+        ${noFuel.length ? `<div class="cs-subhead">Tracked, but no fuel to match yet <span class="muted">(${noFuel.length})</span></div>
+        <div class="cs-rows">${noFuelRows}</div>
+        <p class="cs-more">Usually the latest fuel-card import stops before these days, or the vehicle’s fuel card isn’t linked to it. Importing a newer statement fills these in.</p>` : ''}
         ${V.table(['Vehicle', 'Fuel / km', 'L/100km', 'Fuel spend', 'Litres', 'Distance', 'GPS days'], tableRows)}
       </figure>
     </section>`;
