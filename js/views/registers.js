@@ -31,6 +31,64 @@ AD.views = AD.views || {};
   // Sample dates are relative to today, so "due soon" / "overdue" look realistic.
   const day = (offset) => AD.time.addDays(AD.time.todayKey(), offset);
 
+  // ---- Costs (technology & equipment) ---------------------------------------
+  // Each device / item can carry a purchase price and a monthly cost (phone or
+  // SIM plan, subscription, Starlink, or hire / lease for equipment).
+  const money = (n) => '$' + Math.round(Number(n) || 0).toLocaleString('en-AU');
+  const numOrNull = (v) => (v === '' || v == null ? null : Math.round(Number(v) * 100) / 100);
+  const badMoney = (v) => v !== '' && v != null && !(Number(v) >= 0);
+  /** Whole months from the purchase date to today (0 within the first month). */
+  function monthsOwned(purchased) {
+    if (!purchased) return 0;
+    const a = AD.time.parseKey(String(purchased).slice(0, 10)), b = AD.time.parseKey(AD.time.todayKey());
+    return Math.max(0, (b.y - a.y) * 12 + (b.m - a.m) - (b.d < a.d ? 1 : 0));
+  }
+  /** Total spent so far: purchase price + monthly cost for each month owned. */
+  const costToDate = (r) => (Number(r.purchasePrice) || 0) + (Number(r.monthlyCost) || 0) * monthsOwned(r.purchased);
+  /** Register cell: "$1,499" with "+ $65/mth" underneath. */
+  const costCell = (r) => {
+    const p = Number(r.purchasePrice) || 0, m = Number(r.monthlyCost) || 0;
+    if (!p && !m) return AD.ui.dash;
+    return `${p ? money(p) : '<span class="muted">—</span>'}${m ? `<span class="t2">+ ${money(m)}/mth</span>` : ''}`;
+  };
+  /** " · $48,200 value · $419/month" for a register's summary line. */
+  const costSummary = (rows) => {
+    const value = rows.reduce((s, r) => s + (Number(r.purchasePrice) || 0), 0);
+    const monthly = rows.reduce((s, r) => s + (Number(r.monthlyCost) || 0), 0);
+    return (value ? ` · ${money(value)} value` : '') + (monthly ? ` · ${money(monthly)}/month` : '');
+  };
+  /** Save, but if the database doesn't have columns added by a later SQL file
+   *  yet, save everything else and say which file to run. */
+  async function saveWithLaterColumns(fn, rec, cols, file) {
+    try {
+      return await fn(rec);
+    } catch (e) {
+      const msg = String((e && (e.message || e.details || e.hint)) || e);
+      const present = cols.filter((c) => c in rec);
+      if (!present.length || !/pgrst204|42703|schema cache|could not find/i.test(msg)) throw e;
+      const rest = Object.assign({}, rec);
+      present.forEach((c) => delete rest[c]);
+      AD.ui.toast(`Saved, but costs couldn’t be stored yet — run ${file} again in the Supabase SQL Editor.`, 'error');
+      return fn(rest);
+    }
+  }
+  const hasCost = (r) => !!(Number(r.purchasePrice) || Number(r.monthlyCost));
+  /** Profile rows: purchase price, monthly cost and the running total, with
+   *  the working shown ("$1,499 purchase + 14 months × $65"). */
+  function costDetailRows(r) {
+    const p = Number(r.purchasePrice) || 0, m = Number(r.monthlyCost) || 0;
+    const months = monthsOwned(r.purchased);
+    const working = m && r.purchased
+      ? `${p ? `${money(p)} purchase + ` : ''}${months} month${months === 1 ? '' : 's'} × ${money(m)}`
+      : m && !r.purchased ? 'Add a purchase date to count the monthly cost' : '';
+    return [
+      ['Purchase price', p ? esc(money(p)) : '<span class="muted">Not recorded</span>'],
+      ['Monthly cost', m ? `${esc(money(m))}<span class="t2">per month · ${esc(money(m * 12))} a year</span>` : '<span class="muted">None</span>'],
+      ['Total cost to date', hasCost(r) ? `${esc(money(costToDate(r)))}${working ? `<span class="t2">${esc(working)}</span>` : ''}` : '<span class="muted">—</span>']
+    ];
+  }
+  AD.costs = { money, monthsOwned, costToDate, hasCost, detailRows: costDetailRows };
+
   /** Date with a coloured flag underneath when it's due soon or overdue. */
   function dueCell(key, { soon = 30, past = (n) => `Overdue ${n}d`, future = 'Due in' } = {}) {
     const T = AD.time;
@@ -302,16 +360,16 @@ AD.views = AD.views || {};
   // as soon as the first real item is added. Item names, numbers and serials
   // are made up; the people are mapped onto real staff (withRealAssignees).
   const SAMPLE_EQUIPMENT = () => withRealAssignees([
-    { id: 'sample-SUR-01', sample: true, assetTag: 'SUR-01', name: 'GNSS rover', category: 'Surveying', make: 'Trimble R12i', serial: '6143R00217', location: 'Wetherill Park depot', sampleAssignee: { name: 'Priya Nair', position: 'Registered surveyor' }, status: 'In service', lastInspection: day(-291), nextInspection: day(74), notes: 'Annual calibration with the Trimble dealer.' },
-    { id: 'sample-SUR-02', sample: true, assetTag: 'SUR-02', name: 'Robotic total station', category: 'Surveying', make: 'Leica TS16', serial: '1873402', location: 'Site — Parramatta Rd, Granville', sampleAssignee: { name: 'Josh Whitfield', position: 'Survey technician' }, status: 'In service', lastInspection: day(-353), nextInspection: day(12), notes: '' },
-    { id: 'sample-SUR-03', sample: true, assetTag: 'SUR-03', name: 'Rotating laser level', category: 'Surveying', make: 'Topcon RL-H5A', serial: 'TP-55120', location: 'Wetherill Park depot', sampleAssignee: null, status: 'Under repair', lastInspection: day(-374), nextInspection: day(-9), notes: 'Dropped on site — sent for repair and recalibration.' },
-    { id: 'sample-LOC-01', sample: true, assetTag: 'LOC-01', name: 'Cable & pipe locator', category: 'Locating', make: 'Radiodetection RD8200', serial: 'RD-8200-41187', location: 'Ute UTE-04', sampleAssignee: { name: 'Mia Tanaka', position: 'Utility locator' }, status: 'In service', lastInspection: day(-205), nextInspection: day(160), notes: '' },
-    { id: 'sample-LOC-02', sample: true, assetTag: 'LOC-02', name: 'Ground penetrating radar', category: 'Locating', make: 'Leica DS2000', serial: 'DS2-00938', location: 'Site — Church St, Ryde', sampleAssignee: { name: 'Sam Haddad', position: 'Utility locator' }, status: 'In service', lastInspection: day(-340), nextInspection: day(25), notes: '' },
-    { id: 'sample-LOC-03', sample: true, assetTag: 'LOC-03', name: 'Sewer inspection camera', category: 'Locating', make: 'Envirosight ROVVER X', serial: 'RVX-2291', location: 'Wetherill Park depot', sampleAssignee: null, status: 'In service', lastInspection: day(-162), nextInspection: day(203), notes: '' },
-    { id: 'sample-CIV-01', sample: true, assetTag: 'CIV-01', name: 'Trench shield (3.0 m)', category: 'Civil', make: 'Aluminium box shield', serial: 'TS-3000-07', location: 'Site — Parramatta Rd, Granville', sampleAssignee: { name: 'Liam Carter', position: 'Site supervisor' }, status: 'In service', lastInspection: day(-132), nextInspection: day(48), notes: '' },
-    { id: 'sample-SAF-01', sample: true, assetTag: 'SAF-01', name: '4-gas detector', category: 'Safety', make: 'Honeywell BW MicroClip X3', serial: 'MCX3-60814', location: 'Ute UTE-02', sampleAssignee: { name: 'Ben O’Connor', position: 'Pipe layer' }, status: 'In service', lastInspection: day(-183), nextInspection: day(-3), notes: 'Bump test before every confined space entry.' },
-    { id: 'sample-SAF-02', sample: true, assetTag: 'SAF-02', name: 'Confined space tripod & winch', category: 'Safety', make: 'Tripod rescue kit', serial: 'CS-TRI-114', location: 'Wetherill Park depot', sampleAssignee: null, status: 'Out of service', lastInspection: day(-406), nextInspection: day(-41), notes: 'Tagged out — winch cable frayed. Do not use.' },
-    { id: 'sample-TRF-01', sample: true, assetTag: 'TRF-01', name: 'Variable message sign trailer', category: 'Traffic control', make: 'Solar VMS trailer', serial: 'VMS-0452', location: 'Site — Church St, Ryde', sampleAssignee: null, status: 'In service', lastInspection: day(-89), nextInspection: day(96), notes: '' }
+    { id: 'sample-SUR-01', sample: true, assetTag: 'SUR-01', name: 'GNSS rover', category: 'Surveying', make: 'Trimble R12i', serial: '6143R00217', location: 'Wetherill Park depot', sampleAssignee: { name: 'Priya Nair', position: 'Registered surveyor' }, status: 'In service', lastInspection: day(-291), nextInspection: day(74), purchased: day(-760), purchasePrice: 32000, monthlyCost: null, notes: 'Annual calibration with the Trimble dealer.' },
+    { id: 'sample-SUR-02', sample: true, assetTag: 'SUR-02', name: 'Robotic total station', category: 'Surveying', make: 'Leica TS16', serial: '1873402', location: 'Site — Parramatta Rd, Granville', sampleAssignee: { name: 'Josh Whitfield', position: 'Survey technician' }, status: 'In service', lastInspection: day(-353), nextInspection: day(12), purchased: day(-1180), purchasePrice: 48000, monthlyCost: null, notes: '' },
+    { id: 'sample-SUR-03', sample: true, assetTag: 'SUR-03', name: 'Rotating laser level', category: 'Surveying', make: 'Topcon RL-H5A', serial: 'TP-55120', location: 'Wetherill Park depot', sampleAssignee: null, status: 'Under repair', lastInspection: day(-374), nextInspection: day(-9), purchased: day(-1500), purchasePrice: 2800, monthlyCost: null, notes: 'Dropped on site — sent for repair and recalibration.' },
+    { id: 'sample-LOC-01', sample: true, assetTag: 'LOC-01', name: 'Cable & pipe locator', category: 'Locating', make: 'Radiodetection RD8200', serial: 'RD-8200-41187', location: 'Ute UTE-04', sampleAssignee: { name: 'Mia Tanaka', position: 'Utility locator' }, status: 'In service', lastInspection: day(-205), nextInspection: day(160), purchased: day(-640), purchasePrice: 9500, monthlyCost: null, notes: '' },
+    { id: 'sample-LOC-02', sample: true, assetTag: 'LOC-02', name: 'Ground penetrating radar', category: 'Locating', make: 'Leica DS2000', serial: 'DS2-00938', location: 'Site — Church St, Ryde', sampleAssignee: { name: 'Sam Haddad', position: 'Utility locator' }, status: 'In service', lastInspection: day(-340), nextInspection: day(25), purchased: day(-420), purchasePrice: 38000, monthlyCost: null, notes: '' },
+    { id: 'sample-LOC-03', sample: true, assetTag: 'LOC-03', name: 'Sewer inspection camera', category: 'Locating', make: 'Envirosight ROVVER X', serial: 'RVX-2291', location: 'Wetherill Park depot', sampleAssignee: null, status: 'In service', lastInspection: day(-162), nextInspection: day(203), purchased: day(-900), purchasePrice: 26000, monthlyCost: null, notes: '' },
+    { id: 'sample-CIV-01', sample: true, assetTag: 'CIV-01', name: 'Trench shield (3.0 m)', category: 'Civil', make: 'Aluminium box shield', serial: 'TS-3000-07', location: 'Site — Parramatta Rd, Granville', sampleAssignee: { name: 'Liam Carter', position: 'Site supervisor' }, status: 'In service', lastInspection: day(-132), nextInspection: day(48), purchased: day(-1100), purchasePrice: 6500, monthlyCost: null, notes: '' },
+    { id: 'sample-SAF-01', sample: true, assetTag: 'SAF-01', name: '4-gas detector', category: 'Safety', make: 'Honeywell BW MicroClip X3', serial: 'MCX3-60814', location: 'Ute UTE-02', sampleAssignee: { name: 'Ben O’Connor', position: 'Pipe layer' }, status: 'In service', lastInspection: day(-183), nextInspection: day(-3), purchased: day(-300), purchasePrice: 950, monthlyCost: null, notes: 'Bump test before every confined space entry.' },
+    { id: 'sample-SAF-02', sample: true, assetTag: 'SAF-02', name: 'Confined space tripod & winch', category: 'Safety', make: 'Tripod rescue kit', serial: 'CS-TRI-114', location: 'Wetherill Park depot', sampleAssignee: null, status: 'Out of service', lastInspection: day(-406), nextInspection: day(-41), purchased: day(-1900), purchasePrice: 3200, monthlyCost: null, notes: 'Tagged out — winch cable frayed. Do not use.' },
+    { id: 'sample-TRF-01', sample: true, assetTag: 'TRF-01', name: 'Variable message sign trailer', category: 'Traffic control', make: 'Solar VMS trailer', serial: 'VMS-0452', location: 'Site — Church St, Ryde', sampleAssignee: null, status: 'In service', lastInspection: day(-89), nextInspection: day(96), purchased: day(-150), purchasePrice: null, monthlyCost: 1200, notes: '' }
   ]);
   const showingSampleEquipment = () => !AD.store.all('equipment').length;
   const sampleEquipment = (id) => (showingSampleEquipment() ? SAMPLE_EQUIPMENT().find((x) => x.id === id) || null : null);
@@ -360,6 +418,11 @@ AD.views = AD.views || {};
           <div class="form-section-title full"><b>Where it is and who has it</b><span>Assign it to someone from the Employee register, or leave it in the depot pool</span></div>
           <div class="field"><label>Assigned to</label><select name="employeeId">${options(people, x.employeeId || '', 'Depot pool (not assigned)')}</select></div>
           <div class="field"><label>Location</label><input type="text" name="location" value="${esc(x.location)}" placeholder="e.g. Wetherill Park depot, a site, or a ute"></div>
+          <div class="form-section-title full"><b>Purchase & cost</b><span>What it cost, and any ongoing hire, lease or service fee</span></div>
+          <div class="field"><label>Purchase date</label><input type="date" name="purchased" value="${dateVal(x.purchased)}"></div>
+          <div class="field"><label>Purchase price ($)</label><input type="number" name="purchasePrice" value="${x.purchasePrice != null ? esc(x.purchasePrice) : ''}" min="0" step="0.01" inputmode="decimal" placeholder="e.g. 32000"></div>
+          <div class="field"><label>Monthly cost ($)</label><input type="number" name="monthlyCost" value="${x.monthlyCost != null ? esc(x.monthlyCost) : ''}" min="0" step="0.01" inputmode="decimal" placeholder="e.g. 450">
+            <div class="help">Hire, lease or subscription. Leave blank if none.</div></div>
           <div class="form-section-title full"><b>Inspection & calibration</b><span>Items due within ${INSPECT_SOON_DAYS} days are flagged amber, overdue red</span></div>
           <div class="field"><label>Last inspection</label><input type="date" name="lastInspection" value="${dateVal(x.lastInspection)}"></div>
           <div class="field"><label>Next inspection / calibration</label><input type="date" name="nextInspection" value="${dateVal(x.nextInspection)}"></div>
@@ -390,22 +453,25 @@ AD.views = AD.views || {};
           const d = formData(form);
           const err = {};
           if (!d.name) err.name = 'Item is required.';
+          if (badMoney(d.purchasePrice)) err.purchasePrice = 'Enter a dollar amount.';
+          if (badMoney(d.monthlyCost)) err.monthlyCost = 'Enter a dollar amount.';
           if (!showErrors(form, err)) return;
           const rec = {
             name: d.name, category: d.category, make: d.make, assetTag: d.assetTag, serial: d.serial,
             status: d.status, employeeId: d.employeeId || null, location: d.location,
-            lastInspection: d.lastInspection || null, nextInspection: d.nextInspection || null, notes: d.notes
+            lastInspection: d.lastInspection || null, nextInspection: d.nextInspection || null, notes: d.notes,
+            purchased: d.purchased || null, purchasePrice: numOrNull(d.purchasePrice), monthlyCost: numOrNull(d.monthlyCost)
           };
           const who = employeeById(rec.employeeId);
           saveBtn.disabled = true;
           let saved;
           try {
             if (isNew) {
-              saved = await AD.store.insert('equipment', rec, 'eq');
+              saved = await saveWithLaterColumns((r) => AD.store.insert('equipment', r, 'eq'), rec, ['purchased', 'purchasePrice', 'monthlyCost'], 'supabase/create-equipment.sql');
               await AD.store.log(`${rec.name} added to the equipment register${who ? ` (assigned to ${who.name})` : ''}`);
               toast(`${rec.name} added`);
             } else {
-              saved = await AD.store.update('equipment', x.id, rec);
+              saved = await saveWithLaterColumns((r) => AD.store.update('equipment', x.id, r), rec, ['purchased', 'purchasePrice', 'monthlyCost'], 'supabase/create-equipment.sql');
               const moved = (x.employeeId || null) !== rec.employeeId;
               await AD.store.log(moved ? `${rec.name} ${who ? `assigned to ${who.name}` : 'returned to the depot pool'}` : `${rec.name} equipment details updated`);
               toast(`${rec.name} saved`);
@@ -445,15 +511,15 @@ AD.views = AD.views || {};
   // and gone as soon as the first real device is added. Names, numbers and
   // serials are made up.
   const SAMPLE_DEVICES = () => [
-    { id: 'sample-001', sample: true, type: 'Laptop', make: 'Dell Latitude 5440', assetTag: 'IT-001', serial: 'DL5440-7H2KQ', sampleAssignee: { name: 'Sophie Kim', position: 'Project coordinator' }, mobile: '', purchased: day(-410), warrantyEnds: day(320), status: 'In use', notes: 'Docking station and second monitor at the Wetherill Park office.' },
-    { id: 'sample-002', sample: true, type: 'Laptop', make: 'Panasonic Toughbook 40', assetTag: 'IT-002', serial: 'TB40-1123987', sampleAssignee: { name: 'Priya Nair', position: 'Registered surveyor' }, mobile: '', purchased: day(-1010), warrantyEnds: day(-280), status: 'In use', notes: 'Rugged field laptop. Out of warranty — due for replacement next financial year.' },
-    { id: 'sample-003', sample: true, type: 'Field controller', make: 'Trimble TSC7', assetTag: 'IT-003', serial: 'TSC7-55031', sampleAssignee: { name: 'Josh Whitfield', position: 'Survey technician' }, mobile: '', purchased: day(-640), warrantyEnds: day(90), status: 'In use', notes: '' },
-    { id: 'sample-004', sample: true, type: 'Tablet', make: 'Samsung Galaxy Tab Active5', assetTag: 'IT-004', serial: 'IMEI 356938110041221', sampleAssignee: { name: 'Mia Tanaka', position: 'Utility locator' }, mobile: '0491 571 491', purchased: day(-200), warrantyEnds: day(530), status: 'In use', notes: '' },
-    { id: 'sample-005', sample: true, type: 'Phone', make: 'Samsung Galaxy XCover7', assetTag: 'IT-005', serial: 'IMEI 352719331802465', sampleAssignee: { name: 'Liam Carter', position: 'Site supervisor' }, mobile: '0491 571 804', purchased: day(-150), warrantyEnds: day(580), status: 'In use', notes: '' },
-    { id: 'sample-006', sample: true, type: 'Phone', make: 'Apple iPhone 15', assetTag: 'IT-006', serial: 'IMEI 359812447019937', sampleAssignee: { name: 'Sophie Kim', position: 'Project coordinator' }, mobile: '0491 572 549', purchased: day(-330), warrantyEnds: day(22), status: 'In use', notes: '' },
-    { id: 'sample-007', sample: true, type: 'Phone', make: 'Samsung Galaxy XCover6 Pro', assetTag: 'IT-007', serial: 'IMEI 351046228861734', sampleAssignee: null, mobile: '', purchased: day(-900), warrantyEnds: day(-170), status: 'Spare', notes: 'Spare for new starters. Wiped and reset.' },
-    { id: 'sample-008', sample: true, type: 'Drone', make: 'DJI Matrice 350 RTK', assetTag: 'IT-008', serial: '1ZNBJ7Q00C0093', sampleAssignee: { name: 'Josh Whitfield', position: 'Survey technician' }, mobile: '', purchased: day(-260), warrantyEnds: day(105), status: 'In repair', notes: 'Gimbal fault — with the DJI repair centre.' },
-    { id: 'sample-009', sample: true, type: 'Site internet', make: 'Starlink Standard kit', assetTag: 'IT-009', serial: 'KIT-4F2290A1', sampleAssignee: null, mobile: '', purchased: day(-120), warrantyEnds: day(245), status: 'In use', notes: 'Lives in the site shed on the Granville job.' }
+    { id: 'sample-001', sample: true, type: 'Laptop', make: 'Dell Latitude 5440', assetTag: 'IT-001', serial: 'DL5440-7H2KQ', sampleAssignee: { name: 'Sophie Kim', position: 'Project coordinator' }, mobile: '', purchased: day(-410), warrantyEnds: day(320), status: 'In use', purchasePrice: 2199, monthlyCost: null, notes: 'Docking station and second monitor at the Wetherill Park office.' },
+    { id: 'sample-002', sample: true, type: 'Laptop', make: 'Panasonic Toughbook 40', assetTag: 'IT-002', serial: 'TB40-1123987', sampleAssignee: { name: 'Priya Nair', position: 'Registered surveyor' }, mobile: '', purchased: day(-1010), warrantyEnds: day(-280), status: 'In use', purchasePrice: 6500, monthlyCost: null, notes: 'Rugged field laptop. Out of warranty — due for replacement next financial year.' },
+    { id: 'sample-003', sample: true, type: 'Field controller', make: 'Trimble TSC7', assetTag: 'IT-003', serial: 'TSC7-55031', sampleAssignee: { name: 'Josh Whitfield', position: 'Survey technician' }, mobile: '', purchased: day(-640), warrantyEnds: day(90), status: 'In use', purchasePrice: 4800, monthlyCost: null, notes: '' },
+    { id: 'sample-004', sample: true, type: 'Tablet', make: 'Samsung Galaxy Tab Active5', assetTag: 'IT-004', serial: 'IMEI 356938110041221', sampleAssignee: { name: 'Mia Tanaka', position: 'Utility locator' }, mobile: '0491 571 491', purchased: day(-200), warrantyEnds: day(530), status: 'In use', purchasePrice: 899, monthlyCost: 45, notes: '' },
+    { id: 'sample-005', sample: true, type: 'Phone', make: 'Samsung Galaxy XCover7', assetTag: 'IT-005', serial: 'IMEI 352719331802465', sampleAssignee: { name: 'Liam Carter', position: 'Site supervisor' }, mobile: '0491 571 804', purchased: day(-150), warrantyEnds: day(580), status: 'In use', purchasePrice: 799, monthlyCost: 65, notes: '' },
+    { id: 'sample-006', sample: true, type: 'Phone', make: 'Apple iPhone 15', assetTag: 'IT-006', serial: 'IMEI 359812447019937', sampleAssignee: { name: 'Sophie Kim', position: 'Project coordinator' }, mobile: '0491 572 549', purchased: day(-330), warrantyEnds: day(22), status: 'In use', purchasePrice: 1499, monthlyCost: 65, notes: '' },
+    { id: 'sample-007', sample: true, type: 'Phone', make: 'Samsung Galaxy XCover6 Pro', assetTag: 'IT-007', serial: 'IMEI 351046228861734', sampleAssignee: null, mobile: '', purchased: day(-900), warrantyEnds: day(-170), status: 'Spare', purchasePrice: 699, monthlyCost: null, notes: 'Spare for new starters. Wiped and reset.' },
+    { id: 'sample-008', sample: true, type: 'Drone', make: 'DJI Matrice 350 RTK', assetTag: 'IT-008', serial: '1ZNBJ7Q00C0093', sampleAssignee: { name: 'Josh Whitfield', position: 'Survey technician' }, mobile: '', purchased: day(-260), warrantyEnds: day(105), status: 'In repair', purchasePrice: 21000, monthlyCost: null, notes: 'Gimbal fault — with the DJI repair centre.' },
+    { id: 'sample-009', sample: true, type: 'Site internet', make: 'Starlink Standard kit', assetTag: 'IT-009', serial: 'KIT-4F2290A1', sampleAssignee: null, mobile: '', purchased: day(-120), warrantyEnds: day(245), status: 'In use', purchasePrice: 599, monthlyCost: 139, notes: 'Lives in the site shed on the Granville job.' }
   ];
   const showingSampleDevices = () => !AD.store.all('tech_devices').length;
   const sampleDevice = (id) => (showingSampleDevices() ? SAMPLE_DEVICES().find((d) => d.id === id) || null : null);
@@ -486,9 +552,12 @@ AD.views = AD.views || {};
           <div class="field"><label>Assigned to</label><select name="employeeId">${options(people, d0.employeeId || '', 'Unassigned')}</select></div>
           <div class="field"><label>Status</label><select name="status">${options(DEVICE_STATUSES, d0.status || 'In use')}</select></div>
           <div class="field"><label>Mobile number</label><input type="text" name="mobile" value="${esc(d0.mobile)}" inputmode="tel" placeholder="For phones and tablets with a SIM"></div>
-          <div class="form-section-title full"><b>Purchase & warranty</b><span>Warranties ending within ${WARRANTY_SOON_DAYS} days are flagged</span></div>
+          <div class="form-section-title full"><b>Purchase, warranty & cost</b><span>Warranties ending within ${WARRANTY_SOON_DAYS} days are flagged</span></div>
           <div class="field"><label>Purchase date</label><input type="date" name="purchased" value="${dateVal(d0.purchased)}"></div>
           <div class="field"><label>Warranty ends</label><input type="date" name="warrantyEnds" value="${dateVal(d0.warrantyEnds)}"></div>
+          <div class="field"><label>Purchase price ($)</label><input type="number" name="purchasePrice" value="${d0.purchasePrice != null ? esc(d0.purchasePrice) : ''}" min="0" step="0.01" inputmode="decimal" placeholder="e.g. 1499"></div>
+          <div class="field"><label>Monthly cost ($)</label><input type="number" name="monthlyCost" value="${d0.monthlyCost != null ? esc(d0.monthlyCost) : ''}" min="0" step="0.01" inputmode="decimal" placeholder="e.g. 65">
+            <div class="help">Phone or SIM plan, subscription or lease. Leave blank if none.</div></div>
           <div class="field full"><label>Notes</label><textarea name="notes" rows="2">${esc(d0.notes)}</textarea></div>
         </form>
         <div class="form-actions">
@@ -522,22 +591,25 @@ AD.views = AD.views || {};
           const d = formData(form);
           const err = {};
           if (!d.make) err.make = 'Make / model is required.';
+          if (badMoney(d.purchasePrice)) err.purchasePrice = 'Enter a dollar amount.';
+          if (badMoney(d.monthlyCost)) err.monthlyCost = 'Enter a dollar amount.';
           if (!showErrors(form, err)) return;
           const rec = {
             type: d.type, make: d.make, assetTag: d.assetTag, serial: d.serial,
             employeeId: d.employeeId || null, status: d.status, mobile: d.mobile,
-            purchased: d.purchased || null, warrantyEnds: d.warrantyEnds || null, notes: d.notes
+            purchased: d.purchased || null, warrantyEnds: d.warrantyEnds || null, notes: d.notes,
+            purchasePrice: numOrNull(d.purchasePrice), monthlyCost: numOrNull(d.monthlyCost)
           };
           const who = employeeById(rec.employeeId);
           saveBtn.disabled = true;
           let saved;
           try {
             if (isNew) {
-              saved = await AD.store.insert('tech_devices', rec, 'dev');
+              saved = await saveWithLaterColumns((r) => AD.store.insert('tech_devices', r, 'dev'), rec, ['purchasePrice', 'monthlyCost'], 'supabase/create-tech-devices.sql');
               await AD.store.log(`${rec.make} added to the technology register${who ? ` (assigned to ${who.name})` : ''}`);
               toast(`${rec.make} added`);
             } else {
-              saved = await AD.store.update('tech_devices', d0.id, rec);
+              saved = await saveWithLaterColumns((r) => AD.store.update('tech_devices', d0.id, r), rec, ['purchasePrice', 'monthlyCost'], 'supabase/create-tech-devices.sql');
               const moved = (d0.employeeId || null) !== rec.employeeId;
               await AD.store.log(moved
                 ? `${rec.make} ${who ? `assigned to ${who.name}` : 'unassigned'}`
@@ -643,7 +715,7 @@ AD.views = AD.views || {};
         const over = rows.filter((r) => dueState(r.nextInspection, INSPECT_SOON_DAYS) === 'overdue').length;
         const soon = rows.filter((r) => dueState(r.nextInspection, INSPECT_SOON_DAYS) === 'soon').length;
         const out = rows.filter((r) => r.status === 'Out of service').length;
-        return `${plural(rows.length, 'item')}${out ? ` · ${out} out of service` : ''}`
+        return `${plural(rows.length, 'item')}${out ? ` · ${out} out of service` : ''}${costSummary(rows)}`
           + (over ? ` · <span class="flag flag-red">${over} overdue for inspection</span>` : '')
           + (soon ? ` · <span class="flag flag-amber">${soon} due within ${INSPECT_SOON_DAYS} days</span>` : '');
       },
@@ -658,6 +730,7 @@ AD.views = AD.views || {};
         { head: 'Serial #', width: 140, cls: 'col-opt col-wide', cell: (r) => or(r.serial) },
         { head: 'Location', cls: 'col-opt', cell: (r) => or(r.location) },
         { head: 'Assigned to', width: 220, cls: 'col-opt col-wide', cell: (r) => (r.sampleAssignee ? sampleAssigneeCell(r.sampleAssignee) : r.employeeId && employeeById(r.employeeId) ? assigneeCell(employeeById(r.employeeId)) : '<span class="muted">Depot pool</span>') },
+        { head: 'Cost', width: 120, cls: 'col-opt col-wide nowrap', cell: costCell },
         { head: 'Status', width: 140, cell: (r) => AD.ui.badge(r.status, EQ_TONE[r.status] || 'grey') },
         { head: 'Inspection / calibration', width: 170, cell: (r) => dueCell(r.nextInspection, { soon: INSPECT_SOON_DAYS }) }
       ]
@@ -685,7 +758,8 @@ AD.views = AD.views || {};
         const spare = rows.filter((r) => r.status === 'Spare').length;
         const ended = rows.filter((r) => r.status !== 'Retired' && dueState(r.warrantyEnds, WARRANTY_SOON_DAYS) === 'overdue').length;
         const soon = rows.filter((r) => r.status !== 'Retired' && dueState(r.warrantyEnds, WARRANTY_SOON_DAYS) === 'soon').length;
-        return `${plural(rows.length, 'device')} · ${inUse} in use · ${spare} spare`
+        // Retired devices don't count towards value or monthly spend.
+        return `${plural(rows.length, 'device')} · ${inUse} in use · ${spare} spare${costSummary(rows.filter((r) => r.status !== 'Retired'))}`
           + (soon ? ` · <span class="flag flag-amber">${soon} warrant${soon === 1 ? 'y' : 'ies'} ending within ${WARRANTY_SOON_DAYS} days</span>` : '')
           + (ended ? ` · ${ended} out of warranty` : '');
       },
@@ -698,6 +772,7 @@ AD.views = AD.views || {};
         { head: 'Assigned to', width: 230, cell: (r) => (r.sampleAssignee ? sampleAssigneeCell(r.sampleAssignee) : assigneeCell(employeeById(r.employeeId))) },
         { head: 'Mobile number', width: 140, cls: 'col-opt nowrap', cell: (r) => or(r.mobile) },
         { head: 'Purchased', width: 110, cls: 'col-opt col-wide nowrap', cell: (r) => fmtDate(r.purchased) },
+        { head: 'Cost', width: 110, cls: 'col-opt col-wide nowrap', cell: costCell },
         { head: 'Warranty', width: 150, cls: 'col-opt', cell: (r) => (r.warrantyEnds ? dueCell(String(r.warrantyEnds).slice(0, 10), { soon: WARRANTY_SOON_DAYS, past: (n) => `Ended ${n}d ago`, future: 'Ends in' }) : AD.ui.dash) },
         { head: 'Status', width: 120, cell: (r) => AD.ui.badge(r.status, IT_TONE[r.status] || 'grey') }
       ]

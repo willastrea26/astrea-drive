@@ -28,6 +28,12 @@ create table if not exists public.equipment (
   photo              text not null default ''            -- small JPEG for the item's profile
 );
 
+-- Purchase & costs: when it was bought, what it cost, and any monthly hire /
+-- lease / subscription fee. Added later — re-running this file is safe.
+alter table public.equipment add column if not exists purchased       date;
+alter table public.equipment add column if not exists "purchasePrice" numeric;
+alter table public.equipment add column if not exists "monthlyCost"   numeric;
+
 create index if not exists equipment_employee on public.equipment ("employeeId");
 
 revoke all on table public.equipment from anon;

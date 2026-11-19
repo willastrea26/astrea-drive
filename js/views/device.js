@@ -41,6 +41,10 @@ AD.views.device = (function () {
     return { html: T.fmtKey(key), flag };
   }
 
+  // Cost rows and figures come from the shared helpers in registers.js.
+  const hasCost = (r) => AD.costs.hasCost(r);
+  const costRows = (r) => AD.costs.detailRows(r);
+
   // ------------------------------------------------------------- photo
   function photoBox(d) {
     const icon = I[TYPE_ICON[d.type] || 'monitor'] || I.monitor;
@@ -124,6 +128,7 @@ AD.views.device = (function () {
       ['Mobile number', d.mobile ? `<a href="tel:${esc(d.mobile.replace(/[^\d+]/g, ''))}">${esc(d.mobile)}</a>` : '<span class="muted">No SIM recorded</span>'],
       ['Purchased', d.purchased ? `${T.fmtKey(day10(d.purchased))}<span class="t2">${esc(age(day10(d.purchased)))} old</span>` : notRec],
       ['Warranty ends', d.warrantyEnds ? `${w.html}${w.flag ? `<span class="t2">${w.flag}</span>` : ''}` : notRec],
+      ...costRows(d),
       ['Status', badge(d.status, tone)]
     ];
 
@@ -141,6 +146,7 @@ AD.views.device = (function () {
           <div><dt>Assigned to</dt><dd>${empLink}</dd></div>
           <div><dt>Age</dt><dd>${d.purchased ? esc(age(day10(d.purchased))) : dash}</dd></div>
           <div><dt>Warranty</dt><dd>${w.html}${w.flag ? ` ${w.flag}` : ''}</dd></div>
+          ${hasCost(d) ? `<div><dt>Cost to date</dt><dd>${esc(AD.costs.money(AD.costs.costToDate(d)))}</dd></div>` : ''}
         </dl>
         <div class="veh-actions">
           ${sample ? '' : `<button class="btn btn-primary" data-edit-dev>${I.edit} Edit device</button>`}

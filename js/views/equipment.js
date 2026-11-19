@@ -116,6 +116,8 @@ AD.views.equipment = (function () {
       ['Location', x.location ? esc(x.location) : notRec],
       ['Last inspection', x.lastInspection ? T.fmtKey(day10(x.lastInspection)) : notRec],
       ['Next inspection / calibration', x.nextInspection ? `${next.html}${next.flag ? `<span class="t2">${next.flag}</span>` : ''}` : notRec],
+      ['Purchased', x.purchased ? T.fmtKey(day10(x.purchased)) : notRec],
+      ...AD.costs.detailRows(x),
       ['Status', badge(x.status, tone)]
     ];
 
@@ -133,6 +135,7 @@ AD.views.equipment = (function () {
           <div><dt>Assigned to</dt><dd>${empLink}</dd></div>
           <div><dt>Location</dt><dd>${x.location ? esc(x.location) : dash}</dd></div>
           <div><dt>Next inspection</dt><dd>${next.html}${next.flag ? ` ${next.flag}` : ''}</dd></div>
+          ${AD.costs.hasCost(x) ? `<div><dt>Cost to date</dt><dd>${esc(AD.costs.money(AD.costs.costToDate(x)))}</dd></div>` : ''}
         </dl>
         <div class="veh-actions">
           ${sample

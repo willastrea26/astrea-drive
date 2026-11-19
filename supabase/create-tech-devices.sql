@@ -30,6 +30,11 @@ create table if not exists public.tech_devices (
 -- re-running the whole file is safe.
 alter table public.tech_devices add column if not exists photo text not null default '';
 
+-- Costs: what the device cost, and any monthly plan (phone / SIM plan,
+-- subscription, Starlink, lease). Added later — re-running is safe.
+alter table public.tech_devices add column if not exists "purchasePrice" numeric;
+alter table public.tech_devices add column if not exists "monthlyCost"   numeric;
+
 create index if not exists tech_devices_employee on public.tech_devices ("employeeId");
 
 revoke all on table public.tech_devices from anon;
