@@ -9,6 +9,9 @@
  * Files go to the private storage bucket and are only ever opened through
  * short-lived signed links (see create-employee-documents.sql).
  *
+ * Two tabs: "Employee overview" (everything below) and "Rates" (pay and
+ * charge-out rates, restricted — see employee-rates.js).
+ *
  * Assigned vehicles are found by matching the employee's name to the
  * fleet's driver list (the Fleet register's "Assigned driver"), since the
  * two lists aren't linked by ID.
@@ -18,7 +21,7 @@ AD.views = AD.views || {};
 AD.views.employee = (function () {
   const { esc, sectionHead, dash, badge, vehicleBadge } = AD.ui;
   const T = AD.time, I = AD.icons;
-  let root = null, empId = '', uploading = '';
+  let root = null, empId = '', uploading = '', tab = 'overview';
 
   const norm = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
   const initials = (name) => String(name || '?').trim().split(/\s+/).filter(Boolean).map((p) => p[0]).slice(0, 2).join('').toUpperCase();
@@ -427,6 +430,14 @@ AD.views.employee = (function () {
         </div>
       </header>
 
+      <div class="veh-tabbar emp-tabbar">
+        <div class="tabs" role="tablist">
+          ${[['overview', 'Employee overview'], ['rates', 'Rates']].map(([k, label]) => `
+            <button role="tab" data-tab="${k}" class="${tab === k ? 'on' : ''}" aria-selected="${tab === k}">${label}</button>`).join('')}
+        </div>
+      </div>
+
+      ${tab === 'rates' ? `<div role="tabpanel">${AD.employeeRates.panel(e)}</div>` : `<div role="tabpanel">
       <div class="cols-2">
         <section class="section">
           ${sectionHead({ title: 'Contact & personal details', level: 3 })}
@@ -461,11 +472,25 @@ AD.views.employee = (function () {
         </section>
       </div>
 
-      ${documentsSection(e)}`;
+      ${documentsSection(e)}
+      </div>`}`;
 
     const openForm = () => AD.employeeForm(e, (saved) => (saved ? draw() : AD.go('employee-register')));
     el.querySelector('[data-edit-emp]').onclick = openForm;
-    el.querySelector('[data-edit-lic]').onclick = openForm;
+    el.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => {
+      tab = b.dataset.tab;
+      AD.setParams({ tab: tab === 'overview' ? '' : tab });
+      draw();
+    }));
+    bindPhoto(el, e);
+    if (tab === 'rates') {
+      AD.employeeRates.bind(el, e, draw);
+      // First visit this session: ask the database whether this user may see rates, then redraw.
+      if (AD.store.available('employee_rates') && !AD.employeeRates.hasChecked()) AD.employeeRates.checkAccess().then(() => { if (root === el && tab === 'rates') draw(); });
+      return;
+    }
+    const editLic = el.querySelector('[data-edit-lic]');
+    if (editLic) editLic.onclick = openForm;
     el.querySelectorAll('li[data-veh]').forEach((li) => li.addEventListener('click', () => AD.go('vehicle/' + li.dataset.veh)));
     // Devices: click one to open its profile; "Add device" opens a new one already assigned to this person.
     el.querySelectorAll('li[data-dev]').forEach((li) => li.addEventListener('click', () => AD.go('device/' + li.dataset.dev)));
@@ -475,14 +500,13 @@ AD.views.employee = (function () {
     el.querySelectorAll('li[data-eq]').forEach((li) => li.addEventListener('click', () => AD.go('equipment/' + li.dataset.eq)));
     const addEq = el.querySelector('[data-add-eq]');
     if (addEq) addEq.onclick = () => AD.equipmentForm(null, () => draw(), { employeeId: e.id });
-    bindPhoto(el, e);
     bindDocs(el, e);
     bindLive(el);
   }
 
   return {
     title: (arg) => (AD.store.get('employees', arg) || {}).name || 'Employee',
-    render(el, params, arg) { root = el; empId = arg || ''; uploading = ''; draw(); },
+    render(el, params, arg) { root = el; empId = arg || ''; uploading = ''; tab = params && params.tab === 'rates' ? 'rates' : 'overview'; draw(); },
     // Don't redraw mid-upload (the progress text lives in the drop zone).
     refresh: () => root && !uploading && draw(),
     destroy: () => { destroyMaps(); root = null; }

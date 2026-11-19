@@ -3261,3 +3261,19 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 .sample-person { font-weight: 600; color: var(--ink); }
 .dev-person.is-sample { cursor: default; }
 .dev-person.is-sample:hover { background: var(--paper); }
+
+/* Employee profile — Rates tab (restricted pay & charge-out rates) */
+.emp-tabbar { margin-top: 4px; }
+.rate-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.cost-kpi.is-negative strong { color: var(--red, #b42318); }
+.rates-notes { white-space: pre-wrap; }
+.rates-locked {
+  display: flex; gap: 14px; align-items: flex-start; max-width: 620px;
+  padding: 18px 20px; border-radius: var(--r-lg); border: 1px solid var(--rule);
+  background: var(--paper); box-shadow: var(--shadow-1);
+}
+.rates-locked p { margin: 4px 0 0; color: var(--muted); }
+.rates-lock-ico { flex: none; width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: var(--bg, #f3f4f6); color: var(--muted); }
+.rates-lock-ico svg { width: 20px; height: 20px; }
+@media (max-width: 900px) { .rate-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .rate-kpis { grid-template-columns: minmax(0, 1fr); } }
