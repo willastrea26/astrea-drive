@@ -36,6 +36,133 @@ AD.views.dashboard = (function () {
       || (Number(r.dailyRecorded) || 0) > 0
       || (Number(r.tripStatsRecorded) || 0) > 0;
   }
+  /** What a run pulls, in words — shown at the top of its details. */
+  function syncScope(r) {
+    if (r.quick) return 'Odometers only (a quick manual sync).';
+    return r.depth === 'full'
+      ? 'Odometers, 30-day trip statistics, and engine hours for the last 30 days.'
+      : 'Odometers, 30-day trip statistics, and engine hours for the last 3 days.';
+  }
+
+  /**
+   * Click a Telematic inputs run -> which vehicles it changed and how.
+   * The per-vehicle breakdown lives in sync_log.details (update-sync-log-details.sql)
+   * and is fetched only when asked for, so the dashboard doesn't load it for
+   * every run on every page load.
+   */
+  function openSyncDetails(r) {
+    const { modal } = AD.ui;
+    const r1 = (x) => Math.round(x * 10) / 10;
+    const km = (x) => Math.round(x).toLocaleString('en-AU') + ' km';
+    const shortDay = (key) => { const p = String(key).split('-'); return p.length === 3 ? `${+p[2]}/${+p[1]}` : key; };
+    const norm = (s) => String(s || '').trim().toUpperCase();
+    const vehicles = AD.store.all('vehicles');
+    const vehFor = (rego) => vehicles.find((v) => norm(v.rego) === norm(rego) || (v.netstarRego && norm(v.netstarRego) === norm(rego))) || null;
+
+    function render(details) {
+      const odo = Array.isArray(details.odometers) ? details.odometers : [];
+      const days = Array.isArray(details.engineHours) ? details.engineHours : [];
+      const trips = Array.isArray(details.tripStats) ? details.tripStats : [];
+      // One entry per vehicle, keyed by the fleet vehicle (or the Netstar rego if unmatched).
+      const by = new Map();
+      const entry = (rego) => {
+        const v = vehFor(rego);
+        const key = v ? v.id : 'rego:' + norm(rego);
+        if (!by.has(key)) by.set(key, { v, rego: norm(rego), odo: null, days: [], trip: null });
+        return by.get(key);
+      };
+      const unmatched = [];
+      odo.forEach((o) => { if (o.status === 'unmatched') unmatched.push(o.rego); else entry(o.rego).odo = o; });
+      days.forEach((d) => entry(d.rego).days.push(d));
+      trips.forEach((t) => { entry(t.rego).trip = t; });
+
+      const changed = (e) => (e.odo && ['accumulated', 'baseline', 'suspect'].includes(e.odo.status)) || e.days.length > 0;
+      const rows = [...by.values()].filter((e) => e.v || e.odo || e.days.length || e.trip);
+      rows.sort((a, b) => (changed(b) - changed(a)) || String(a.v ? a.v.id : a.rego).localeCompare(String(b.v ? b.v.id : b.rego)));
+
+      const odoCell = (e) => {
+        const o = e.odo;
+        if (!o) return r.quick || !odo.length ? '<span class="muted">—</span>' : '<span class="muted">Not in this run</span>';
+        if (o.status === 'accumulated') return `<span class="flag flag-green">+${km(o.addedKm || 0)}</span><span class="t2">now ${km(o.savedKm || 0)}</span>`;
+        if (o.status === 'verified') return '<span class="muted">No change</span><span class="t2">GPS-verified</span>';
+        if (o.status === 'baseline') return `<span class="flag flag-muted">Starting point set</span><span class="t2">tracker at ${km(o.gpsKm || 0)}</span>`;
+        if (o.status === 'suspect') return `<span class="flag flag-amber">${km(o.jumpKm || 0)} jump not added</span><span class="t2">check the tracker</span>`;
+        if (o.status === 'missing') return '<span class="muted">No reading from Netstar</span>';
+        return `<span class="muted">${esc(o.status || '—')}</span>`;
+      };
+      const hoursCell = (e) => {
+        if (!e.days.length) return r.quick ? '<span class="muted">—</span>' : '<span class="muted">No new days</span>';
+        const ds = e.days.slice().sort((a, b) => String(a.day).localeCompare(String(b.day)));
+        const hrs = ds.reduce((s, d) => s + (Number(d.hours) || 0), 0);
+        const dist = ds.reduce((s, d) => s + (Number(d.distance) || 0), 0);
+        const line = (d) => `${esc(shortDay(d.day))}: ${r1(Number(d.hours) || 0)} hr${d.distance != null ? ` · ${km(d.distance)}` : ''}`;
+        const head = `<b>${r1(hrs)} hr</b>${dist ? ` · ${km(dist)}` : ''}<span class="t2">${ds.length} day${ds.length === 1 ? '' : 's'} saved</span>`;
+        return ds.length <= 4
+          ? `${head}<span class="sync-days">${ds.map(line).join('<br>')}</span>`
+          : `${head}<details class="sync-days-more"><summary>Show each day</summary><span class="sync-days">${ds.map(line).join('<br>')}</span></details>`;
+      };
+      const tripCell = (e) => {
+        const t = e.trip;
+        if (!t) return r.quick ? '<span class="muted">Not refreshed (quick sync)</span>' : '<span class="muted">—</span>';
+        const bits = [t.runningKm != null ? km(t.runningKm) : '', t.trips != null ? `${t.trips} trip${t.trips === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ');
+        const sub = [t.workingDays != null ? `${t.workingDays} working day${t.workingDays === 1 ? '' : 's'}` : '', t.idleMinutes != null ? `${r1(t.idleMinutes / 60)} hr idle` : ''].filter(Boolean).join(' · ');
+        return `${bits || '<span class="muted">No trips</span>'}${sub ? `<span class="t2">${sub}</span>` : ''}`;
+      };
+      const vehCell = (e) => e.v
+        ? `<a href="#/vehicle/${encodeURIComponent(e.v.id)}" data-close-go><b>${esc(e.v.id)}</b></a><span class="t2">${esc([e.v.rego, [e.v.make, String(e.v.model || '').split(' — ')[0]].filter(Boolean).join(' ')].filter(Boolean).join(' · '))}</span>`
+        : `<b>${esc(e.rego)}</b><span class="t2">Not in the Fleet register</span>`;
+      const tr = (e) => `<tr class="${changed(e) ? '' : 'sync-unchanged'}"><td>${vehCell(e)}</td><td>${odoCell(e)}</td><td>${hoursCell(e)}</td><td>${tripCell(e)}</td></tr>`;
+      const head = '<thead><tr><th style="width:24%">Vehicle</th><th style="width:22%">Odometer</th><th style="width:28%">Engine hours</th><th>30-day trip stats</th></tr></thead>';
+      const changedRows = rows.filter(changed), quietRows = rows.filter((e) => !changed(e));
+
+      const addedKm = odo.filter((o) => o.status === 'accumulated').reduce((s, o) => s + (Number(o.addedKm) || 0), 0);
+      const chips = [
+        `${changedRows.length} vehicle${changedRows.length === 1 ? '' : 's'} updated`,
+        addedKm ? `+${km(addedKm)} added to odometers` : '',
+        days.length ? `${days.length} engine-hour day${days.length === 1 ? '' : 's'} saved` : '',
+        trips.length ? `trip stats refreshed for ${trips.length}` : ''
+      ].filter(Boolean);
+
+      return `
+        <p class="sync-scope">${esc(syncScope(r))}</p>
+        <p class="sync-chips">${chips.map((c) => `<span class="sync-chip">${esc(c)}</span>`).join('')}</p>
+        ${changedRows.length
+          ? `<div class="table-wrap"><table class="data sync-veh-tbl">${head}<tbody>${changedRows.map(tr).join('')}</tbody></table></div>`
+          : '<p class="empty">No vehicle’s odometer or engine hours changed in this run.</p>'}
+        ${quietRows.length ? `<details class="sync-all sync-quiet"><summary>${quietRows.length} vehicle${quietRows.length === 1 ? '' : 's'} with no change</summary>
+          <div class="table-wrap"><table class="data sync-veh-tbl">${head}<tbody>${quietRows.map(tr).join('')}</tbody></table></div></details>` : ''}
+        ${unmatched.length ? `<p class="sync-unmatched">${AD.icons.alert}<span><b>Not matched to a fleet vehicle:</b> ${unmatched.map((x) => esc(x)).join(', ')}. These Netstar trackers’ regos don’t match the Fleet register or a vehicle’s Netstar alias, so they were skipped.</span></p>` : ''}`;
+    }
+
+    modal({
+      title: `${syncLabel(r)} — ${T.fmtDateTime(r.ranAt)}`,
+      wide: true,
+      body: `<div data-sync-body>${r.ok === false
+        ? `<p class="sync-scope">${esc(syncScope(r))}</p><p class="sync-unmatched is-fail">${AD.icons.alert}<span><b>This sync failed.</b> ${esc(r.error || 'No error message was recorded.')}</span></p>`
+        : '<p class="empty">Loading details…</p>'}</div>
+        <div class="form-actions"><button class="btn btn-ghost" data-close type="button">Close</button></div>`,
+      async onMount(el, close) {
+        el.querySelector('[data-close]').onclick = close;
+        el.addEventListener('click', (ev) => { if (ev.target.closest('[data-close-go]')) close(); });
+        if (r.ok === false) return;
+        const box = el.querySelector('[data-sync-body]');
+        let details = null, missingColumn = false;
+        try {
+          const { data, error } = await AD.sb.from('sync_log').select('details').eq('id', r.id).maybeSingle();
+          if (error) missingColumn = /details|42703|column/i.test(String(error.message || error.code || ''));
+          else details = data && data.details;
+        } catch (e) { /* shown as "not recorded" below */ }
+        if (!box.isConnected) return;
+        if (details && (details.odometers || details.engineHours || details.tripStats)) { box.innerHTML = render(details); return; }
+        box.innerHTML = `<p class="sync-scope">${esc(syncScope(r))}</p>
+          <p class="sync-chips"><span class="sync-chip">${esc(syncDetail(r))}</span></p>
+          <p class="empty">${missingColumn
+            ? 'Vehicle-by-vehicle details aren’t switched on yet. Run <code>supabase/update-sync-log-details.sql</code> in the Supabase SQL Editor and redeploy the netstar function; syncs after that will show each vehicle here.'
+            : 'This run didn’t record which vehicles it changed — only the totals above. Syncs after the netstar function update show each vehicle here.'}</p>`;
+      }
+    });
+  }
+
   const OWNED_SCHEDULE_VAC_IDS = new Set(Array.from({ length: 8 }, (_, i) => `AVT${String(i + 1).padStart(2, '0')}`));
   let root = null, day = '', schedFilter = 'all';
   // Which insight is on screen. Held across redraws so a background refresh
@@ -634,7 +761,7 @@ AD.views.dashboard = (function () {
             // moved the numbers (or failed) show up. Everything else is still
             // available in the "View all inputs" table below for diagnostics.
             const shown = syncLog.filter(syncAdded).slice(0, 8);
-            return shown.map((r) => `<li${r.ok === false ? ' class="sync-fail"' : ''}><span class="what">${esc(syncLabel(r))}<span class="t2">${esc(syncDetail(r))}</span></span><span class="when">${esc(T.fmtDateTime(r.ranAt))}</span></li>`).join('')
+            return shown.map((r) => `<li class="link${r.ok === false ? ' sync-fail' : ''}" data-sync="${esc(r.id)}" tabindex="0" title="See which vehicles this sync updated"><span class="what">${esc(syncLabel(r))}<span class="t2">${esc(syncDetail(r))}</span></span><span class="when">${esc(T.fmtDateTime(r.ranAt))}</span></li>`).join('')
               || '<li class="muted">No GPS syncs with new data yet.</li>';
           })()}
         </ul>
@@ -657,7 +784,7 @@ AD.views.dashboard = (function () {
                   : syncAdded(r)
                     ? `<span class="flag flag-green">Added data</span>`
                     : `<span class="flag flag-muted">Nothing new</span>`;
-                return `<tr${r.ok === false ? ' class="sync-fail"' : ''}>
+                return `<tr class="sync-row${r.ok === false ? ' sync-fail' : ''}" data-sync="${esc(r.id)}" tabindex="0" title="See which vehicles this sync updated">
                   <td>${esc(T.fmtDateTime(r.ranAt))}</td>
                   <td>${esc(syncLabel(r))}</td>
                   <td>${cell(r.updated)}</td>
@@ -675,6 +802,12 @@ AD.views.dashboard = (function () {
 
     el.querySelectorAll('[data-go]').forEach((b) => b.addEventListener('click', () => { const [r, p] = JSON.parse(b.dataset.go); AD.go(r, p); }));
     wireInsights(el);
+    // Telematic inputs: click (or Enter on) a run to see the vehicles it updated.
+    el.querySelectorAll('[data-sync]').forEach((row) => {
+      const open = () => { const r = syncLog.find((x) => String(x.id) === row.dataset.sync); if (r) openSyncDetails(r); };
+      row.addEventListener('click', open);
+      row.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
+    });
     el.querySelectorAll('.rows li[data-veh]').forEach((li) => li.addEventListener('click', (e) => {
       if (e.target.closest('a')) return;
       AD.go('vehicle/' + li.dataset.veh);

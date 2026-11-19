@@ -43,6 +43,11 @@ function netstarHeaders(extra: Record<string, string> = {}): Record<string, stri
   return { accept: "*/*", "x-api-key": API_KEY, "User-Agent": NETSTAR_UA, ...extra };
 }
 
+// Every sync-odometers run is logged to sync_log, with a per-vehicle
+// breakdown in "details" (odometer result, engine-hour days, trip stats) so
+// the dashboard's Telematic inputs can show what each run changed. Needs
+// supabase/update-sync-log-details.sql; without it, runs log counts only.
+
 // Netstar rate-limits with a token bucket ("429 Rate limit exceeded"). The
 // report calls (the many per-day ones especially) go through nsFetch, which
 // spaces requests ~4/second and, on a 429, waits and retries instead of
@@ -478,19 +483,33 @@ async function syncOdometers(depth: "recent" | "full" = "recent", quick = false,
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
+  // Per-vehicle detail of what this run changed, saved with the log row so
+  // the dashboard can show "which vehicles, and what" when a run is clicked.
+  // Filled in as each stage finishes; whatever is there gets logged even if
+  // a later stage fails.
+  const details: {
+    odometers: unknown[] | null;
+    engineHours: Array<{ rego: string; day: string; hours: number; distance: number | null }>;
+    tripStats: Array<Record<string, unknown>>;
+  } = { odometers: null, engineHours: [], tripStats: [] };
+
   // Records this run to sync_log (dashboard's "Telematic inputs") no matter
   // how it ends — logging itself is best-effort and never breaks the sync.
   const logRun = async (ok: boolean, extra: Record<string, unknown> = {}) => {
+    const args = {
+      p_source: source, p_depth: depth, p_quick: quick, p_ok: ok,
+      p_updated: (extra.updated as number) ?? null,
+      p_verified: (extra.verified as number) ?? null,
+      p_daily_recorded: (extra.dailyRecorded as number) ?? null,
+      p_trip_stats_recorded: (extra.tripStatsRecorded as number) ?? null,
+      p_work_hours_recorded: (extra.workHoursRecorded as number) ?? null,
+      p_error: (extra.error as string) ?? null,
+    };
     try {
-      await db.rpc("record_sync_log", {
-        p_source: source, p_depth: depth, p_quick: quick, p_ok: ok,
-        p_updated: (extra.updated as number) ?? null,
-        p_verified: (extra.verified as number) ?? null,
-        p_daily_recorded: (extra.dailyRecorded as number) ?? null,
-        p_trip_stats_recorded: (extra.tripStatsRecorded as number) ?? null,
-        p_work_hours_recorded: (extra.workHoursRecorded as number) ?? null,
-        p_error: (extra.error as string) ?? null,
-      });
+      // With per-vehicle details (needs update-sync-log-details.sql) ...
+      const { error: e1 } = await db.rpc("record_sync_log", { ...args, p_details: details });
+      // ... or, until that's been run, the summary counts only.
+      if (e1) await db.rpc("record_sync_log", args);
     } catch (_e) { /* logging must never sink the sync itself */ }
   };
 
@@ -507,6 +526,7 @@ async function syncOdometers(depth: "recent" | "full" = "recent", quick = false,
 
   const { data, error } = await db.rpc("sync_odometers_from_telematics", { readings });
   if (error) throw error;
+  details.odometers = Array.isArray(data?.results) ? data.results : null;
 
   // ---- Trip-summary stats (ONE call for the whole fleet, so it goes first
   // while Netstar's rate allowance is fullest) ----------------------------
@@ -553,7 +573,7 @@ async function syncOdometers(depth: "recent" | "full" = "recent", quick = false,
     if (tripRows.length) {
       const { data: tData, error: tErr } = await db.rpc("record_trip_stats", { rows: tripRows });
       if (tErr) tripStatsDebug.rpcError = tErr.message;
-      else tripStatsRecorded = Number(tData) || tripRows.length;
+      else { tripStatsRecorded = Number(tData) || tripRows.length; details.tripStats = tripRows; }
     }
   } catch (e) {
     tripStatsDebug.error = String((e as Error)?.message ?? e);
@@ -612,9 +632,11 @@ async function syncOdometers(depth: "recent" | "full" = "recent", quick = false,
       dailyDebug.probe = await probeReports(devices[0].imei, y.from, y.to);
     }
     for (let i = 0; i < dayRows.length; i += 400) {
-      const { data: dData, error: dErr } = await db.rpc("record_work_hours_daily", { rows: dayRows.slice(i, i + 400) });
+      const chunk = dayRows.slice(i, i + 400);
+      const { data: dData, error: dErr } = await db.rpc("record_work_hours_daily", { rows: chunk });
       if (dErr) { dailyDebug.rpcError = dErr.message; break; }
       dailyRecorded = (dailyRecorded ?? 0) + (Number(dData) || 0);
+      details.engineHours.push(...chunk);
     }
 
     // Roll the 30-day "hrs/week" total up from EVERY day ever stored, not

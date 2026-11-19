@@ -3309,3 +3309,24 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 }
 .rate-shift-dollar { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rate-shift-dollar b { color: var(--ink); font-size: 15px; }
+
+/* Dashboard Telematic inputs — click a run to see which vehicles it updated */
+.sync-tbl tr.sync-row { cursor: pointer; }
+.sync-tbl tr.sync-row:hover td { background: var(--hover); }
+.sync-scope { color: var(--muted); margin: 0 0 10px; }
+.sync-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 14px; }
+.sync-chip { display: inline-block; padding: 4px 10px; border-radius: 999px; background: var(--blue-tint); color: var(--ink); font-size: 13px; font-weight: 600; }
+.sync-veh-tbl td { vertical-align: top; }
+.sync-veh-tbl td .t2 { display: block; color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+.sync-veh-tbl td a { color: inherit; text-decoration: none; }
+.sync-veh-tbl td a:hover { text-decoration: underline; }
+.sync-veh-tbl .flag { display: inline-block; }
+.sync-veh-tbl tr.sync-unchanged td { color: var(--muted); }
+.sync-days { display: block; margin-top: 4px; font-size: 12.5px; color: var(--muted); line-height: 1.5; }
+.sync-days-more { margin-top: 4px; font-size: 12.5px; }
+.sync-days-more > summary { cursor: pointer; color: var(--blue); }
+.sync-quiet { margin-top: 14px; }
+.sync-unmatched { display: flex; gap: 8px; align-items: flex-start; margin: 14px 0 0; padding: 10px 12px; border-radius: var(--r); background: var(--amber-tint); color: var(--ink); font-size: 13.5px; }
+.sync-unmatched svg { width: 16px; height: 16px; flex: none; margin-top: 2px; color: var(--amber); }
+.sync-unmatched.is-fail { background: var(--red-tint); }
+.sync-unmatched.is-fail svg { color: var(--red); }

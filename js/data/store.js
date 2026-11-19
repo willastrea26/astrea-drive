@@ -47,9 +47,9 @@ AD.store = (function () {
   // Optional tables that failed to load (usually: migration not run yet),
   // so a page can say "run the setup SQL" instead of failing on save.
   const unavailable = new Set();
-  async function loadOptional(table, build) {
+  async function loadOptional(table, build, columns = '*') {
     try {
-      const { data, error } = await build(sb().from(table).select('*'));
+      const { data, error } = await build(sb().from(table).select(columns));
       if (error) { unavailable.add(table); return []; }
       unavailable.delete(table);
       return data || [];
@@ -82,7 +82,10 @@ AD.store = (function () {
       // as the table exists.
       loadOptional('vehicle_costs', (q) => q),
       // GPS sync run history (dashboard's "Telematic inputs") — most recent first.
-      loadOptional('sync_log', (q) => q.order('ranAt', { ascending: false }).limit(100)),
+      // Not "details" (the per-vehicle breakdown): the dashboard fetches that
+      // for one run only when it's clicked, so it isn't downloaded 100 times over.
+      loadOptional('sync_log', (q) => q.order('ranAt', { ascending: false }).limit(100),
+        'id,source,depth,quick,ok,updated,verified,dailyRecorded,tripStatsRecorded,workHoursRecorded,error,ranAt'),
       // Employee register — optional until create-employees.sql is run.
       loadOptional('employees', (q) => q.order('name')),
       // Employee personal documents — optional until create-employee-documents.sql is run.
