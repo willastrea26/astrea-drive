@@ -127,7 +127,7 @@ AD.views['cost-sheet'] = (function () {
     return `<small class="cs-delta cs-delta-${tone}">${arrow} ${Math.abs(pct)}% · ${fmt(avg)} avg</small>`;
   }
 
-  const TONE_VAR = { worse: 'var(--red)', better: 'var(--green)', fuel: 'var(--cs-blue)', planned: 'var(--mint)' };
+  const TONE_VAR = { worse: 'var(--red)', better: 'var(--green)', spend: 'var(--red)', unplanned: 'var(--cs-amber)', fuel: 'var(--cs-blue)', planned: 'var(--mint)' };
   const kpi = (label, value, foot, tone) => `<div class="cs-kpi"${tone ? ` style="--cs-tone:${TONE_VAR[tone]}"` : ''}><span>${esc(label)}</span><strong>${value}</strong>${foot}</div>`;
   const fmtChange = (n) => Math.abs(n) < 0.005 ? '—' : (n > 0 ? '+' : '−') + L.fmtAUD(Math.abs(n));
   const median = (nums) => {
@@ -221,8 +221,8 @@ AD.views['cost-sheet'] = (function () {
       })}
 
       <div class="cs-kpis" style="--cs-kpi-n:${restOfYearMonths.length ? 5 : 4}" role="group" aria-label="This ${cfg.label} against the average ${cfg.label}">
-        ${kpi('Total spend', L.fmtAUD(spend), delta(spend, avgSpend, haveBaseline, L.fmtAUD, true), trendTone(spend, avgSpend, haveBaseline, true))}
-        ${kpi('Unplanned share', `${Math.round(share)}%`, shareFoot, shareTone)}
+        ${kpi('Total spend', L.fmtAUD(spend), delta(spend, avgSpend, haveBaseline, L.fmtAUD, true), 'spend')}
+        ${kpi('Unplanned share', `${Math.round(share)}%`, shareFoot, 'unplanned')}
         ${kpi('Fuel share', `${Math.round(pctOf(fuelNow))}%`, sliceFoot(fuelNow, avgFuel), 'fuel')}
         ${kpi('Planned servicing share', `${Math.round(pctOf(planned))}%`, sliceFoot(planned, avgPlanned), 'planned')}
         ${restOfYearMonths.length ? kpi('Projected to year-end', L.fmtAUD(projRestTotal), `<small class="cs-delta">${restOfYearMonths.length} month${restOfYearMonths.length === 1 ? '' : 's'} remaining · ${L.fmtAUD(projMonthAvg)}/mo avg</small>`) : ''}
