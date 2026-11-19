@@ -8,12 +8,13 @@
  * per session whether this user may see rates, and shows a "restricted"
  * message if not — so locking needs no app change.
  *
- * Derived figures: a salary's hourly equivalent (38-hour week, 52 weeks), cost
+ * Derived figures: a salary's hourly equivalent (7.6-hour days, 5 days a week, 52 weeks — the construction-industry standard), cost
  * per hour including super, and the margin between charge-out and cost.
  * Activity-log entries say that rates changed, never what they are.
  */
 AD.employeeRates = (function () {
-  const HOURS_PER_YEAR = 38 * 52; // 1,976 — full-time year
+  const DAY_HOURS = 7.6;                       // construction-industry ordinary day
+  const HOURS_PER_YEAR = DAY_HOURS * 5 * 52;    // 1,976 hours a year
   const PAY_TYPES = ['Salary', 'Hourly'];
   let access = null;     // null = not checked yet, then true / false
   let checking = null;   // the in-flight check, so it only runs once
@@ -36,7 +37,8 @@ AD.employeeRates = (function () {
   /** Pay per hour (actual, or salary ÷ 1,976), cost per hour incl. super, margin. */
   function figures(r) {
     const salary = num(r.annualSalary), hourly = num(r.hourlyRate), charge = num(r.chargeOutRate), sup = num(r.superPercent);
-    const payHour = hourly != null ? hourly : salary != null ? salary / HOURS_PER_YEAR : null;
+    // Salaried staff: always the salary ÷ 1,976 hours. Hourly staff: their rate.
+    const payHour = r.payType !== 'Hourly' && salary != null ? salary / HOURS_PER_YEAR : hourly;
     const costHour = payHour != null ? payHour * (1 + (sup || 0) / 100) : null;
     const margin = charge != null && costHour != null ? charge - costHour : null;
     return { salary, hourly, charge, sup, payHour, costHour, margin, salaryEquiv: hourly != null && salary == null ? hourly * HOURS_PER_YEAR : null };
@@ -68,15 +70,18 @@ AD.employeeRates = (function () {
     const f = figures(r);
     const kpi = (label, value, sub, cls = '') => `<div class="cost-kpi${cls}"><span>${esc(label)}</span><strong>${value}</strong><small>${sub}</small></div>`;
     const payKpi = r.payType === 'Hourly'
-      ? kpi('Hourly pay rate', f.hourly != null ? money2(f.hourly) : '—', f.salaryEquiv != null ? `≈ ${money(f.salaryEquiv)} a year (38-hour week)` : 'Hourly')
-      : kpi('Annual salary', f.salary != null ? money(f.salary) : '—', f.payHour != null ? `≈ ${money2(f.payHour)}/hr (38-hour week)` : 'Salary');
+      ? kpi('Hourly pay rate', f.hourly != null ? money2(f.hourly) : '—', f.salaryEquiv != null ? `≈ ${money(f.salaryEquiv)} a year (7.6-hr days)` : 'Hourly')
+      : kpi('Annual salary', f.salary != null ? money(f.salary) : '—', f.payHour != null ? `≈ ${money2(f.payHour)}/hr (7.6-hr days)` : 'Salary');
     const marginPct = f.margin != null && f.charge ? Math.round((f.margin / f.charge) * 100) : null;
     const notRec = '<span class="muted">Not recorded</span>';
     const who = r.updatedBy ? (AD.logic && AD.logic.userName && AD.logic.userName(r.updatedBy)) || r.updatedBy : '';
     const details = [
       ['Pay type', esc(r.payType || 'Salary')],
       ['Annual salary', f.salary != null ? money(f.salary) : notRec],
-      ['Hourly pay rate', f.hourly != null ? money2(f.hourly) : f.payHour != null ? `<span class="muted">${money2(f.payHour)} (from salary)</span>` : notRec],
+      ['Hourly pay rate', f.payHour == null ? notRec
+        : r.payType !== 'Hourly' && f.salary != null
+          ? `${money2(f.payHour)}<span class="t2">Worked out from the salary — 52 weeks × 5 days × ${DAY_HOURS} hours</span>`
+          : money2(f.payHour)],
       ['Charge-out rate', f.charge != null ? `${money2(f.charge)} per hour` : notRec],
       ['Super', f.sup != null ? `${f.sup}%` : notRec],
       ['Effective from', r.effectiveFrom ? AD.time.fmtKey(String(r.effectiveFrom).slice(0, 10)) : notRec],
@@ -111,10 +116,10 @@ AD.employeeRates = (function () {
         <form class="form-grid" novalidate>
           <div class="field"><label>Pay type</label><select name="payType">${options(PAY_TYPES, x.payType || 'Salary')}</select></div>
           <div class="field"><label>Effective from</label><input type="date" name="effectiveFrom" value="${x.effectiveFrom ? esc(String(x.effectiveFrom).slice(0, 10)) : ''}"></div>
-          <div class="field"><label>Annual salary ($)</label><input type="number" name="annualSalary" value="${val(x.annualSalary)}" min="0" step="1" inputmode="decimal" placeholder="e.g. 95000">
-            <div class="help">For salaried staff. The hourly equivalent is worked out on a 38-hour week.</div></div>
+          <div class="field" data-salary-field><label>Annual salary ($)</label><input type="number" name="annualSalary" value="${val(x.annualSalary)}" min="0" step="1" inputmode="decimal" placeholder="e.g. 95000">
+            <div class="help">For salaried staff.</div></div>
           <div class="field"><label>Hourly pay rate ($)</label><input type="number" name="hourlyRate" value="${val(x.hourlyRate)}" min="0" step="0.01" inputmode="decimal" placeholder="e.g. 42.50">
-            <div class="help">For hourly staff (or to override the salary’s hourly equivalent).</div></div>
+            <div class="help" data-hr-help></div></div>
           <div class="field"><label>Charge-out rate ($ per hour)</label><input type="number" name="chargeOutRate" value="${val(x.chargeOutRate)}" min="0" step="0.01" inputmode="decimal" placeholder="e.g. 120"></div>
           <div class="field"><label>Super (%)</label><input type="number" name="superPercent" value="${val(x.superPercent)}" min="0" max="100" step="0.1" inputmode="decimal" placeholder="e.g. 12"></div>
           <div class="field full"><label>Notes</label><textarea name="notes" rows="2" placeholder="e.g. Award level, allowances, next review date">${esc(x.notes || '')}</textarea></div>
@@ -127,6 +132,23 @@ AD.employeeRates = (function () {
         const f = el.querySelector('form');
         el.querySelector('[data-close]').onclick = close;
         const saveBtn = el.querySelector('[data-save]');
+        // Salaried: the hourly rate works itself out from the salary (read-only).
+        // Hourly: type the hourly rate; there's no salary.
+        const sal = f.elements.annualSalary, hr = f.elements.hourlyRate, pt = f.elements.payType;
+        const hrHelp = el.querySelector('[data-hr-help]');
+        const fromSalary = (v) => { const n = num(v); return n != null ? Math.round((n / HOURS_PER_YEAR) * 100) / 100 : null; };
+        const sync = () => {
+          const salaried = pt.value === 'Salary';
+          el.querySelector('[data-salary-field]').style.display = salaried ? '' : 'none';
+          hr.readOnly = salaried;
+          if (salaried) { const h = fromSalary(sal.value); hr.value = h != null ? h.toFixed(2) : ''; }
+          hrHelp.textContent = salaried
+            ? `Worked out from the salary: ÷ 52 weeks ÷ 5 days ÷ ${DAY_HOURS} hours (${HOURS_PER_YEAR.toLocaleString('en-AU')} hours a year).`
+            : 'The hourly pay rate for this person.';
+        };
+        pt.addEventListener('change', sync);
+        sal.addEventListener('input', sync);
+        sync();
         saveBtn.onclick = async () => {
           const d = formData(f);
           const err = {};
@@ -135,12 +157,15 @@ AD.employeeRates = (function () {
           });
           if (d.superPercent !== '' && Number(d.superPercent) > 100) err.superPercent = 'Enter a percentage up to 100.';
           if (d.payType === 'Hourly' && d.hourlyRate === '') err.hourlyRate = 'Enter the hourly pay rate.';
-          if (d.payType === 'Salary' && d.annualSalary === '' && d.hourlyRate === '') err.annualSalary = 'Enter the annual salary.';
+          if (d.payType === 'Salary' && d.annualSalary === '') err.annualSalary = 'Enter the annual salary.';
           if (!showErrors(f, err)) return;
           const who = AD.currentUserEmail || '';
+          const salaried = d.payType === 'Salary';
           const rec = {
             payType: d.payType,
-            annualSalary: num(d.annualSalary), hourlyRate: num(d.hourlyRate), chargeOutRate: num(d.chargeOutRate),
+            annualSalary: salaried ? num(d.annualSalary) : null,
+            hourlyRate: salaried ? fromSalary(d.annualSalary) : num(d.hourlyRate),
+            chargeOutRate: num(d.chargeOutRate),
             superPercent: num(d.superPercent), effectiveFrom: d.effectiveFrom || null, notes: d.notes,
             updatedAt: new Date().toISOString(), updatedBy: who
           };
