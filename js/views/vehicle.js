@@ -1152,6 +1152,54 @@ AD.views.vehicle = (function () {
     showAll();
   }
 
+  /**
+   * Fuel cost per km and total running cost per km, from the daily GPS
+   * kilometres — the same figures as the Cost sheet's Fuel cost per km and
+   * Cost vs usage charts. Fuel is matched to the GPS days (L.fuelEconomy);
+   * the total adds recorded services and resolved repairs over the last 90
+   * days of GPS data. Nothing shown for a vehicle without daily GPS km.
+   */
+  function costPerKmFacts(v, services, defects, isHours, faint) {
+    const fe = L.fuelEconomy(v);
+    if (!fe || !(fe.kmTotal > 0)) return '';
+    const n0 = (n) => Math.round(n).toLocaleString('en-AU');
+    const rate = (n) => '$' + (n >= 10 ? n0(n) : n.toFixed(2));
+    const short = (a, b) => `${T.fmtKey(a).slice(0, 5)}–${T.fmtKey(b).slice(0, 5)}`;
+
+    let fuelCell;
+    if (fe.costPerKm != null) {
+      fuelCell = `${rate(fe.costPerKm)}/km<span class="sub">${fe.litresPer100 != null ? fe.litresPer100.toFixed(1) + ' L/100km · ' : ''}${L.fmtAUD(fe.fuelCost)} ÷ ${n0(fe.kmTotal)} km · ${short(fe.fromKey, fe.toKey)}</span>`;
+    } else {
+      const all = L.fuelFor(v);
+      fuelCell = `${faint('No fuel to match yet')}<span class="sub">${n0(fe.kmTotal)} km since ${T.fmtKey(fe.fromKey).slice(0, 5)}, no fills dated in those days${all && all.lastDate ? ` · latest fill ${T.fmtKey(all.lastDate)}` : ''}</span>`;
+    }
+
+    // Total: fuel + servicing + repairs over the same span of daily GPS data.
+    const daily = L.workHoursDaily(v, 90);
+    const days = daily ? daily.days.filter((d) => d.km != null) : [];
+    let totalCell = faint('—');
+    if (days.length) {
+      const from = days[0].day, to = days[days.length - 1].day;
+      const km = days.reduce((n, d) => n + (d.km || 0), 0);
+      const hrs = days.reduce((n, d) => n + (d.hours || 0), 0);
+      const inWin = (d) => d && d >= from && d <= to;
+      const fuel = (L.fuelFor(v, from, to) || { cost: 0 }).cost;
+      const svc = services.filter((s) => inWin(s.date)).reduce((n, s) => n + Number(s.cost || 0), 0);
+      const rep = defects.filter((d) => d.status === 'Resolved' && inWin(d.resolvedDate)).reduce((n, d) => n + Number(d.cost || 0), 0);
+      const spend = fuel + svc + rep;
+      const spanDays = T.daysBetween(from, to) + 1;
+      if (spend > 0 && km > 0) {
+        const parts = [fuel && `fuel ${L.fmtAUD(fuel)}`, svc && `servicing ${L.fmtAUD(svc)}`, rep && `repairs ${L.fmtAUD(rep)}`].filter(Boolean).join(' + ');
+        totalCell = `${rate(spend / km)}/km${isHours && hrs > 0 ? ` · ${rate(spend / hrs)}/engine hr` : ''}<span class="sub">${parts} over ${spanDays} days${spanDays < 60 ? ' · thin data' : ''}</span>`;
+      } else {
+        totalCell = `${faint('No spend to measure yet')}<span class="sub">no fuel, servicing or repairs recorded since ${T.fmtKey(from).slice(0, 5)}</span>`;
+      }
+    }
+
+    return `<div><dt>Fuel cost per km</dt><dd>${fuelCell}</dd></div>
+            <div><dt>Total cost per km</dt><dd>${totalCell}</dd></div>`;
+  }
+
   function overview(v, services, defects) {
     const s = L.serviceState(v), r = L.regoState(v);
     const flagTone = (tone) => (tone ? 'flag-' + tone : 'muted');
@@ -1200,6 +1248,7 @@ AD.views.vehicle = (function () {
     const fuelFact = fuel
       ? `<div><dt>Fuel (imported)</dt><dd>${L.fmtAUD(fuel.cost)}<span class="sub">${fuel.litres ? Math.round(fuel.litres).toLocaleString('en-AU') + ' L · ' : ''}${fuel.count} transaction${fuel.count === 1 ? '' : 's'} from fuel-card data</span></dd></div>`
       : '';
+    const costFacts = costPerKmFacts(v, services, defects, isHours, faint);
     const openDefs = defects.filter((d) => d.status !== 'Resolved');
     const engineChart = engineHoursChart(v);
     return `
@@ -1216,6 +1265,7 @@ AD.views.vehicle = (function () {
             <div><dt>Registration expiry</dt><dd>${T.fmtKey(v.regoExpiry)}<span class="sub ${flagTone(L.attentionTone(r.state, r.days))}">${esc(r.state === 'ok' ? 'Current — ' + r.why : r.why)}</span></dd></div>
             <div><dt>Last service</dt><dd>${lastServiceCell}</dd></div>
             <div><dt>Next service</dt><dd>${nextServiceLabel(v, s)}<span class="sub ${flagTone(L.attentionTone(s.state, s.daysLeft, s.kmLeft, s.hoursLeft))}">${esc(s.why.charAt(0).toUpperCase() + s.why.slice(1))}</span>${projService ? `<span class="sub">${esc(projService)}</span>` : ''}</dd></div>
+            ${costFacts}
             ${v.status === 'In workshop' && v.workshopId ? `<div class="facts-span"><dt>Currently at</dt><dd>${esc((AD.store.get('workshops', v.workshopId) || {}).name || 'Unknown workshop')}</dd></div>` : ''}
           </dl>
           ${detailsFacts(v)}
