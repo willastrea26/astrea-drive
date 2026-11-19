@@ -274,11 +274,34 @@ AD.views = AD.views || {};
   const EQ_TONE = { 'In service': 'aqua', 'Under repair': 'violet', 'Out of service': 'red' };
   const INSPECT_SOON_DAYS = 30;
 
+  /** Sample items that have someone are assigned to REAL staff from the
+   *  Employee register: a person from the matching team (survey gear to
+   *  surveyors, locating gear to locators, civil / safety / traffic gear to
+   *  the Civil team), spread across different people. Nothing is saved —
+   *  it just means the samples show, and "Edit" pre-fills, people you
+   *  actually have. With no staff loaded, the made-up names stay. */
+  const SAMPLE_TEAM = { Surveying: 'Surveying', Locating: 'Locating', Civil: 'Civil', Safety: 'Civil', 'Traffic control': 'Civil' };
+  function withRealAssignees(items) {
+    const staff = AD.store.all('employees').slice().sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    if (!staff.length) return items;
+    const used = {};
+    return items.map((x) => {
+      if (!x.sampleAssignee) return x;
+      const team = SAMPLE_TEAM[x.category] || '';
+      const inTeam = staff.filter((e) => teamOf(e) === team);
+      const pool = inTeam.length ? inTeam : staff;
+      const n = used[team] || 0;
+      used[team] = n + 1;
+      const { sampleAssignee, ...rest } = x;
+      return Object.assign(rest, { employeeId: pool[n % pool.length].id });
+    });
+  }
+
   // SAMPLE EQUIPMENT — shown ONLY while the register has no real items (same
-  // rules as the sample devices): never written to Supabase, read-only,
-  // labelled, and gone as soon as the first real item is added. All names,
-  // numbers and serials are made up.
-  const SAMPLE_EQUIPMENT = () => [
+  // rules as the sample devices): never written to Supabase, labelled, and gone
+  // as soon as the first real item is added. Item names, numbers and serials
+  // are made up; the people are mapped onto real staff (withRealAssignees).
+  const SAMPLE_EQUIPMENT = () => withRealAssignees([
     { id: 'sample-SUR-01', sample: true, assetTag: 'SUR-01', name: 'GNSS rover', category: 'Surveying', make: 'Trimble R12i', serial: '6143R00217', location: 'Wetherill Park depot', sampleAssignee: { name: 'Priya Nair', position: 'Registered surveyor' }, status: 'In service', lastInspection: day(-291), nextInspection: day(74), notes: 'Annual calibration with the Trimble dealer.' },
     { id: 'sample-SUR-02', sample: true, assetTag: 'SUR-02', name: 'Robotic total station', category: 'Surveying', make: 'Leica TS16', serial: '1873402', location: 'Site — Parramatta Rd, Granville', sampleAssignee: { name: 'Josh Whitfield', position: 'Survey technician' }, status: 'In service', lastInspection: day(-353), nextInspection: day(12), notes: '' },
     { id: 'sample-SUR-03', sample: true, assetTag: 'SUR-03', name: 'Rotating laser level', category: 'Surveying', make: 'Topcon RL-H5A', serial: 'TP-55120', location: 'Wetherill Park depot', sampleAssignee: null, status: 'Under repair', lastInspection: day(-374), nextInspection: day(-9), notes: 'Dropped on site — sent for repair and recalibration.' },
@@ -289,7 +312,7 @@ AD.views = AD.views || {};
     { id: 'sample-SAF-01', sample: true, assetTag: 'SAF-01', name: '4-gas detector', category: 'Safety', make: 'Honeywell BW MicroClip X3', serial: 'MCX3-60814', location: 'Ute UTE-02', sampleAssignee: { name: 'Ben O’Connor', position: 'Pipe layer' }, status: 'In service', lastInspection: day(-183), nextInspection: day(-3), notes: 'Bump test before every confined space entry.' },
     { id: 'sample-SAF-02', sample: true, assetTag: 'SAF-02', name: 'Confined space tripod & winch', category: 'Safety', make: 'Tripod rescue kit', serial: 'CS-TRI-114', location: 'Wetherill Park depot', sampleAssignee: null, status: 'Out of service', lastInspection: day(-406), nextInspection: day(-41), notes: 'Tagged out — winch cable frayed. Do not use.' },
     { id: 'sample-TRF-01', sample: true, assetTag: 'TRF-01', name: 'Variable message sign trailer', category: 'Traffic control', make: 'Solar VMS trailer', serial: 'VMS-0452', location: 'Site — Church St, Ryde', sampleAssignee: null, status: 'In service', lastInspection: day(-89), nextInspection: day(96), notes: '' }
-  ];
+  ]);
   const showingSampleEquipment = () => !AD.store.all('equipment').length;
   const sampleEquipment = (id) => (showingSampleEquipment() ? SAMPLE_EQUIPMENT().find((x) => x.id === id) || null : null);
   const equipmentFor = (employeeId) => AD.store.all('equipment').filter((x) => x.employeeId === employeeId);
@@ -302,8 +325,10 @@ AD.views = AD.views || {};
       AD.ui.toast('Run supabase/create-equipment.sql in the Supabase SQL Editor first — then items can be saved.', 'error');
       return;
     }
+    // Keep the (real) person the sample is mapped to; a made-up one isn't carried over.
     const { id, sample, sampleAssignee, assignee, ...fields } = x;
-    AD.equipmentForm(null, onSaved, Object.assign({}, fields, { employeeId: '', fromSample: true }));
+    const keep = fields.employeeId && AD.store.get('employees', fields.employeeId) ? fields.employeeId : '';
+    AD.equipmentForm(null, onSaved, Object.assign({}, fields, { employeeId: keep, fromSample: true }));
   }
 
   AD.equipment = { EQ_CATEGORIES, EQ_STATUSES, EQ_TONE, INSPECT_SOON_DAYS, equipmentFor, sampleEquipment, editSample: editSampleEquipment };
@@ -322,7 +347,7 @@ AD.views = AD.views || {};
       title: x.fromSample ? `Edit ${x.name || 'equipment'}` : isNew ? 'Add equipment' : `Edit ${x.name || 'equipment'}`,
       wide: true,
       body: `
-        ${x.fromSample ? `<div class="sample-note">${AD.icons.alert}<div><b>This is a sample item.</b> Saving adds it to your equipment register as a <b>real item</b> — check the details match your actual equipment and choose who has it. Once you’ve saved your first real item, the other sample items are hidden.</div></div>` : ''}
+        ${x.fromSample ? `<div class="sample-note">${AD.icons.alert}<div><b>This is a sample item.</b> Saving adds it to your equipment register as a <b>real item</b> — check the details match your actual equipment and who has it. Once you’ve saved your first real item, the other sample items are hidden.</div></div>` : ''}
         <form class="form-grid" novalidate>
           <div class="form-section-title full"><b>Item</b><span>What it is and how to identify it</span></div>
           <div class="field"><label>Item <span class="req">*</span></label><input type="text" name="name" value="${esc(x.name)}" placeholder="e.g. GNSS rover"></div>

@@ -94,14 +94,17 @@ AD.views.equipment = (function () {
       return;
     }
     const tone = (AD.equipment && AD.equipment.EQ_TONE[x.status]) || 'grey';
-    // Sample items carry a made-up person (no profile, no contact details).
-    const emp = sample ? x.sampleAssignee : (x.employeeId ? AD.store.get('employees', x.employeeId) : null);
-    const team = emp && !sample && AD.employees ? AD.employees.teamOf(emp) : '';
+    // A real employee (sample items are mapped onto your real staff where
+    // possible), or — only if no staff are loaded — a sample's made-up person.
+    const realEmp = x.employeeId ? AD.store.get('employees', x.employeeId) : null;
+    const fakeEmp = !realEmp && sample ? x.sampleAssignee : null;
+    const emp = realEmp || fakeEmp;
+    const team = realEmp && AD.employees ? AD.employees.teamOf(realEmp) : '';
     const next = inspection(day10(x.nextInspection));
-    const telHref = emp && emp.mobile ? 'tel:' + emp.mobile.replace(/[^\d+]/g, '') : '';
-    const empLink = !emp ? '<span class="muted">Depot pool</span>'
-      : sample ? esc(emp.name)
-      : `<a href="#/employee/${encodeURIComponent(emp.id)}">${esc(emp.name)}</a>`;
+    const telHref = realEmp && realEmp.mobile ? 'tel:' + realEmp.mobile.replace(/[^\d+]/g, '') : '';
+    const empLink = realEmp ? `<a href="#/employee/${encodeURIComponent(realEmp.id)}">${esc(realEmp.name)}</a>`
+      : fakeEmp ? esc(fakeEmp.name)
+      : '<span class="muted">Depot pool</span>';
     const notRec = '<span class="muted">Not recorded</span>';
 
     const details = [
@@ -145,7 +148,7 @@ AD.views.equipment = (function () {
         </section>
         <section class="section">
           ${sectionHead({ title: 'Assigned to', level: 3, actions: sample ? '' : `<button type="button" class="btn btn-ghost btn-sm" data-reassign>${I.edit} ${emp ? 'Reassign' : 'Assign'}</button>` })}
-          ${emp && sample
+          ${fakeEmp
             ? `<div class="dev-person is-sample">
                 <span class="emp-thumb" aria-hidden="true">${esc(initials(emp.name))}</span>
                 <span class="dev-person-text"><span class="id">${esc(emp.name)}</span><span class="t2">${esc(emp.position || '')}</span></span>
