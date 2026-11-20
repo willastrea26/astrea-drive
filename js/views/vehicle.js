@@ -397,7 +397,9 @@ AD.views.vehicle = (function () {
       const workshopId = status === 'In workshop' && f.workshopId ? f.workshopId.value : '';
       if (status === v.status && workshopId === (v.workshopId || '')) return;
       try {
-        await AD.store.update('vehicles', v.id, { status, workshopId });
+        // A status set by hand is no longer the GPS geofence's to manage
+        // (statusSource only exists once create-workshop-geofence.sql has run).
+        await AD.store.update('vehicles', v.id, v.statusSource ? { status, workshopId, statusSource: '' } : { status, workshopId });
         const shop = workshopId && AD.store.get('workshops', workshopId);
         await AD.store.log(`${v.id} status changed to ${status}${shop ? ' at ' + shop.name : ''}`, v.id);
       } catch (err) {
@@ -1266,7 +1268,7 @@ AD.views.vehicle = (function () {
             <div><dt>Last service</dt><dd>${lastServiceCell}</dd></div>
             <div><dt>Next service</dt><dd>${nextServiceLabel(v, s)}<span class="sub ${flagTone(L.attentionTone(s.state, s.daysLeft, s.kmLeft, s.hoursLeft))}">${esc(s.why.charAt(0).toUpperCase() + s.why.slice(1))}</span>${projService ? `<span class="sub">${esc(projService)}</span>` : ''}</dd></div>
             ${costFacts}
-            ${v.status === 'In workshop' && v.workshopId ? `<div class="facts-span"><dt>Currently at</dt><dd>${esc((AD.store.get('workshops', v.workshopId) || {}).name || 'Unknown workshop')}</dd></div>` : ''}
+            ${v.status === 'In workshop' && v.workshopId ? `<div class="facts-span"><dt>Currently at</dt><dd>${esc((AD.store.get('workshops', v.workshopId) || {}).name || 'Unknown workshop')}${v.statusSource === 'geofence' ? '<span class="sub sub-gps">Detected by GPS: parked here 30+ min · goes back automatically when it leaves</span>' : ''}</dd></div>` : ''}
           </dl>
           ${detailsFacts(v)}
           <section class="section">

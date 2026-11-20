@@ -143,6 +143,8 @@ AD.vehicleForm = function (vehicle, onSaved) {
           wrdtPlantNo: d.wrdtPlantNo || null, evieFob: d.evieFob || null, evieCard: d.evieCard || null,
           hired: hiredMode, hireCompany: hiredMode ? (d.hireCompany || '') : ''
         };
+        // A status picked by hand is no longer the GPS geofence's to manage.
+        if (!isNew && v.statusSource && d.status !== v.status) rec.statusSource = '';
         saveBtn.disabled = true;
         let saved;
         try {

@@ -474,6 +474,35 @@ async function mapLimit<T, R>(
  * waiting on; the nightly cron (quick=false) still refreshes those every
  * night regardless of whether anyone clicks the button.
  */
+/**
+ * Workshop geofences: read every tracker's live position and hand them to
+ * apply_workshop_geofence() (create-workshop-geofence.sql), which marks a
+ * vehicle In workshop after 30 minutes parked inside a workshop's geofence
+ * and releases it when it drives off. One object-status call per device —
+ * the same call the live map makes — so it's light enough to run every 15
+ * minutes. Like the odometer sync it uses the anon key: the database
+ * function is SECURITY DEFINER and can only do this one job.
+ */
+async function checkGeofences() {
+  const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ??
+    "sb_publishable_hInlEU8CHjlKIiMtAz4t1g_qggctjTA";
+  if (!supabaseUrl) return { error: "Supabase URL unavailable" };
+  const db = createClient(supabaseUrl, anonKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  const devices = (await fetchVehicles()).filter((v) => v.imei);
+  const statuses = await mapLimit(devices, CONCURRENCY, (v) => fetchStatus(v.imei, true));
+  const readings = devices.map((v, i) => ({
+    rego: v.rego,
+    lat: statuses[i]?.lat ?? null,
+    lng: statuses[i]?.lng ?? null,
+  })).filter((r) => r.lat != null && r.lng != null);
+  const { data, error } = await db.rpc("apply_workshop_geofence", { readings });
+  if (error) return { error: error.message, readings: readings.length };
+  return { readings: readings.length, devices: devices.length, ...(data as Record<string, unknown>) };
+}
+
 async function syncOdometers(depth: "recent" | "full" = "recent", quick = false, source: "cron" | "manual" = "manual") {
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ??
@@ -696,6 +725,21 @@ Deno.serve(async (req: Request) => {
       const positions = (await mapLimit(imeis, CONCURRENCY, fetchStatus))
         .filter(Boolean);
       return json({ positions });
+    }
+
+    if (action === "geofence") {
+      // Cron calls come through pg_net, which gives up after ~5s — so, as
+      // with the odometer sync, answer straight away and finish in the
+      // background. A manual call (e.g. testing from the browser) waits for
+      // and returns the real result.
+      if (sourceFromAuth(req) === "cron") {
+        const run = checkGeofences().catch(() => {});
+        // deno-lint-ignore no-explicit-any
+        const rt = (globalThis as any).EdgeRuntime;
+        if (rt?.waitUntil) rt.waitUntil(run);
+        return json({ started: true });
+      }
+      return json(await checkGeofences());
     }
 
     if (action === "sync-odometers") {
