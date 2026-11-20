@@ -290,7 +290,7 @@ AD.views.defects = (function () {
 
   function render(el, params) {
     root = el;
-    st = { status: params.status || 'open', priority: params.priority || '', vehicle: params.vehicle || '' };
+    st = { status: params.status || 'all', priority: params.priority || '', vehicle: params.vehicle || '' };
     const vehicles = AD.store.all('vehicles').map((v) => v.id).sort();
     const open = L.openDefects();
     const urgent = open.filter((d) => d.priority === 'Critical' || d.priority === 'High').length;
