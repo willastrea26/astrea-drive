@@ -711,6 +711,97 @@ AD.art = (function () {
     <g fill="#4a5568"><circle cx="25" cy="46.5" r="4.8"/><circle cx="95" cy="46.5" r="4.8"/></g>
     <g fill="#1a2130"><circle cx="25" cy="46.5" r="1.8"/><circle cx="95" cy="46.5" r="1.8"/></g>`;
 
+  // Body-style car profiles, so each car reads as its real model's shape:
+  //   suv   — upright SUV, tall glasshouse, near-vertical tailgate (Touareg)
+  //   suvk  — the same with a forward kink at the rear window (BMW X-series)
+  //   coupe — low, sleek SUV with a long sloping roof and slim glass (Velar)
+  //   long  — long-wheelbase 7-seat SUV, three windows a side (Q7)
+  //   cross — short, rounded compact crossover with black cladding (Atto 3)
+  // Same 120x60 frame, ground line and wheel size as every other drawing.
+  const GLASS = '#1a3550';
+  const CAR_SHAPES = {
+    suv: {
+      body: 'M 8 44 L 7.2 37 Q 7.5 30.5 12 29.5 L 35 27.5 L 45.5 18.5 Q 47 17 49.5 17 L 96 17 Q 101 17 104 19.5 L 108.5 25 Q 110.5 27.5 110.6 31 L 111 41 L 110 44 L 102 44 A 10 10 0 0 0 82 44 L 36 44 A 10 10 0 0 0 16 44 Z',
+      glass: ['M 37.3 27 L 46.3 19.3 L 63 19.3 L 63 27 Z', 'M 64.5 19.3 L 82 19.3 L 82 27 L 64.5 27 Z',
+              'M 83.5 19.3 L 96 19.3 Q 100.5 19.3 102.8 22 L 105.5 26 L 105.5 27 L 83.5 27 Z'],
+      doors: 'M63.75 27 L63.75 42 M82.75 27 L82.75 36', wheels: [26, 92], rails: [52, 97], cladding: true,
+      handles: [52, 72], handleY: 31.2, mark: [40, 31, 17],
+      head: 'M 7.6 31.5 L 15 30 L 15.5 32 L 8 33.5 Z', tail: 'M 106.5 25.5 L 110.4 29 L 110.6 32 L 106.5 30 Z'
+    },
+    coupe: {
+      body: 'M 8 44 L 7.3 38.5 Q 7.6 32.5 12 31.5 L 37 29.3 L 48.5 20.5 Q 50.5 19.3 53.5 19.3 L 84 19.3 Q 92 19.8 99 23.5 L 107.5 28.8 Q 110.5 30.8 110.5 34 L 111 41 L 110 44 L 102 44 A 10 10 0 0 0 82 44 L 36 44 A 10 10 0 0 0 16 44 Z',
+      glass: ['M 39.8 28.6 L 49 21.6 L 64 21.6 L 64 28.6 Z',
+              'M 65.5 21.6 L 84 21.6 Q 91 22 96.5 25.2 L 101 28.6 L 65.5 28.6 Z'],
+      doors: 'M64.75 28.6 L64.75 42 M85 28.6 L85 36', wheels: [26, 92], rails: null, cladding: false,
+      handles: [53, 75], handleY: 32.6, mark: [41, 32.4, 17], flushHandles: true,
+      head: 'M 7.8 33 L 17 31.6 L 17.3 32.8 L 8.2 34.4 Z', tail: 'M 100 29.4 L 110.2 31.6 L 110.4 33 L 100 31 Z'
+    },
+    long: {
+      body: 'M 6 44 L 5.3 37.5 Q 5.5 31 10 30 L 33 28 L 43.5 18.8 Q 45 17.5 47.5 17.5 L 98 18.6 Q 103 19 106 21.5 L 110.3 26.5 Q 112 29 112 32.5 L 112.5 41 L 111.5 44 L 106 44 A 10 10 0 0 0 86 44 L 34 44 A 10 10 0 0 0 14 44 Z',
+      glass: ['M 35.3 27.5 L 44.3 19.8 L 60 19.8 L 60 27.5 Z', 'M 61.5 19.8 L 80 19.9 L 80 27.5 L 61.5 27.5 Z',
+              'M 81.5 20 L 98 20.4 Q 102.5 20.8 104.6 23.2 L 107 27 L 107 27.5 L 81.5 27.5 Z'],
+      doors: 'M60.75 27.5 L60.75 42 M80.75 27.5 L80.75 36', wheels: [24, 96], rails: [50, 99], cladding: true,
+      handles: [49, 70], handleY: 31.4, mark: [37.5, 31.2, 17],
+      head: 'M 5.6 32 L 14 30.5 L 14.5 32.4 L 6 34 Z', tail: 'M 107.2 26.6 L 111.8 30 L 112 33 L 107.2 30.6 Z'
+    },
+    cross: {
+      body: 'M 12 44 L 11 38 Q 11.3 32 15.5 31 L 36 28.5 L 45.5 19.5 Q 47.5 18 50.5 18 L 87 18 Q 92.5 18.3 96 21.5 L 103.5 28 Q 106.5 30.5 106.5 34 L 107 41 L 106 44 L 99 44 A 10 10 0 0 0 79 44 L 39 44 A 10 10 0 0 0 19 44 Z',
+      glass: ['M 38.5 28 L 46.5 20.5 L 62 20.5 L 62 28 Z', 'M 63.5 20.5 L 79 20.5 L 79 27.6 L 63.5 27.9 Z',
+              'M 80.5 20.5 L 87 20.5 Q 91.5 20.8 94 23.5 L 96.5 26.6 L 80.5 27.4 Z'],
+      doors: 'M62.75 28 L62.75 42 M79.75 27.6 L79.75 36', wheels: [29, 89], rails: [55, 88], cladding: true,
+      handles: [51, 70], handleY: 32, mark: [40.5, 31.8, 16],
+      head: 'M 11.6 33 L 19 31.6 L 19.4 33.3 L 12 34.8 Z', tail: 'M 98.5 28.6 L 106 32 L 106.3 34 L 98.5 31 Z'
+    }
+  };
+  CAR_SHAPES.suvk = Object.assign({}, CAR_SHAPES.suv, {
+    // BMW-style forward kink at the base of the rear quarter window.
+    glass: [CAR_SHAPES.suv.glass[0], CAR_SHAPES.suv.glass[1],
+            'M 83.5 19.3 L 96 19.3 Q 100.5 19.3 102.8 22 L 105.5 26 L 104.6 27 L 94 27 Q 91 27 90 24.8 L 86 24.8 L 83.5 27 Z']
+  });
+
+  const carShape = (s, body, stroke, markTone) => {
+    const [fx, rx] = s.wheels;
+    const cx = (fx + rx) / 2;
+    const wheel = (x) => `<circle cx="${x}" cy="46.5" r="8"/>`;
+    return `
+    <ellipse cx="${cx}" cy="54.6" rx="${(rx - fx) / 2 + 22}" ry="3" fill="#101D35" opacity=".16"/>
+    ${s.rails ? `<path d="M${s.rails[0]} 15.6 L${s.rails[1]} 15.6" stroke="#2a3542" stroke-width="1.3" stroke-linecap="round"/>
+    <path d="M${s.rails[0] + 2} 15.8 L${s.rails[0] + 2} 19 M${s.rails[1] - 2} 15.8 L${s.rails[1] - 2} 19" stroke="#2a3542" stroke-width="1"/>` : ''}
+    <path d="${s.body}" fill="${body}" stroke="${stroke}" stroke-width=".9" stroke-linejoin="round"/>
+    ${s.glass.map((d) => `<path d="${d}" fill="${GLASS}"/>`).join('')}
+    <path d="${s.doors}" stroke="${stroke}" stroke-width=".7" fill="none"/>
+    ${s.handles.map((x) => s.flushHandles
+      ? `<rect x="${x}" y="${s.handleY}" width="6" height=".8" rx=".4" fill="${stroke}"/>`
+      : `<rect x="${x}" y="${s.handleY}" width="5.5" height="1.4" rx=".6" fill="${stroke}"/>`).join('')}
+    ${mark(markTone, s.mark[0], s.mark[1], s.mark[2])}
+    ${s.cladding ? `<g fill="none" stroke="#24303d" stroke-width="2.2">
+      <path d="M${fx - 10} 44 A 10 10 0 0 1 ${fx + 10} 44"/><path d="M${rx - 10} 44 A 10 10 0 0 1 ${rx + 10} 44"/></g>
+    <path d="M${fx + 10} 43 L${rx - 10} 43" stroke="#24303d" stroke-width="2"/>` : ''}
+    <path d="${s.head}" fill="#f0f4f8"/>
+    <path d="${s.tail}" fill="#c93f3f"/>
+    <g fill="#161b24">${wheel(fx)}${wheel(rx)}</g>
+    <g fill="#4a5568">${[fx, rx].map((x) => `<circle cx="${x}" cy="46.5" r="4.8"/>`).join('')}</g>
+    <g fill="#1a2130">${[fx, rx].map((x) => `<circle cx="${x}" cy="46.5" r="1.8"/>`).join('')}</g>`;
+  };
+  const CAR_STYLE_SYMBOLS = Object.keys(CAR_SHAPES).map((k) =>
+    `<symbol id="art-car-${k}" viewBox="0 0 120 60">${carShape(CAR_SHAPES[k], '#4a90c4', '#2a5c82', 'white')}</symbol>` +
+    `<symbol id="art-car-${k}-red" viewBox="0 0 120 60">${carShape(CAR_SHAPES[k], '#c23b3b', '#7a2626', 'white')}</symbol>`).join('');
+
+  /**
+   * Which body style a car is, from its make and model. Anything not
+   * recognised keeps the original sedan. Order matters: coupe-SUVs and
+   * long 7-seaters are checked before the general SUV list.
+   */
+  const carStyle = (v) => {
+    const s = `${v.make || ''} ${v.model || ''}`.toLowerCase();
+    if (/velar|evoque|range rover sport|\bx6\b|\bx4\b|\bq8\b|coupe suv|urus/.test(s)) return 'coupe';
+    if (/\bq7\b|xc90|kluger|land ?cruiser|prado|pajero|\bx7\b|\bgls\b|discovery(?! sport)|santa fe|sorento|cx-?9|cx-?90|palisade|everest|patrol|tahoe|fortuner/.test(s)) return 'long';
+    if (/atto|dolphin|kona|\bmg ?4\b|\bzs\b|seal u|ioniq ?5|\bev6\b|model y|niro|\bq2\b|\bq3\b|\bx1\b|\bx2\b|t-?roc|cx-?3\b|cx-?30|juke|venue|yaris cross|corolla cross|c-hr|jolion|eclipse cross/.test(s)) return 'cross';
+    if (/\bbmw\b/.test(s) && /\bx[3-5]\b/.test(s)) return 'suvk';
+    if (/touareg|tiguan|\bq5\b|rav ?4|cx-?5|cx-?60|outlander|forester|x-?trail|range rover|cayenne|\bglc\b|\bgle\b|xc60|macan|tucson|sportage|kodiaq|defender|discovery sport|grand cherokee|\bsuv\b/.test(s)) return 'suv';
+    return '';
+  };
+
   const SYMBOLS = [
     vacSymbol('art-vac',         PAL_WHITE),
     vacSymbol('art-vac-red',     PAL_RED),
@@ -726,6 +817,7 @@ AD.art = (function () {
     vanSymbol('art-van-red',     PAL_RED),
     `<symbol id="art-car"     viewBox="0 0 120 60">${carBody('#4a90c4', '#2a5c82', 'white')}</symbol>`,
     `<symbol id="art-car-red" viewBox="0 0 120 60">${carBody('#c23b3b', '#7a2626', 'white')}</symbol>`,
+    CAR_STYLE_SYMBOLS,
   ].join('');
 
   // Inject once per document.
@@ -762,7 +854,7 @@ AD.art = (function () {
     'Ute': (v, width, label) => ute(width, label || `${v.id} ute`),
     'Tipper truck': (v, width, label) => tip(width, label || `${v.id} tipper`),
     'Excavator': (v, width, label) => dig(width, label || `${v.id} excavator`),
-    'Car': (v, width, label) => car(width, label || `${v.id} car`),
+    'Car': (v, width, label) => { const k = carStyle(v); return (k ? plain(`art-car-${k}`) : car)(width, label || `${v.id} car`); },
     'Van': (v, width, label) => van(width, label || `${v.id} van`),
     'Trailer': (v, width, label) => trailer(width, label || `${v.id} trailer`)
   };
@@ -774,7 +866,7 @@ AD.art = (function () {
     'Ute': (v, width, label) => uteRed(width, label || `${v.id || v.rego} hired ute`),
     'Tipper truck': (v, width, label) => tipRed(width, label || `${v.id || v.rego} hired tipper`),
     'Excavator': (v, width, label) => digRed(width, label || `${v.id || v.rego} hired excavator`),
-    'Car': (v, width, label) => carRed(width, label || `${v.id || v.rego} hired car`),
+    'Car': (v, width, label) => { const k = carStyle(v); return (k ? plain(`art-car-${k}-red`) : carRed)(width, label || `${v.id || v.rego} hired car`); },
     'Van': (v, width, label) => vanRed(width, label || `${v.id || v.rego} hired van`),
     'Trailer': (v, width, label) => trailerRed(width, label || `${v.id || v.rego} hired trailer`)
   };
