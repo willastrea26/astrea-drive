@@ -239,6 +239,8 @@ AD.views['cost-sheet'] = (function () {
 
       ${fuelPerKm()}
 
+      ${tolls()}
+
       ${costVsUsage()}
 
       <p class="section-foot muted small">Spend is recorded services plus resolved defects, counted on the day the service was recorded or the defect was resolved; imported fuel-card spend is shown as its own band on Spend over time, folded into Cost vs usage, and broken out on its own in Fuel cost per km. Planned is scheduled servicing; unplanned is a defect repair. The KPIs above cover servicing, repairs and fuel for the ${cfg.label} on screen, against the average of the ${cfg.baselineN} ${cfg.baselineN === 1 ? cfg.label : cfg.plural} before. Running cost divides a vehicle's spend by the distance or hours covered between its first and last service in the window, so it needs at least two services to show a rate.</p>
@@ -255,6 +257,7 @@ AD.views['cost-sheet'] = (function () {
     el.querySelectorAll('[data-scope]').forEach((b) => (b.onclick = () => setScope(b.dataset.scope)));
     el.querySelectorAll('[data-period]').forEach((b) => (b.onclick = () => setPeriod(b.dataset.period)));
     el.querySelectorAll('[data-use]').forEach((b) => (b.onclick = () => { if (b.dataset.use === usageMode) return; usageMode = b.dataset.use; setParams(); draw(); }));
+    bindTollAssign(el);
     bindProjectionInputs();
   }
 
@@ -988,6 +991,180 @@ AD.views['cost-sheet'] = (function () {
    * Hover shows the litres, the accumulated fuel cost, the number of fills and
    * the average price per litre.
    */
+  /**
+   * Tolls, from imported Linkt statements: kept as their own section, not
+   * folded into the spend figures above. Weekly / monthly / yearly figures are
+   * the imported statements' daily average (total ÷ the days the statements
+   * cover) scaled up, so they're a run rate, not a calendar total. Each line is
+   * attributed to a vehicle from the CURRENT register (plate, or the vehicle's
+   * Linkt tag number), so linking a tag here re-attributes its past trips.
+   */
+  function tolls() {
+    const wrap = (meta, body) => `<section class="section" id="cs-tolls">
+      ${sectionHead({ title: 'Tolls', meta })}
+      <figure class="viz-card">${body}</figure>
+    </section>`;
+    const state = AD.store.tollsState ? AD.store.tollsState() : 'missing';
+    if (state === 'idle' || state === 'loading') {
+      if (state === 'idle') AD.store.loadTolls().then(() => root && draw());
+      return wrap('Linkt toll charges', '<p class="empty">Loading toll data…</p>');
+    }
+    if (state === 'missing') {
+      return wrap('Linkt toll charges', '<p class="empty">Toll tracking isn’t set up yet. Run <b>create-toll-entries.sql</b> in Supabase, then import a Linkt detailed statement with <b>Import cost data</b>.</p>');
+    }
+    const rows = AD.store.all('toll_entries');
+    if (!rows.length) {
+      return wrap('Linkt toll charges', '<p class="empty">No Linkt statements imported yet. Use <b>Import cost data</b> at the top of the page and drop in a Linkt detailed statement PDF.</p>');
+    }
+
+    const num = (n) => Number(n) || 0;
+    const aud2 = (n) => num(n).toLocaleString('en-AU', { style: 'currency', currency: 'AUD' });
+    const fmtShort = (k) => T.fmtKey(k);
+
+    // Coverage: the statement periods themselves (charges can be dated a little
+    // before a period when Linkt posts them late, so the line dates overstate it).
+    const stmts = new Map();
+    rows.forEach((r) => {
+      const k = r.statement || 'none';
+      if (!stmts.has(k)) stmts.set(k, { start: r.periodStart || r.date, end: r.periodEnd || r.date });
+      const s = stmts.get(k);
+      if (!r.periodStart) { if (r.date < s.start) s.start = r.date; if (r.date > s.end) s.end = r.date; }
+    });
+    const periods = [...stmts.values()];
+    const coverDays = periods.reduce((t, p) => t + T.daysBetween(p.start, p.end) + 1, 0) || 1;
+    const from = periods.reduce((m, p) => (p.start < m ? p.start : m), periods[0].start);
+    const to = periods.reduce((m, p) => (p.end > m ? p.end : m), periods[0].end);
+
+    const total = rows.reduce((t, r) => t + num(r.amount), 0);
+    const perDay = total / coverDays;
+    const fees = rows.filter((r) => r.kind === 'fee');
+    const feeTotal = fees.reduce((t, r) => t + num(r.amount), 0);
+
+    // Attribute every line to a vehicle (cached per tag / plate).
+    const match = AD.linkt.matcher(AD.store.all('vehicles'));
+    const cache = new Map();
+    const owner = (r) => {
+      const key = r.tag ? 't' + r.tag : r.plate ? 'p' + r.plate : '';
+      if (!key) return { vehicle: null, ambiguous: [] };
+      if (!cache.has(key)) cache.set(key, match(r));
+      const m = cache.get(key);
+      if (!m.vehicle && !m.ambiguous.length && r.vehicleId) return { vehicle: AD.store.get('vehicles', r.vehicleId), ambiguous: [] };
+      return m;
+    };
+    const byVeh = new Map(), loose = new Map(), roads = new Map();
+    let credits = 0;
+    rows.forEach((r) => {
+      const a = num(r.amount);
+      if (r.kind === 'trip' && r.road) roads.set(r.road, (roads.get(r.road) || 0) + a);
+      if (r.kind === 'adjustment') { credits += a; return; }
+      const m = owner(r);
+      if (m.vehicle) {
+        const g = byVeh.get(m.vehicle.id) || { v: m.vehicle, total: 0, trips: 0, fees: 0, feeAmt: 0, roads: new Map() };
+        g.total += a;
+        if (r.kind === 'fee') { g.fees++; g.feeAmt += a; } else { g.trips++; if (r.road) g.roads.set(r.road, (g.roads.get(r.road) || 0) + a); }
+        byVeh.set(m.vehicle.id, g);
+      } else {
+        const key = r.tag ? 'tag:' + AD.linkt.tagKey(r.tag) : 'plate:' + r.plate;
+        const g = loose.get(key) || { key, tag: r.tag || '', plate: r.plate || '', total: 0, count: 0, fees: 0, owners: m.ambiguous };
+        g.total += a; g.count++; if (r.kind === 'fee') g.fees++;
+        loose.set(key, g);
+      }
+    });
+
+    const vehicles = [...byVeh.values()].sort((a, b) => b.total - a.total);
+    const looseList = [...loose.values()].sort((a, b) => b.total - a.total);
+    const top = Math.max(...vehicles.map((g) => g.total), ...looseList.map((g) => g.total), 0.01);
+
+    const kpi = (label, value, sub) => `<div class="cost-kpi"><span>${esc(label)}</span><strong>${value}</strong><small>${sub}</small></div>`;
+    const kpis = `<div class="cost-kpis cs-fuelkm-kpis">
+        ${kpi('Per week', L.fmtAUD(perDay * 7), 'average over the imported statements')}
+        ${kpi('Per month', L.fmtAUD(perDay * 365 / 12), `${L.fmtAUD(perDay)} a day`)}
+        ${kpi('Yearly forecast', L.fmtAUD(perDay * 365), 'at the current run rate · incl. GST')}
+        ${kpi('No Tag fees', L.fmtAUD(feeTotal), `${fees.length.toLocaleString('en-AU')} charges · avoidable with a working tag`)}
+      </div>`;
+
+    const idCell = (v) => {
+      const art = (AD.art && AD.art.forVehicle(v, 44)) || '';
+      return `<span class="id">${art ? `<span class="cs-veh-art">${art}</span>` : ''}<span class="cs-id-text">${esc(v.id)}${v.rego ? `<small class="cs-rego">${esc(v.rego)}</small>` : ''}</span></span>`;
+    };
+    const topRoad = (g) => { const e = [...g.roads.entries()].sort((a, b) => b[1] - a[1])[0]; return e ? e[0] : ''; };
+    const SHOW = 12;
+    const vehRows = vehicles.slice(0, SHOW).map((g, i) => `<a class="cs-row cs-row-art cs-fuelkm-row" href="${vehHref(g.v.id)}" style="--i:${i}" ${V.tipAttr(g.v.id, [
+        ['Tolls', aud2(g.total), '#8b7ee8'],
+        ['Trips', g.trips.toLocaleString('en-AU'), 'var(--muted)'],
+        ...(g.fees ? [['No Tag fees', `${g.fees} · ${aud2(g.feeAmt)}`, 'var(--amber)']] : []),
+        ...(topRoad(g) ? [['Most used', topRoad(g), 'var(--muted)']] : []),
+        ['Per week (avg)', aud2((g.total / coverDays) * 7), 'var(--muted)']
+      ])}>
+        ${idCell(g.v)}
+        <span class="cs-hbar"><i class="cs-toll" style="width:${(g.total / top) * 100}%"></i></span>
+        <span class="cs-row-val">${L.fmtAUD(g.total)}<span class="cs-row-sub">${L.fmtAUD((g.total / coverDays) * 7)}/wk</span></span>
+        <span class="cs-row-meta">${g.fees ? `<span class="cs-chip cs-chip-amber">${g.fees} No Tag fee${g.fees === 1 ? '' : 's'}</span>` : ''}${g.trips.toLocaleString('en-AU')} trips${topRoad(g) ? ` · mostly ${esc(topRoad(g))}` : ''}</span>
+      </a>`).join('');
+
+    // Lines that don't belong to a fleet vehicle yet. Tags can be linked here.
+    const vehOptions = AD.store.all('vehicles').filter((v) => !v.hired).sort((a, b) => a.id.localeCompare(b.id))
+      .map((v) => `<option value="${esc(v.id)}">${esc(v.id)}${v.rego ? ' · ' + esc(v.rego) : ''}</option>`).join('');
+    const looseRow = (g, i) => `<div class="cs-row cs-row-art cs-row-muted cs-toll-loose" style="--i:${vehicles.length + i}">
+        <span class="id"><span class="cs-id-text">${g.tag ? `Tag ${esc(g.tag)}` : `Plate ${esc(g.plate)}`}<small class="cs-rego">${g.owners.length ? `on ${esc(g.owners.join(' and '))}` : 'not in the fleet register'}</small></span></span>
+        <span class="cs-hbar"><i class="cs-toll" style="width:${(g.total / top) * 100}%"></i></span>
+        <span class="cs-row-val">${L.fmtAUD(g.total)}</span>
+        <span class="cs-row-meta">${g.count.toLocaleString('en-AU')} line${g.count === 1 ? '' : 's'}${g.fees ? ` · ${g.fees} No Tag fee${g.fees === 1 ? '' : 's'}` : ''}
+          ${g.tag && !g.owners.length ? ` · <label class="cs-toll-assign">Link to <select data-toll-assign="${esc(g.tag)}"><option value="">choose a vehicle…</option>${vehOptions}</select></label>` : ''}
+          ${g.owners.length ? ' · this tag is recorded on more than one vehicle; fix it in the Fleet register' : ''}</span>
+      </div>`;
+    const LOOSE_SHOW = 8;
+    const looseRows = looseList.slice(0, LOOSE_SHOW).map(looseRow).join('')
+      + (looseList.length > LOOSE_SHOW ? `<details class="cs-toll-more"><summary>Show ${looseList.length - LOOSE_SHOW} more</summary>${looseList.slice(LOOSE_SHOW).map((g, i) => looseRow(g, i + LOOSE_SHOW)).join('')}</details>` : '');
+
+    // Toll roads.
+    const roadList = [...roads.entries()].sort((a, b) => b[1] - a[1]);
+    const roadTop = Math.max(...roadList.map(([, a]) => a), 0.01);
+    const roadRows = roadList.slice(0, 8).map(([name, a]) => `<div class="hb-row cs-toll-road">
+        <span class="hb-label">${esc(name)}</span>
+        <span class="cs-hbar"><i class="cs-toll" style="width:${(a / roadTop) * 100}%"></i></span>
+        <span class="hb-val">${L.fmtAUD(a)}</span>
+      </div>`).join('');
+
+    const tableRows = vehicles.map((g) => [g.v.id, g.v.rego || '', g.trips.toLocaleString('en-AU'), String(g.fees), aud2(g.total), aud2((g.total / coverDays) * 7)])
+      .concat(looseList.map((g) => [g.tag ? `Tag ${g.tag}` : `Plate ${g.plate}`, '', String(g.count - g.fees), String(g.fees), aud2(g.total), aud2((g.total / coverDays) * 7)]));
+
+    const body = `
+      <figcaption><span class="viz-sub">Linkt toll trips and fees by vehicle. Kept separate from the spend figures above. Weekly, monthly and yearly figures are the daily average of the imported statements; amounts include GST.</span></figcaption>
+      ${kpis}
+      <div class="cs-rows">${vehRows}</div>
+      ${vehicles.length > SHOW ? `<p class="cs-more">${vehicles.length - SHOW} more vehicle${vehicles.length - SHOW === 1 ? '' : 's'} in the table.</p>` : ''}
+      ${looseList.length ? `<div class="cs-subhead">Not linked to a fleet vehicle <span class="muted">(${looseList.length} · ${L.fmtAUD(looseList.reduce((t, g) => t + g.total, 0))})</span></div>
+        <div class="cs-rows">${looseRows}</div>
+        <p class="cs-more">Linking a tag saves it on that vehicle in the Fleet register, and all of the tag’s past trips move across.</p>` : ''}
+      ${roadList.length ? `<div class="cs-subhead">By toll road</div><div class="hb cs-toll-roads">${roadRows}</div>` : ''}
+      ${credits ? `<p class="cs-more">Account credits (e.g. the M8/M5 East truck rebate): ${aud2(credits)}, included in the totals above but not in any one vehicle.</p>` : ''}
+      ${V.table(['Vehicle', 'Rego', 'Trips', 'No Tag fees', 'Tolls', 'Per week'], tableRows)}`;
+
+    return wrap(`Linkt · ${stmts.size} statement${stmts.size === 1 ? '' : 's'} · ${fmtShort(from)}–${fmtShort(to)} (${coverDays} days) · ${aud2(total)}`, body);
+  }
+
+  /** "Link to vehicle" on an unlinked Linkt tag: add the tag to that vehicle's Linkt tag field. */
+  function bindTollAssign(el) {
+    el.querySelectorAll('[data-toll-assign]').forEach((sel) => sel.addEventListener('change', async () => {
+      const tag = sel.dataset.tollAssign, vid = sel.value;
+      const v = vid && AD.store.get('vehicles', vid);
+      if (!v) return;
+      const existing = String(v.linktTag || '').trim();
+      const next = existing ? `${existing}, ${tag}` : tag;
+      sel.disabled = true;
+      try {
+        await AD.store.update('vehicles', v.id, { linktTag: next });
+        await AD.store.log(`Linkt tag ${tag} linked to ${v.id}`, v.id);
+        AD.ui.toast(`Tag ${tag} linked to ${v.id}. Its trips now count against ${v.id}.`, 'ok');
+        draw();
+      } catch (e) {
+        sel.disabled = false;
+        AD.ui.toast('Could not link the tag: ' + ((e && e.message) || e), 'error');
+      }
+    }));
+  }
+
   function fuelLitreage() {
     const l0 = (n) => Math.round(n).toLocaleString('en-AU');
     const lines = AD.store.all('vehicles').filter((v) => !v.hired).map((v) => {

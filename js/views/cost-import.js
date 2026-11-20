@@ -110,7 +110,7 @@ AD.importFuelData = (function () {
     let fileName = '';
 
     const close = AD.ui.modal({
-      title: 'Import fuel-card data',
+      title: 'Import cost data',
       wide: true,
       body: `<div id="fi-body">${dropStep()}</div>`,
       onMount: (el) => wireDrop(el.querySelector('#fi-body'))
@@ -118,7 +118,7 @@ AD.importFuelData = (function () {
 
     function dropStep(err) {
       return `
-        <p class="note">Drop your fuel-card export here — <b>.xlsx</b>, <b>.csv</b>, or a BP Plus Vehicle Analysis <b>.pdf</b>. Each transaction is matched to a vehicle by its registration; rows for regos not in the fleet are skipped.</p>
+        <p class="note">Drop a fuel-card export (<b>.xlsx</b>, <b>.csv</b> or a BP Plus Vehicle Analysis <b>.pdf</b>) or a <b>Linkt detailed statement</b> (<b>.pdf</b>) here. Fuel is matched to vehicles by registration; tolls by registration or Linkt tag number.</p>
         <label class="fi-drop" id="fi-drop">
           <input type="file" id="fi-file" accept=".xlsx,.xls,.csv,.pdf" hidden>
           <span class="fi-drop-ico">${AD.icons.file}</span>
@@ -144,7 +144,10 @@ AD.importFuelData = (function () {
       try {
         if (/\.pdf$/i.test(file.name)) {
           const pdfjs = await loadPDFJS();
-          const result = await AD.bpPdf.read(file, pdfjs, AD.store.all('vehicles'));
+          // Read the text once, then decide: a Linkt toll statement, or a BP fuel report.
+          const pages = await AD.linkt.readPages(file, pdfjs);
+          if (AD.linkt.isLinkt(pages)) { renderLinktStep(container, pages); return; }
+          const result = AD.bpPdf.parsePages(pages, AD.store.all('vehicles'));
           if (!result.rows.length) throw new Error('No BP fuel transactions could be read from this PDF. Use the BP Plus Vehicle Analysis report or export the transactions to Excel.');
           parsed = { headers: result.headers, rows: result.rows, provider: 'BP', pdfMeta: result.meta };
           renderMapStep(container);
@@ -167,6 +170,89 @@ AD.importFuelData = (function () {
         container.innerHTML = dropStep((e && e.message) || 'Could not read that file.');
         wireDrop(container);
       }
+    }
+
+    /* ---- Linkt toll statement ------------------------------------------ */
+    function renderLinktStep(container, pages) {
+      const { rows: lines, meta } = AD.linkt.parse(pages);
+      const aud = (n) => Number(n || 0).toLocaleString('en-AU', { style: 'currency', currency: 'AUD' });
+      if (!lines.length) {
+        container.innerHTML = dropStep('This looks like a Linkt statement, but no charge lines could be read from it.');
+        wireDrop(container);
+        return;
+      }
+      const statementKey = meta.statement || [meta.periodStart, meta.periodEnd].filter(Boolean).join('_') || fileName;
+      const match = AD.linkt.matcher(AD.store.all('vehicles'));
+      const unmatched = new Map(), ambiguous = new Map(), vehicles = new Set();
+      let matchedAmount = 0;
+      const rows = AD.linkt.withIds(lines, statementKey).map((r) => {
+        const m = match(r);
+        if (m.vehicle) { vehicles.add(m.vehicle.id); matchedAmount += r.amount; }
+        else if (r.kind !== 'adjustment') {
+          const bucket = m.ambiguous.length ? ambiguous : unmatched;
+          const label = r.tag ? `Tag ${r.tag}` : `Plate ${r.plate}`;
+          const g = bucket.get(m.key) || { label, count: 0, amount: 0, owners: m.ambiguous };
+          g.count++; g.amount += r.amount; bucket.set(m.key, g);
+        }
+        return {
+          id: r.id, vehicleId: m.vehicle ? m.vehicle.id : null, date: r.date,
+          plate: r.plate || null, state: r.state || null, tag: r.tag || null, class: r.class || null,
+          startTime: r.startTime || null, finishTime: r.finishTime || null, details: r.details, road: r.road || null,
+          kind: r.kind, amount: r.amount, statement: statementKey,
+          periodStart: meta.periodStart || null, periodEnd: meta.periodEnd || null, source: `Linkt PDF · ${fileName}`
+        };
+      });
+      const t = meta.totals, c = meta.counts;
+      const groupList = (map) => [...map.values()].sort((a, b) => b.amount - a.amount);
+      const um = groupList(unmatched), am = groupList(ambiguous);
+      const umAmount = um.reduce((s, g) => s + g.amount, 0) + am.reduce((s, g) => s + g.amount, 0);
+      const recon = meta.reconciles === true
+        ? `<p class="fi-note-skip"><b>✓ Matches the statement:</b> ${aud(t.all)} read, against Linkt’s “Total charged for statement period” of ${aud(meta.total)}.</p>`
+        : meta.reconciles === false
+          ? `<p class="fi-warn">The lines read add to ${aud(t.all)}, but the statement says ${aud(meta.total)}. Some lines may not have been read — check before importing.</p>`
+          : '';
+      const list = (groups, extra) => groups.slice(0, 10).map((g) =>
+        `<li><b>${esc(g.label)}</b> · ${g.count} line${g.count === 1 ? '' : 's'} · ${aud(g.amount)}${extra ? extra(g) : ''}</li>`).join('')
+        + (groups.length > 10 ? `<li class="muted">+${groups.length - 10} more</li>` : '');
+
+      container.innerHTML = `
+        <p class="note">Linkt statement <b>${esc(meta.statement || '')}</b>${meta.periodStart ? ` for <b>${esc(fmtDate(meta.periodStart))}</b> to <b>${esc(fmtDate(meta.periodEnd))}</b>` : ''}, read from <b>${esc(fileName)}</b> (${meta.pages} pages).</p>
+        <div class="fi-stats">
+          <div class="fi-stat fi-stat-good"><b>${c.trips.toLocaleString('en-AU')}</b><span>toll trips · ${aud(t.trips)}</span></div>
+          <div class="fi-stat"><b>${c.fees.toLocaleString('en-AU')}</b><span>No Tag fees · ${aud(t.fees)}</span></div>
+          <div class="fi-stat fi-stat-mint"><b>${aud(t.all)}</b><span>total charged${c.adjustments ? ` (after ${aud(Math.abs(t.adjustments))} of credits)` : ''}</span></div>
+          <div class="fi-stat"><b>${vehicles.size}</b><span>fleet vehicles matched</span></div>
+        </div>
+        ${recon}
+        <p class="fi-note-skip muted">${meta.payments} payment${meta.payments === 1 ? '' : 's'} (${aud(meta.paymentTotal)}) are not costs and are left out.</p>
+        ${um.length ? `<details class="fi-no-fuel"><summary>${um.length} tag${um.length === 1 ? '' : 's'} / plate${um.length === 1 ? '' : 's'} not linked to a fleet vehicle yet (${aud(umAmount)})</summary>
+          <ul class="fi-list">${list(um)}</ul>
+          <p class="muted">They’re still imported, so the total matches the statement. Link them from the Tolls section of the Cost sheet, or add the tag number to the vehicle in the Fleet register; past trips then move across automatically.</p></details>` : ''}
+        ${am.length ? `<p class="fi-warn">${am.length} tag${am.length === 1 ? ' is' : 's are'} recorded against more than one vehicle, so ${am.length === 1 ? 'its' : 'their'} trips can’t be assigned: <span>${am.slice(0, 5).map((g) => `${esc(g.label)} (${esc(g.owners.join(', '))})`).join('; ')}</span>. Fix the tag in the Fleet register.</p>` : ''}
+        <p class="fi-note-skip muted">Importing the same statement again is safe: it updates the existing lines instead of adding them twice.</p>
+        <div class="fi-actions">
+          <button class="btn btn-secondary" id="fi-back" type="button">Choose a different file</button>
+          <button class="btn btn-primary" id="fi-import" type="button">Import ${rows.length.toLocaleString('en-AU')} toll lines</button>
+        </div>`;
+      container.querySelector('#fi-back').onclick = () => { container.innerHTML = dropStep(); wireDrop(container); };
+      container.querySelector('#fi-import').onclick = async () => {
+        const btn = container.querySelector('#fi-import');
+        btn.disabled = true;
+        try {
+          await AD.store.importTolls(rows, (done, total) => { btn.textContent = `Importing… ${Math.round((done / total) * 100)}%`; });
+          try { await AD.store.log(`Linkt statement ${meta.statement || statementKey} imported: ${rows.length.toLocaleString('en-AU')} toll lines, ${aud(t.all)}`); } catch (e) { /* log is best-effort */ }
+          AD.ui.toast(`Imported ${rows.length.toLocaleString('en-AU')} toll lines (${aud(t.all)}).`, 'ok');
+          close();
+          if (onDone) onDone();
+        } catch (e) {
+          btn.disabled = false; btn.textContent = `Import ${rows.length.toLocaleString('en-AU')} toll lines`;
+          const msg = (e && (e.message || e.details)) || 'Import failed.';
+          const friendly = /toll_entries|could not find the table|does not exist/i.test(msg)
+            ? 'The tolls table hasn’t been created yet: run create-toll-entries.sql in Supabase first, then try again.'
+            : msg;
+          container.querySelector('.fi-actions').insertAdjacentHTML('beforebegin', `<p class="fi-err">${esc(friendly)}</p>`);
+        }
+      };
     }
 
     function colSelect(id, label, required, defIdx) {

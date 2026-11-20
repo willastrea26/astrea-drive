@@ -115,6 +115,7 @@ AD.store = (function () {
     next.tech_devices = techDevices;
     next.equipment = equipment;
     next.employee_rates = employeeRates;
+    next.toll_entries = db.toll_entries || [];   // loaded on demand (loadTolls), kept across refreshes
     db = next;
     emit('*');
   }
@@ -134,6 +135,50 @@ AD.store = (function () {
     db.fuel_entries = (db.fuel_entries || []).filter((r) => !saved.some((s) => s.id === r.id)).concat(saved);
     emit('fuel_entries');
     return saved;
+  }
+
+  /**
+   * Toll lines (Linkt). Loaded on demand by the Cost sheet rather than with
+   * everything else: a quarter is ~8,000 rows, more than one request returns
+   * (Supabase caps responses at 1,000 rows), and no other screen needs them.
+   * Fetched in pages of 1,000, only the columns the app uses.
+   */
+  const TOLL_COLS = 'id,vehicleId,date,plate,tag,class,road,kind,amount,statement,periodStart,periodEnd';
+  let tollsState = 'idle';   // idle | loading | ready | missing
+  async function loadTolls(force) {
+    if (tollsState === 'loading' || (!force && (tollsState === 'ready' || tollsState === 'missing'))) return tollsState;
+    tollsState = 'loading';
+    const out = [];
+    try {
+      for (let from = 0; ; from += 1000) {
+        const { data, error } = await sb().from('toll_entries').select(TOLL_COLS).order('id').range(from, from + 999);
+        if (error) { unavailable.add('toll_entries'); tollsState = 'missing'; db.toll_entries = []; emit('toll_entries'); return tollsState; }
+        out.push(...(data || []));
+        if (!data || data.length < 1000) break;
+      }
+      unavailable.delete('toll_entries');
+      db.toll_entries = out;
+      tollsState = 'ready';
+    } catch (e) {
+      unavailable.add('toll_entries'); tollsState = 'missing'; db.toll_entries = [];
+    }
+    emit('toll_entries');
+    return tollsState;
+  }
+
+  /** Bulk-import Linkt toll lines. Upserts on the deterministic row id, so re-importing a statement can't double-count. */
+  async function importTolls(rows, onProgress) {
+    if (!rows || !rows.length) return 0;
+    let done = 0;
+    for (let i = 0; i < rows.length; i += 500) {
+      const chunk = rows.slice(i, i + 500);
+      const { error } = await sb().from('toll_entries').upsert(chunk, { onConflict: 'id' });
+      if (error) throw error;
+      done += chunk.length;
+      if (onProgress) onProgress(done, rows.length);
+    }
+    await loadTolls(true);
+    return done;
   }
 
   function all(coll) { return db[coll] || []; }
@@ -324,5 +369,5 @@ AD.store = (function () {
     return remove('employee_documents', doc.id);
   }
 
-  return { load, all, get, available: (table) => !unavailable.has(table), insert, update, remove, log, on, uid, importFuel, uploadDocument, signDocumentUrl, removeDocument, renameDocumentCategory, reorderDocuments, uploadVehiclePhoto, removeVehiclePhoto, uploadEmployeeDocument, removeEmployeeDocument };
+  return { load, all, get, available: (table) => !unavailable.has(table), insert, update, remove, log, on, uid, importFuel, loadTolls, importTolls, tollsState: () => tollsState, uploadDocument, signDocumentUrl, removeDocument, renameDocumentCategory, reorderDocuments, uploadVehiclePhoto, removeVehiclePhoto, uploadEmployeeDocument, removeEmployeeDocument };
 })();
