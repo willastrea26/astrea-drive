@@ -1044,7 +1044,7 @@ AD.fleetReportPdf = (function () {
       const timeout = new Promise((res) => setTimeout(() => res(null), 12000));
       const r = await Promise.race([call, timeout]);
       if (!r || r.error || !r.data || !Array.isArray(r.data.positions)) return null;
-      const parseT = (s) => { const m = /^(\d{2})-(\d{2})-(\d{4})\s+(\d{2}):(\d{2}):(\d{2})/.exec(String(s || '')); return m ? Date.parse(`${m[3]}-${m[2]}-${m[1]}T${m[4]}:${m[5]}:${m[6]}+11:00`) : null; };
+      const parseT = (s) => AD.time.netstarTime(s);
       const STALE = 24 * 3600000;
       let reporting = 0, moving = 0, offline = 0;
       r.data.positions.forEach((p) => {

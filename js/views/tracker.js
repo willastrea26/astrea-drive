@@ -29,13 +29,7 @@ AD.views.tracker = (function () {
   let prefs = loadPrefs();
 
   /** Netstar reports times as "DD-MM-YYYY HH:MM:SS" (Australia local). -> ms epoch | null */
-  function parseNetstarTime(s) {
-    const m = /^(\d{2})-(\d{2})-(\d{4})\s+(\d{2}):(\d{2}):(\d{2})/.exec(String(s || ''));
-    if (!m) return null;
-    const [, dd, mm, yyyy, hh, mi, ss] = m;
-    const t = Date.parse(`${yyyy}-${mm}-${dd}T${hh}:${mi}:${ss}+11:00`); // treat as Sydney; close enough for "ago"
-    return Number.isFinite(t) ? t : null;
-  }
+  function parseNetstarTime(s) { return AD.time.netstarTime(s); }
 
   /** How long ago, compactly: "3 min ago", "2 h ago", "5 d ago". */
   function agoText(ms) {

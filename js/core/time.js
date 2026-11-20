@@ -125,7 +125,25 @@ AD.time = (function () {
     return (toMs(v) - startOfDay(key)) / 60000;
   }
 
+  /**
+   * A Netstar "DD-MM-YYYY HH:MM:SS" timestamp (e.g. a tracker's last report)
+   * -> ms epoch | null. The live feed sends these in UTC: trucks moving right
+   * now showed "seen 11 h ago" (exactly the AEDT offset) while their positions
+   * matched Netstar's own app. Read as UTC first; if that lands in the future
+   * — which a Sydney wall-clock time read as UTC always would, Sydney being
+   * ahead — fall back to reading it as Sydney time. So it's right either way.
+   */
+  function netstarTime(s) {
+    const m = /^(\d{2})-(\d{2})-(\d{4})\s+(\d{2}):(\d{2}):(\d{2})/.exec(String(s || ''));
+    if (!m) return null;
+    const asUtc = Date.UTC(+m[3], +m[2] - 1, +m[1], +m[4], +m[5], +m[6]);
+    if (!Number.isFinite(asUtc)) return null;
+    if (asUtc <= Date.now() + 15 * 60000) return asUtc;
+    return asUtc - offsetAt(asUtc);
+  }
+
   return {
+    netstarTime,
     TZ, parts, fromParts, dateKey, parseKey, startOfDay, addDays, dayOfWeek, daysBetween,
     todayKey, toInput, fromInput, abbr, fmtDate, fmtTime, fmtDateTime, fmtKey, fmtKeyLong,
     minutesIntoDay, MONTHS, DOW, pad, toMs

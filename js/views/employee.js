@@ -111,12 +111,7 @@ AD.views.employee = (function () {
   }
 
   /** Netstar reports "dd-MM-yyyy HH:mm:ss" in Sydney time. */
-  function nsTime(s) {
-    const m = /^(\d{2})-(\d{2})-(\d{4})\s+(\d{2}):(\d{2}):(\d{2})/.exec(String(s || ''));
-    if (!m) return null;
-    const t = Date.parse(`${m[3]}-${m[2]}-${m[1]}T${m[4]}:${m[5]}:${m[6]}+11:00`);
-    return Number.isFinite(t) ? t : null;
-  }
+  function nsTime(s) { return AD.time.netstarTime(s); }
   function ago(ms) {
     const mins = Math.max(0, Math.round((Date.now() - ms) / 60000));
     if (mins < 1) return 'just now';
