@@ -362,28 +362,29 @@ AD.fleetReportPdf = (function () {
 
     y += 70;
 
-    /* Four metric tiles. */
-    const share = data.unplannedShare;
+    /* Five metric tiles: the month's spend split three ways (fuel, planned
+       servicing, unplanned repairs — together 100%, as on the Cost sheet),
+       then availability and open defects. */
+    const cm = data.curMonth;
+    const has = cm.total > 0;
+    const pctStr = (x) => (has ? Math.round(x * 100) + '%' : 'N/A');
+    const ofTotal = (n) => `${shortAud(n)} of ${shortAud(cm.total)}`;
     const tiles = [
-      { label: 'UNPLANNED', value: data.curMonth.total > 0 ? Math.round(share * 100) + '%' : 'N/A',
-        sub: `${AD.fleetReport.aud(data.curMonth.unplanned)} of ${AD.fleetReport.aud(data.curMonth.total)}`,
-        tone: share >= 0.4 ? C.red : share >= 0.25 ? C.amber : C.green,
-        frac: share },
+      { label: 'FUEL', value: pctStr(data.fuelShare), sub: ofTotal(cm.fuel), tone: C.blue, frac: data.fuelShare },
+      { label: 'PLANNED', value: pctStr(data.plannedShare), sub: ofTotal(cm.planned), tone: C.mintInk, frac: data.plannedShare },
+      { label: 'UNPLANNED', value: pctStr(data.unplannedShare), sub: ofTotal(cm.unplanned), tone: C.amber, frac: data.unplannedShare },
       { label: 'AVAILABLE', value: data.vehicles.length ? Math.round(data.availabilityPct * 100) + '%' : 'N/A',
         sub: `${data.statusCounts['Available']} of ${data.vehicles.length}`,
         tone: !data.vehicles.length ? C.muted : data.availabilityPct >= 0.7 ? C.green : data.availabilityPct >= 0.5 ? C.amber : C.red,
         frac: data.availabilityPct },
-      { label: 'CHARGED', value: String(data.vehiclesCharged),
-        sub: `of ${data.vehicles.length} vehicles`,
-        tone: C.mintInk, frac: data.vehicles.length ? data.vehiclesCharged / data.vehicles.length : 0 },
       { label: 'DEFECTS', value: String(data.openDefects.length),
         sub: `${data.defCounts.Critical} critical, ${data.defCounts.High} high`,
         tone: data.defCounts.Critical ? C.red : data.defCounts.High ? C.amber : C.green,
         frac: null }
     ];
-    const tw2 = (CONTENT_W - 3 * 5) / 4;
+    const tw2 = (CONTENT_W - 4 * 4) / 5;
     tiles.forEach((t, i) => {
-      const x = M.l + i * (tw2 + 5);
+      const x = M.l + i * (tw2 + 4);
       g.roundRect(x, y, tw2, 34, 2.5, C.white);
       g.stroke(C.rule); g.doc.setLineWidth(0.3);
       g.doc.roundedRect(x, y, tw2, 34, 2.5, 2.5, 'S');
@@ -481,40 +482,45 @@ AD.fleetReportPdf = (function () {
       const isCur = i === data.months.length - 1;
       const hPlanned = (mo.planned / top) * chartH;
       const hUnplan = (mo.unplanned / top) * chartH;
+      const hFuel = ((mo.fuel || 0) / top) * chartH;
       const base = chartY + chartH;
       if (hPlanned > 0.3) g.rect(x, base - hPlanned, barW, hPlanned, isCur ? C.mintInk : C.mint);
       if (hUnplan > 0.3) g.rect(x, base - hPlanned - hUnplan, barW, hUnplan, isCur ? [168, 104, 16] : C.amber);
+      if (hFuel > 0.3) g.rect(x, base - hPlanned - hUnplan - hFuel, barW, hFuel, isCur ? [34, 92, 150] : C.blue);
       // Month label.
       const lab = T.MONTHS[mo.m].slice(0, 3);
       g.text(lab, cx, base + 5, { size: 6.6, bold: isCur, color: isCur ? C.navy : C.muted, align: 'center' });
       if (mo.m === 0 || i === 0) g.text(String(mo.year).slice(2), cx, base + 9, { size: 5.8, color: C.muted, align: 'center' });
       // Value over the current month.
       if (isCur && mo.total > 0) {
-        g.text(shortAud(mo.total), cx, base - hPlanned - hUnplan - 2.4, { size: 6.6, bold: true, color: C.navy, align: 'center' });
+        g.text(shortAud(mo.total), cx, base - hPlanned - hUnplan - hFuel - 2.4, { size: 6.6, bold: true, color: C.navy, align: 'center' });
       }
     });
 
     y = chartY + chartH + 14;
 
     // Legend.
-    const leg = [['Planned servicing', C.mint], ['Unplanned repairs', C.amber], ['12-month baseline', C.navy]];
+    const leg = [['Planned servicing', C.mint], ['Unplanned repairs', C.amber], ['Fuel', C.blue], ['12-month baseline', C.navy]];
     let lx = M.l;
     leg.forEach(([lab, col]) => {
       g.rect(lx, y - 2.6, 3, 3, col);
       g.text(lab, lx + 4.6, y, { size: 8, color: C.body });
-      lx += 42;
+      lx += lab === 'Fuel' ? 22 : 40;
     });
+    g.text(data.fuelThrough ? `Fuel is from fuel-card imports; latest transaction ${T.fmtKey(data.fuelThrough)}.` : 'No fuel-card data imported yet, so totals are servicing and repairs only.',
+      M.l, y + 5, { size: 7, italic: true, color: C.muted });
 
-    y += 9;
+    y += 12;
 
     /* Data table. */
     const cols = [
-      { t: 'Month',      w: 34, a: 'left' },
-      { t: 'Planned',    w: 26, a: 'right' },
-      { t: 'Unplanned',  w: 26, a: 'right' },
-      { t: 'Total',      w: 26, a: 'right' },
-      { t: 'Target',     w: 26, a: 'right' },
-      { t: 'Variance',   w: 26, a: 'right' },
+      { t: 'Month',      w: 28, a: 'left' },
+      { t: 'Planned',    w: 22, a: 'right' },
+      { t: 'Unplanned',  w: 22, a: 'right' },
+      { t: 'Fuel',       w: 22, a: 'right' },
+      { t: 'Total',      w: 22, a: 'right' },
+      { t: 'Target',     w: 22, a: 'right' },
+      { t: 'Variance',   w: 24, a: 'right' },
       { t: 'Jobs',       w: 14, a: 'right' }
     ];
     const tableW = cols.reduce((t, c) => t + c.w, 0);
@@ -540,7 +546,7 @@ AD.fleetReportPdf = (function () {
 
       const vals = [
         T.MONTHS[mo.m].slice(0, 3) + ' ' + String(mo.year).slice(2) + (isCur && data.isPartial ? '  MTD' : ''),
-        shortAud(mo.planned), shortAud(mo.unplanned), shortAud(mo.total),
+        shortAud(mo.planned), shortAud(mo.unplanned), shortAud(mo.fuel || 0), shortAud(mo.total),
         shortAud(target),
         (varc >= 0 ? '+' : '-') + shortAud(Math.abs(varc)),
         String(mo.svcCount + mo.defCount)
@@ -548,7 +554,7 @@ AD.fleetReportPdf = (function () {
       let cx2 = ox;
       vals.forEach((v, ci) => {
         const c = cols[ci];
-        const isVar = ci === 5;
+        const isVar = ci === 6;
         const col = isVar ? (varc > target * 0.1 ? C.red : varc < -target * 0.1 ? C.green : C.body) : (isCur ? C.navy : C.body);
         g.text(v, c.a === 'right' ? cx2 + c.w - 2.5 : cx2 + 2.5, y + 4.4,
           { size: 7.4, bold: isCur || isVar, color: col, align: c.a });
@@ -563,6 +569,7 @@ AD.fleetReportPdf = (function () {
       'Twelve months',
       shortAud(data.months.reduce((t, m) => t + m.planned, 0)),
       shortAud(data.months.reduce((t, m) => t + m.unplanned, 0)),
+      shortAud(data.months.reduce((t, m) => t + (m.fuel || 0), 0)),
       shortAud(data.annualTotal),
       shortAud(data.annualTarget),
       '—',
@@ -713,15 +720,17 @@ AD.fleetReportPdf = (function () {
       data.isPartial ? 'Month to date' : '');
 
     /* Comparison table: this month / last month / 12-mo avg. */
-    const prev = data.prevMonth || { total: 0, planned: 0, unplanned: 0, svcCount: 0, defCount: 0 };
+    const prev = data.prevMonth || { total: 0, planned: 0, unplanned: 0, fuel: 0, svcCount: 0, defCount: 0 };
     const avgPlanned = data.months.reduce((t, m) => t + m.planned, 0) / 12;
     const avgUnplan = data.months.reduce((t, m) => t + m.unplanned, 0) / 12;
+    const avgFuel = data.months.reduce((t, m) => t + (m.fuel || 0), 0) / 12;
     const avgJobs = data.months.reduce((t, m) => t + m.svcCount + m.defCount, 0) / 12;
 
     const stats = [
       ['Total spend',          data.curMonth.total,     prev.total,     data.monthlyTarget, 'money'],
       ['Planned servicing',    data.curMonth.planned,   prev.planned,   avgPlanned,         'money'],
       ['Unplanned repairs',    data.curMonth.unplanned, prev.unplanned, avgUnplan,          'money'],
+      ['Fuel',                 data.curMonth.fuel,      prev.fuel,      avgFuel,            'money'],
       ['Jobs recorded',        data.curMonth.svcCount + data.curMonth.defCount,
                                prev.svcCount + prev.defCount, avgJobs,                      'int'],
       ['Services completed',   data.curMonth.svcCount,  prev.svcCount,  null,               'int'],
@@ -791,17 +800,17 @@ AD.fleetReportPdf = (function () {
 
     y += 8;
 
-    /* Spend mix — the month's planned/unplanned split beside the twelve-month
+    /* Spend mix — the month's planned / unplanned / fuel split beside the twelve-month
        norm, so a shift in the balance is visible rather than inferred. */
     y = heading(g, M.l, y, 'Spend mix');
     const mixes = [
-      { title: 'THIS MONTH', planned: data.curMonth.planned, unplanned: data.curMonth.unplanned },
-      { title: 'TWELVE-MONTH AVERAGE', planned: avgPlanned, unplanned: avgUnplan }
+      { title: 'THIS MONTH', planned: data.curMonth.planned, unplanned: data.curMonth.unplanned, fuel: data.curMonth.fuel },
+      { title: 'TWELVE-MONTH AVERAGE', planned: avgPlanned, unplanned: avgUnplan, fuel: avgFuel }
     ];
     const mw = (CONTENT_W - 6) / 2, mh = 41;
     mixes.forEach((m, i) => {
       const x = M.l + i * (mw + 6);
-      const tot = m.planned + m.unplanned;
+      const tot = m.planned + m.unplanned + (m.fuel || 0);
       g.roundRect(x, y, mw, mh, 2.5, C.white);
       g.stroke(C.rule); g.doc.setLineWidth(0.3);
       g.doc.roundedRect(x, y, mw, mh, 2.5, 2.5, 'S');
@@ -810,14 +819,15 @@ AD.fleetReportPdf = (function () {
       const cx = x + 17, cy = y + 24;
       g.donut(cx, cy, 10, 6.2, [
         { label: 'Planned',   value: m.planned,   color: C.mintInk },
-        { label: 'Unplanned', value: m.unplanned, color: C.amber }
+        { label: 'Unplanned', value: m.unplanned, color: C.amber },
+        { label: 'Fuel',      value: m.fuel || 0, color: C.blue }
       ]);
-      const share = tot > 0 ? m.unplanned / tot : 0;
+      const share = tot > 0 ? (m.fuel || 0) / tot : 0;
       g.text(tot > 0 ? Math.round(share * 100) + '%' : 'N/A', cx, cy + 1, { size: 8.5, bold: true, color: C.navy, align: 'center' });
-      g.text('unpl.', cx, cy + 4.6, { size: 4.6, bold: true, color: C.muted, align: 'center' });
+      g.text('fuel', cx, cy + 4.6, { size: 4.6, bold: true, color: C.muted, align: 'center' });
 
-      let ly = y + 17.5;
-      [['Planned', m.planned, C.mintInk], ['Unplanned', m.unplanned, C.amber]].forEach(([lab, v, col]) => {
+      let ly = y + 14.5;
+      [['Planned', m.planned, C.mintInk], ['Unplanned', m.unplanned, C.amber], ['Fuel', m.fuel || 0, C.blue]].forEach(([lab, v, col]) => {
         g.rect(x + 34, ly - 2.2, 2.6, 2.6, col);
         g.text(lab, x + 39, ly, { size: 7.6, color: C.body });
         g.text(shortAud(v), x + mw - 6, ly, { size: 8, bold: true, color: C.navy, align: 'right' });
@@ -836,7 +846,7 @@ AD.fleetReportPdf = (function () {
       bits.push(`${dir.charAt(0).toUpperCase() + dir.slice(1)} ${Math.round(Math.abs(data.momPct) * 100)}% on last month${data.isPartial ? ' (month still running)' : ''}.`);
     }
     if (data.curMonth.total > 0) {
-      bits.push(`${Math.round(data.unplannedShare * 100)}% unplanned (12-mo norm ${Math.round(data.unplannedShare12 * 100)}%).`);
+      bits.push(`Fuel was ${Math.round(data.fuelShare * 100)}% of spend, planned servicing ${Math.round(data.plannedShare * 100)}% and unplanned repairs ${Math.round(data.unplannedShare * 100)}% (12-month: ${Math.round(data.fuelShare12 * 100)}%, ${Math.round(data.plannedShare12 * 100)}% and ${Math.round(data.unplannedShare12 * 100)}%).`);
     } else {
       bits.push('Nothing recorded yet — check the source data.');
     }
@@ -997,44 +1007,90 @@ AD.fleetReportPdf = (function () {
   }
 
   /**
-   * Telematics-derived usage and efficiency per owned vehicle: trailing-year
-   * spend divided by the distance actually driven (from the usage rate), with
-   * a watch-list flag for the low-use / high-cost cases. Only vehicles with a
-   * usage rate appear; the rest have no distance to divide by.
+   * Running cost against actual use per owned GPS-tracked vehicle, from the
+   * DAILY telematics rows (real km and engine hours per day) — the same basis
+   * as the Cost sheet's Cost vs usage and Fuel cost per km. Each vehicle is
+   * measured over the last USAGE_DAYS days, or however much has been recorded,
+   * and its spend (fuel + planned servicing + unplanned repairs) is counted
+   * over exactly those days. Nothing is extrapolated.
    */
+  const USAGE_DAYS = 90, USAGE_MIN_DAYS = 14, USAGE_THIN_DAYS = 60;
   function gatherUsage() {
     const L = AD.logic;
-    const todayKey = T.todayKey();
-    const fromKey = T.addDays(todayKey, -364);
-    const spend = new Map(), unpl = new Map();
-    AD.store.all('services').filter((s) => s.date && s.date >= fromKey && s.date <= todayKey)
-      .forEach((s) => spend.set(s.vehicleId, (spend.get(s.vehicleId) || 0) + Number(s.cost || 0)));
-    AD.store.all('defects').filter((d) => d.status === 'Resolved' && d.resolvedDate && d.resolvedDate >= fromKey && d.resolvedDate <= todayKey)
-      .forEach((d) => { spend.set(d.vehicleId, (spend.get(d.vehicleId) || 0) + Number(d.cost || 0)); unpl.set(d.vehicleId, (unpl.get(d.vehicleId) || 0) + Number(d.cost || 0)); });
-    const windowDays = 365;
+    const svcs = AD.store.all('services').filter((s) => s.date);
+    const defs = AD.store.all('defects').filter((d) => d.status === 'Resolved' && d.resolvedDate);
+    const sumIn = (rows, id, dateKey, from, to) => rows
+      .filter((r) => r.vehicleId === id && r[dateKey] >= from && r[dateKey] <= to)
+      .reduce((t, r) => t + (Number(r.cost) || 0), 0);
     const lines = AD.store.all('vehicles').filter((v) => !v.hired).map((v) => {
-      const u = L.usageRate(v);
-      if (!u) return null;
-      const windowKm = u.perDay * windowDays;
-      if (!(windowKm > 0)) return null;
-      const sp = spend.get(v.id) || 0;
-      const wh = L.workHours(v);
-      const hoursYear = wh ? wh.perWeek * 52 : null;
-      return { id: v.id, type: v.type, spend: sp, unplanned: unpl.get(v.id) || 0, perDay: u.perDay, perWeek: u.perWeek,
-               windowKm, perKm: sp / windowKm,
-               hrsWeek: wh ? wh.perWeek : null, perHour: hoursYear && hoursYear > 0 ? sp / hoursYear : null };
-    }).filter(Boolean).sort((a, b) => b.perKm - a.perKm);
-    const medKm = medianOf(lines.map((l) => l.perKm));
-    const medUse = medianOf(lines.map((l) => l.perDay));
+      const daily = L.workHoursDaily(v, USAGE_DAYS);
+      if (!daily) return null;
+      const rec = daily.days.filter((d) => d.km != null || d.hours != null);
+      if (!rec.length) return null;
+      const from = rec[0].day, to = rec[rec.length - 1].day;
+      const span = T.daysBetween(from, to) + 1;
+      if (span < USAGE_MIN_DAYS) return null;
+      const km = rec.reduce((t, d) => t + (d.km || 0), 0);
+      const hrs = rec.reduce((t, d) => t + (d.hours || 0), 0);
+      const f = L.fuelFor(v, from, to);
+      const fuel = f ? f.cost : 0, litres = f ? f.litres : 0;
+      const planned = sumIn(svcs, v.id, 'date', from, to);
+      const unplanned = sumIn(defs, v.id, 'resolvedDate', from, to);
+      const spend = fuel + planned + unplanned;
+      return {
+        id: v.id, type: v.type, from, to, span, km, hrs, fuel, litres, planned, unplanned, spend,
+        perKm: km > 0 && spend > 0 ? spend / km : null,
+        perHr: hrs > 0 && spend > 0 ? spend / hrs : null,
+        l100: km > 0 && litres > 0 ? (litres / km) * 100 : null,
+        kmWeek: (km / span) * 7, hrsWeek: (hrs / span) * 7,
+        thin: span < USAGE_THIN_DAYS
+      };
+    }).filter(Boolean);
+    const medKm = medianOf(lines.filter((l) => l.perKm != null).map((l) => l.perKm));
+    const medHr = medianOf(lines.filter((l) => l.perHr != null).map((l) => l.perHr));
+    const medUse = medianOf(lines.filter((l) => l.hrs > 0).map((l) => l.hrsWeek));
     lines.forEach((l) => {
-      l.costly = medKm > 0 && l.perKm > medKm * 1.3;
-      l.lowUse = medUse > 0 && l.perDay < medUse * 0.6;
-      l.watch = l.costly && l.lowUse;
+      l.costlyKm = medKm > 0 && l.perKm != null && l.perKm > medKm * 1.3;
+      l.costlyHr = medHr > 0 && l.perHr != null && l.perHr > medHr * 1.3;
+      l.lowUse = medUse > 0 && l.hrsWeek < medUse * 0.6;
+      l.watch = (l.costlyKm || l.costlyHr) && l.lowUse && !l.thin;
     });
-    const anyHours = lines.some((l) => l.perHour != null);
+    // Highest cost per engine hour first (the fairer measure for vac trucks), then per km.
+    lines.sort((a, b) => (b.perHr || 0) - (a.perHr || 0) || (b.perKm || 0) - (a.perKm || 0));
     const owned = AD.store.all('vehicles').filter((v) => !v.hired);
     const gpsVerified = owned.filter((v) => v.odometerSource === 'telematics').length;
-    return { lines, medKm, anyHours, ownedCount: owned.length, gpsVerified };
+    return { lines, medKm, medHr, ownedCount: owned.length, gpsVerified };
+  }
+
+  /**
+   * Workshop visits detected by the GPS geofences (create-workshop-geofence.sql)
+   * during the report month, paired arrival -> departure from the Activity log.
+   * Best-effort: [] if the log can't be read or the geofences aren't running.
+   */
+  async function fetchWorkshopVisits(data) {
+    try {
+      const { year, month } = data.now;
+      const start = new Date(T.fromParts(year, month, 1)).toISOString();
+      const next = month === 12 ? T.fromParts(year + 1, 1, 1) : T.fromParts(year, month + 1, 1);
+      const { data: rows, error } = await AD.sb.from('activity')
+        .select('ts,vehicleId,text').like('id', 'act-geo-%')
+        .gte('ts', start).lt('ts', new Date(next).toISOString())
+        .order('ts', { ascending: true }).limit(500);
+      if (error || !Array.isArray(rows)) return [];
+      const open = new Map(), visits = [];
+      rows.forEach((r) => {
+        const arrived = /parked at (.+?) for 30\+ min/.exec(r.text || '');
+        const left = /left (.+?) — back to/.exec(r.text || '');
+        if (arrived) {
+          const v = { id: r.vehicleId, workshop: arrived[1], in: Date.parse(r.ts), out: null };
+          open.set(r.vehicleId, v); visits.push(v);
+        } else if (left && open.has(r.vehicleId)) {
+          open.get(r.vehicleId).out = Date.parse(r.ts);
+          open.delete(r.vehicleId);
+        }
+      });
+      return visits;
+    } catch (e) { return []; }
   }
 
   // Live fleet-activity snapshot (best-effort; null if Netstar can't be reached).
@@ -1061,7 +1117,7 @@ AD.fleetReportPdf = (function () {
 
   function usagePage(g, data) {
     let y = 28;
-    y = heading(g, M.l, y, 'Fleet usage & efficiency', 'Telematics-tracked vehicles · spend over the trailing 12 months');
+    y = heading(g, M.l, y, 'Fleet usage & efficiency', `GPS-tracked vehicles · last ${USAGE_DAYS} days of daily GPS data`);
 
     const snap = data.liveSnapshot;
     const u = data.usage || { lines: [], ownedCount: 0, gpsVerified: 0 };
@@ -1091,61 +1147,100 @@ AD.fleetReportPdf = (function () {
     g.text(`Odometers GPS-verified: ${u.gpsVerified} of ${u.ownedCount} vehicles`, M.l, y, { size: 9, color: C.body });
     y += 10;
 
-    /* Cost per km (and per hour) table. */
-    const hrs = u.anyHours;
-    y = heading(g, M.l, y, hrs ? 'Cost per km & per hour' : 'Cost per kilometre',
-      hrs ? 'Yearly spend over distance driven and engine hours · worst value first'
-          : 'Yearly spend divided by distance driven · worst value first');
+    /* Running cost table. */
+    y = heading(g, M.l, y, 'Running cost per km & per engine hour',
+      'Fuel + servicing + repairs over the same days as the GPS data · highest cost per hour first');
     if (!u.lines.length) {
-      g.text('No telematics usage data yet. Figures appear once tracked vehicles have a current', M.l, y + 1, { size: 9, italic: true, color: C.muted });
-      g.text('odometer and a week of history.', M.l, y + 6, { size: 9, italic: true, color: C.muted });
+      g.text(`No GPS-tracked vehicle has ${USAGE_MIN_DAYS} days of daily GPS data yet. Figures appear as the`, M.l, y + 1, { size: 9, italic: true, color: C.muted });
+      g.text('nightly sync builds up daily kilometres and engine hours.', M.l, y + 6, { size: 9, italic: true, color: C.muted });
+      y += 16;
+    } else {
+      const cols = [
+        { k: 'id', t: 'Vehicle', w: 20, a: 'left' }, { k: 'days', t: 'Days', w: 13, a: 'right' },
+        { k: 'km', t: 'Km', w: 19, a: 'right' }, { k: 'hrs', t: 'Eng hrs', w: 17, a: 'right' },
+        { k: 'fuel', t: 'Fuel', w: 20, a: 'right' }, { k: 'maint', t: 'Svc + repairs', w: 24, a: 'right' },
+        { k: 'pkm', t: '$ / km', w: 19, a: 'right' }, { k: 'phr', t: '$ / hr', w: 19, a: 'right' },
+        { k: 'l100', t: 'L/100km', w: 27, a: 'right' }
+      ];
+      const tableW = cols.reduce((a, c) => a + c.w, 0);
+      const ox = M.l;
+      g.rect(ox, y, tableW, 7.5, C.navy);
+      let hx = ox;
+      cols.forEach((c) => { g.text(c.t, c.a === 'left' ? hx + 3 : hx + c.w - 3, y + 5.1, { size: 7.2, bold: true, color: C.white, align: c.a }); hx += c.w; });
+      y += 7.5;
+      u.lines.slice(0, 12).forEach((l, i) => {
+        const rowH = 7.6;
+        if (i % 2 === 1) g.rect(ox, y, tableW, rowH, C.ruleSoft);
+        let x = ox;
+        cols.forEach((c) => {
+          const tx = c.a === 'left' ? x + 3 : x + c.w - 3;
+          const o = { size: 8, color: C.body, align: c.a };
+          let s = '';
+          if (c.k === 'id') { s = safe(l.id); o.bold = true; o.color = C.navy; o.size = 8.4; }
+          else if (c.k === 'days') { s = l.span + (l.thin ? '*' : ''); o.color = l.thin ? C.muted : C.body; }
+          else if (c.k === 'km') s = Math.round(l.km).toLocaleString('en-AU');
+          else if (c.k === 'hrs') s = Math.round(l.hrs).toLocaleString('en-AU');
+          else if (c.k === 'fuel') s = l.fuel ? shortAud(l.fuel) : '—';
+          else if (c.k === 'maint') s = l.planned + l.unplanned ? shortAud(l.planned + l.unplanned) : '—';
+          else if (c.k === 'pkm') { s = l.perKm != null ? perKmStr(l.perKm) : '—'; o.bold = true; o.color = l.costlyKm ? C.red : C.navy; }
+          else if (c.k === 'phr') { s = l.perHr != null ? perKmStr(l.perHr) : '—'; o.bold = true; o.color = l.costlyHr ? C.red : C.navy; }
+          else if (c.k === 'l100') s = l.l100 != null ? l.l100.toFixed(1) : '—';
+          g.text(s, tx, y + 5.1, o);
+          x += c.w;
+        });
+        y += rowH;
+      });
+      y += 4;
+      const med = [u.medKm > 0 ? `median ${perKmStr(u.medKm)}/km` : '', u.medHr > 0 ? `${perKmStr(u.medHr)}/engine hour` : ''].filter(Boolean).join(' and ');
+      g.text(`Red = 30%+ above the fleet ${med || 'median'}.  * Under ${USAGE_THIN_DAYS} days of GPS data, so the figure may still move.`,
+        M.l, y + 1, { size: 7, italic: true, color: C.muted });
+      y += 9;
+
+      /* Replacement watch-list. */
+      const watch = u.lines.filter((l) => l.watch);
+      if (watch.length) {
+        g.roundRect(M.l, y, CONTENT_W, 10 + watch.length * 6.5, 2.5, C.redPale);
+        g.text('REPLACEMENT WATCH-LIST · LOW USE, HIGH COST', M.l + 7, y + 8, { size: 7.5, bold: true, color: C.red });
+        let wy = y + 15;
+        watch.forEach((l) => {
+          g.text(safe(l.id), M.l + 7, wy, { size: 8.6, bold: true, color: C.navy });
+          g.text(`${l.perHr != null ? perKmStr(l.perHr) + '/hr · ' : ''}only ${Math.round(l.hrsWeek)} engine hrs/week · ${AD.fleetReport.aud(l.spend)} over ${l.span} days`, M.l + 34, wy, { size: 8, color: C.body });
+          wy += 6.5;
+        });
+        y = wy + 4;
+      }
+    }
+
+    /* Workshop visits detected by the GPS geofences. */
+    y += 4;
+    y = heading(g, M.l, y, 'Workshop visits (GPS)', `Detected by the workshop geofences in ${T.MONTHS[data.now.month - 1]}`);
+    const visits = data.workshopVisits || [];
+    if (!visits.length) {
+      g.text('None recorded this month. Visits are logged automatically once the workshop geofences are running.', M.l, y + 1, { size: 9, italic: true, color: C.muted });
       return;
     }
-    // Columns: Vehicle, Cost/km, [Cost/hr], Driven/wk, [Hrs/wk], Spend, Status
-    const cols = hrs
-      ? [{ k: 'id', t: 'Vehicle', w: 24, a: 'left' }, { k: 'km', t: 'Cost / km', w: 24, a: 'right' }, { k: 'hr', t: 'Cost / hr', w: 24, a: 'right' }, { k: 'drv', t: 'Driven/wk', w: 26, a: 'right' }, { k: 'hw', t: 'Hrs/wk', w: 20, a: 'right' }, { k: 'sp', t: 'Spend', w: 24, a: 'right' }, { k: 'st', t: 'Status', w: 36, a: 'left' }]
-      : [{ k: 'id', t: 'Vehicle', w: 28, a: 'left' }, { k: 'drv', t: 'Driven / wk', w: 34, a: 'right' }, { k: 'km', t: 'Cost / km', w: 30, a: 'right' }, { k: 'sp', t: 'Spend (yr)', w: 34, a: 'right' }, { k: 'st', t: 'Status', w: 52, a: 'left' }];
-    const tableW = cols.reduce((a, c) => a + c.w, 0);
-    const ox = M.l;
-    g.rect(ox, y, tableW, 7.5, C.navy);
-    let hx = ox;
-    cols.forEach((c) => { g.text(c.t, c.a === 'left' ? hx + 3 : hx + c.w - 3, y + 5.1, { size: 7.2, bold: true, color: C.white, align: c.a }); hx += c.w; });
-    y += 7.5;
-    u.lines.slice(0, 14).forEach((l, i) => {
-      const rowH = 8;
-      if (i % 2 === 1) g.rect(ox, y, tableW, rowH, C.ruleSoft);
-      const status = l.watch ? 'Low use / high cost' : l.costly ? 'Costly per km' : l.lowUse ? 'Low use' : 'OK';
-      const stCol = l.watch ? C.red : l.costly ? C.amber : C.muted;
-      let x = ox;
-      cols.forEach((c) => {
-        const tx = c.a === 'left' ? x + 3 : x + c.w - 3;
-        if (c.k === 'id') g.text(safe(l.id), tx, y + 5.4, { size: 8.4, bold: true, color: C.navy, align: c.a });
-        else if (c.k === 'km') g.text(perKmStr(l.perKm), tx, y + 5.4, { size: 8.4, bold: true, color: l.costly ? C.red : C.navy, align: c.a });
-        else if (c.k === 'hr') g.text(l.perHour != null ? perKmStr(l.perHour) : '—', tx, y + 5.4, { size: 8.4, color: C.navy, align: c.a });
-        else if (c.k === 'drv') g.text(shortKm(l.perWeek), tx, y + 5.4, { size: 8, color: C.body, align: c.a });
-        else if (c.k === 'hw') g.text(l.hrsWeek != null ? Math.round(l.hrsWeek).toLocaleString('en-AU') : '—', tx, y + 5.4, { size: 8, color: C.body, align: c.a });
-        else if (c.k === 'sp') g.text(AD.fleetReport.aud(l.spend), tx, y + 5.4, { size: 8, color: C.body, align: c.a });
-        else if (c.k === 'st') g.text(status, tx, y + 5.4, { size: 7.4, bold: l.watch, color: stCol, align: c.a });
-        x += c.w;
+    const fmtWhen = (ms) => (ms ? `${T.fmtKey(T.dateKey(ms)).slice(0, 5)} ${T.fmtTime(ms)}` : 'Still there');
+    const dur = (v) => {
+      if (!v.out) return '—';
+      const h = (v.out - v.in) / 3600000;
+      return h >= 24 ? `${(h / 24).toFixed(1)} days` : `${h.toFixed(1)} hrs`;
+    };
+    const vc = [{ t: 'Vehicle', w: 22 }, { t: 'Workshop', w: 72 }, { t: 'Arrived', w: 28 }, { t: 'Left', w: 28 }, { t: 'Time in', w: 28 }];
+    g.rect(M.l, y, CONTENT_W, 7, C.navy);
+    let vx = M.l;
+    vc.forEach((c) => { g.text(c.t, vx + 3, y + 4.8, { size: 7.2, bold: true, color: C.white }); vx += c.w; });
+    y += 7;
+    visits.slice(0, 10).forEach((v, i) => {
+      if (i % 2 === 1) g.rect(M.l, y, CONTENT_W, 7, C.ruleSoft);
+      const vals = [safe(v.id), safe(v.workshop), fmtWhen(v.in), v.out ? fmtWhen(v.out) : 'Still there', dur(v)];
+      let x = M.l;
+      vals.forEach((s, ci) => {
+        g.text(s, x + 3, y + 4.8, { size: 7.8, bold: ci === 0, color: ci === 0 ? C.navy : C.body, maxWidth: vc[ci].w - 4 });
+        x += vc[ci].w;
       });
-      y += rowH;
+      y += 7;
     });
-    y += 10;
-
-    /* Replacement watch-list. */
-    const watch = u.lines.filter((l) => l.watch);
-    if (watch.length) {
-      g.roundRect(M.l, y, CONTENT_W, 10 + watch.length * 6.5, 2.5, C.redPale);
-      g.text('REPLACEMENT WATCH-LIST', M.l + 7, y + 8, { size: 7.5, bold: true, color: C.red });
-      let wy = y + 15;
-      watch.forEach((l) => {
-        g.text(safe(l.id), M.l + 7, wy, { size: 8.6, bold: true, color: C.navy });
-        g.text(`${perKmStr(l.perKm)}/km · only ${shortKm(l.perWeek)}/week · ${AD.fleetReport.aud(l.spend)} this year`, M.l + 34, wy, { size: 8, color: C.body });
-        wy += 6.5;
-      });
-    } else {
-      g.text('No vehicles flagged for replacement — tracked vehicles are earning their running cost.', M.l, y + 1, { size: 9, italic: true, color: C.green });
-    }
+    if (visits.length > 10) g.text(`and ${visits.length - 10} more in the Activity log.`, M.l, y + 4, { size: 7.4, italic: true, color: C.muted });
   }
 
   /* ------------------------------------------------------------------ public */
@@ -1160,6 +1255,7 @@ AD.fleetReportPdf = (function () {
     const logoWhite = await loadImg('assets/logo-lockup.png');
     notify('Fetching live fleet activity…');
     data.liveSnapshot = await fetchLiveSnapshot();
+    data.workshopVisits = await fetchWorkshopVisits(data);
     notify('Drawing report…');
 
     const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait', compress: true });
