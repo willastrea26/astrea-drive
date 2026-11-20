@@ -711,94 +711,209 @@ AD.art = (function () {
     <g fill="#4a5568"><circle cx="25" cy="46.5" r="4.8"/><circle cx="95" cy="46.5" r="4.8"/></g>
     <g fill="#1a2130"><circle cx="25" cy="46.5" r="1.8"/><circle cx="95" cy="46.5" r="1.8"/></g>`;
 
-  // Body-style car profiles, so each car reads as its real model's shape:
-  //   suv   — upright SUV, tall glasshouse, near-vertical tailgate (Touareg)
-  //   suvk  — the same with a forward kink at the rear window (BMW X-series)
-  //   coupe — low, sleek SUV with a long sloping roof and slim glass (Velar)
-  //   long  — long-wheelbase 7-seat SUV, three windows a side (Q7)
-  //   cross — short, rounded compact crossover with black cladding (Atto 3)
-  // Same 120x60 frame, ground line and wheel size as every other drawing.
-  const GLASS = '#1a3550';
-  const CAR_SHAPES = {
-    suv: {
-      body: 'M 8 44 L 7.2 37 Q 7.5 30.5 12 29.5 L 35 27.5 L 45.5 18.5 Q 47 17 49.5 17 L 96 17 Q 101 17 104 19.5 L 108.5 25 Q 110.5 27.5 110.6 31 L 111 41 L 110 44 L 102 44 A 10 10 0 0 0 82 44 L 36 44 A 10 10 0 0 0 16 44 Z',
-      glass: ['M 37.3 27 L 46.3 19.3 L 63 19.3 L 63 27 Z', 'M 64.5 19.3 L 82 19.3 L 82 27 L 64.5 27 Z',
-              'M 83.5 19.3 L 96 19.3 Q 100.5 19.3 102.8 22 L 105.5 26 L 105.5 27 L 83.5 27 Z'],
-      doors: 'M63.75 27 L63.75 42 M82.75 27 L82.75 36', wheels: [26, 92], rails: [52, 97], cladding: true,
-      handles: [52, 72], handleY: 31.2, mark: [40, 31, 17],
-      head: 'M 7.6 31.5 L 15 30 L 15.5 32 L 8 33.5 Z', tail: 'M 106.5 25.5 L 110.4 29 L 110.6 32 L 106.5 30 Z'
+  // Model-accurate car profiles. Each is drawn to its real proportions —
+  // length, wheelbase, overhangs, height and ground clearance — at one shared
+  // scale (~20.5 units per metre, so a 0.78 m tyre is the usual r=8 wheel), on
+  // the same ground line as every other drawing, plus the details that make
+  // the model recognisable side-on. Front faces left. No maker badges: the
+  // Astrea wordmark sits on the front door, as on the rest of the fleet.
+  //
+  //   touareg — VW Touareg (3rd gen): upright SUV, strong straight shoulder
+  //             line, three side windows, chrome door strip, roof rails.
+  //   velar   — Range Rover Velar: long flat bonnet, very raked screen, roof
+  //             falling to the rear, slim glass tapering to a point, flush
+  //             handles, wing vent, slim lights, no rails.
+  //   x5      — BMW X5 (G05): upright nose, Hofmeister kink in the rear side
+  //             window, rising character line, air breather behind the front
+  //             wheel, L-shaped tail light, dark sill.
+  //   q7      — Audi Q7 (4M): long, low-ish 7-seater, ruler-straight tornado
+  //             line, flared quattro arches, wide horizontal lights.
+  //   atto3   — BYD Atto 3: short rounded crossover, beltline kicking up at
+  //             the silver finned C-pillar trim, black arch cladding, full-
+  //             width tail bar.
+  //
+  // Each spec: wheels (fx, rx, r, cy), sill (body underside), top (outline
+  // from the front-bottom corner over the roof to the rear-bottom corner —
+  // the underside and wheel arches are generated), dlo (black window
+  // surround), glass panes, door shut lines, highlight/crease lines, and parts.
+  const CARS = {
+    touareg: {
+      fx: 29.3, rx: 88.6, r: 8, cy: 46.5, sill: 50.2,
+      top: 'M 11.2 50.2 L 10.4 45 L 10 40.5 Q 10 37 11.6 35.8 L 13.5 35 Q 26 33.6 42.5 32.8 L 54.5 21.3 Q 55.6 20.3 57.5 20.2 L 99 20.1 Q 102.5 20.2 103.6 21.4 L 108.2 29.6 Q 109.6 31 109.7 33 L 110 43.5 Q 110 47.5 109.2 50.2',
+      dlo: 'M 44.6 31.2 L 55.6 21.5 Q 56.2 21.2 57.4 21.2 L 98.5 21.2 Q 101.3 21.3 102.3 22.6 L 106 29.8 L 105.3 30.4 Z',
+      glass: ['M 46.6 30.6 L 56.6 22.2 L 69.2 22.2 L 69.2 30.7 Z', 'M 71 22.2 L 85.6 22.2 L 85.6 30.5 L 71 30.6 Z',
+              'M 87.4 22.2 L 98.2 22.2 Q 100.6 22.3 101.5 23.4 L 104.6 29.5 L 87.4 30.3 Z'],
+      doors: ['M 42.8 32.8 L 42.6 49.4', 'M 70.1 30.8 L 70.1 49.4', 'M 86.5 30.4 L 86.5 34.6 Q 81 35.4 80.2 41.2'],
+      lights: ['M 13 36.7 Q 60 35.5 108.6 34.6'],
+      creases: ['M 38.5 44.6 L 79.5 44.3'],
+      chrome: ['M 43.2 47.4 L 79 47.4'],
+      handles: [[60, 33.6, 5], [79, 33.4, 5]],
+      mirror: 'M 45.4 31.5 L 49.8 30.7 Q 51 30.7 50.8 31.9 L 50 33.4 L 46.2 33.4 Z',
+      head: 'M 10.4 37.4 L 11.8 35.8 L 19.6 35.1 L 19.1 37.1 Q 15 38.3 10.8 38.8 Z',
+      tail: 'M 103.9 31.8 L 109.6 32.4 L 109.7 34.8 L 104.4 34.5 Z',
+      rails: { y: 19.1, x1: 61, x2: 97, tone: '#c9d1db' },
+      sillTrim: false, cladding: false, rim: 0.66, spokes: 10,
+      mark: [49.5, 38.4, 15]
     },
-    coupe: {
-      body: 'M 8 44 L 7.3 38.5 Q 7.6 32.5 12 31.5 L 37 29.3 L 48.5 20.5 Q 50.5 19.3 53.5 19.3 L 84 19.3 Q 92 19.8 99 23.5 L 107.5 28.8 Q 110.5 30.8 110.5 34 L 111 41 L 110 44 L 102 44 A 10 10 0 0 0 82 44 L 36 44 A 10 10 0 0 0 16 44 Z',
-      glass: ['M 39.8 28.6 L 49 21.6 L 64 21.6 L 64 28.6 Z',
-              'M 65.5 21.6 L 84 21.6 Q 91 22 96.5 25.2 L 101 28.6 L 65.5 28.6 Z'],
-      doors: 'M64.75 28.6 L64.75 42 M85 28.6 L85 36', wheels: [26, 92], rails: null, cladding: false,
-      handles: [53, 75], handleY: 32.6, mark: [41, 32.4, 17], flushHandles: true,
-      head: 'M 7.8 33 L 17 31.6 L 17.3 32.8 L 8.2 34.4 Z', tail: 'M 100 29.4 L 110.2 31.6 L 110.4 33 L 100 31 Z'
+    velar: {
+      fx: 29.75, rx: 88.65, r: 8, cy: 46.5, sill: 50.3,
+      top: 'M 11.7 50.3 L 11 45.5 L 10.9 41 Q 10.9 37.6 12.6 36.3 L 15 35.3 Q 30 34 44.5 32.9 L 58.5 22.2 Q 60 21 62 20.9 L 72 20.7 Q 86 21 97.5 23.3 Q 100 23.8 101.4 25 L 107.6 31.2 Q 108.8 32.4 108.9 34.6 L 109.1 44 Q 109.1 47.8 108.6 50.3',
+      dlo: 'M 46.8 31.6 L 59.4 23 Q 60.6 22.2 62.2 22.1 L 72 21.9 Q 85.5 22.2 96.5 24.4 L 102.2 30.1 Z',
+      glass: ['M 49 31 L 59.9 23.6 Q 60.8 23 62.2 22.9 L 69.6 22.8 L 69.6 31 Z', 'M 71.2 22.8 L 87 23 L 87 30.6 L 71.2 30.9 Z',
+              'M 88.6 23.1 Q 92.5 23.5 96 24.9 L 99.8 29.9 L 88.6 30.5 Z'],
+      doors: ['M 43.6 33 L 43.4 49.5', 'M 70.4 31.3 L 70.4 49.5', 'M 87.8 30.6 L 87.8 34.7 Q 82 35.6 81.1 41.4'],
+      lights: ['M 15 37.4 Q 60 36.4 107.8 35.4'],
+      creases: ['M 41 45.2 Q 60 44.2 80.5 44.6'],
+      chrome: [],
+      handles: [[59, 34.4, 6, true], [78.5, 34.2, 6, true]],
+      mirror: 'M 47.6 31.8 L 52 31 Q 53 31.1 52.8 32.2 L 52 33.6 L 48.3 33.6 Z',
+      head: 'M 11.4 37.7 L 13 36.2 L 22.6 35.3 L 22.4 36.3 Q 17 37.5 11.8 38.7 Z',
+      tail: 'M 101.8 31.6 L 108.7 33.3 L 108.8 34.5 L 102.2 33 Z',
+      extra: '<path d="M 39.2 40.6 L 43.6 40.1 L 43.8 41.4 L 39.4 41.9 Z" fill="#1b2430" stroke="#c9d1db" stroke-width=".35"/>',
+      rails: null, sillTrim: false, cladding: false, rim: 0.72, spokes: 10,
+      mark: [50, 39.3, 15]
     },
-    long: {
-      body: 'M 6 44 L 5.3 37.5 Q 5.5 31 10 30 L 33 28 L 43.5 18.8 Q 45 17.5 47.5 17.5 L 98 18.6 Q 103 19 106 21.5 L 110.3 26.5 Q 112 29 112 32.5 L 112.5 41 L 111.5 44 L 106 44 A 10 10 0 0 0 86 44 L 34 44 A 10 10 0 0 0 14 44 Z',
-      glass: ['M 35.3 27.5 L 44.3 19.8 L 60 19.8 L 60 27.5 Z', 'M 61.5 19.8 L 80 19.9 L 80 27.5 L 61.5 27.5 Z',
-              'M 81.5 20 L 98 20.4 Q 102.5 20.8 104.6 23.2 L 107 27 L 107 27.5 L 81.5 27.5 Z'],
-      doors: 'M60.75 27.5 L60.75 42 M80.75 27.5 L80.75 36', wheels: [24, 96], rails: [50, 99], cladding: true,
-      handles: [49, 70], handleY: 31.4, mark: [37.5, 31.2, 17],
-      head: 'M 5.6 32 L 14 30.5 L 14.5 32.4 L 6 34 Z', tail: 'M 107.2 26.6 L 111.8 30 L 112 33 L 107.2 30.6 Z'
+    x5: {
+      fx: 28.4, rx: 89.4, r: 8, cy: 46.5, sill: 49.9,
+      top: 'M 10.4 49.9 L 9.6 45 L 9.6 40 Q 9.6 36.4 11 35.2 L 13 34 Q 27 32.8 42.8 32.1 L 55.3 21 Q 56.6 19.6 58.8 19.6 L 99.5 19.6 Q 103 19.7 104.4 21.2 L 109 29.6 Q 110.4 31 110.5 33.4 L 110.6 44 Q 110.6 47.8 109.8 49.9',
+      // The rear edge of the window surround turns forward at its foot: the Hofmeister kink.
+      dlo: 'M 45 30.6 L 56.2 21.1 Q 57.2 20.7 58.8 20.7 L 99 20.8 Q 101.6 20.9 102.6 22.1 L 106.4 26.6 Q 106.8 28.2 104.8 28.3 L 101.2 28.4 Q 100 28.5 99.6 29.9 Z',
+      glass: ['M 47 30.1 L 56.6 21.8 L 70.8 21.8 L 70.8 30.1 Z', 'M 72.4 21.8 L 87.6 21.8 L 87.6 29.9 L 72.4 30 Z',
+              'M 89.2 21.8 L 98.8 21.8 Q 101 21.9 101.8 22.9 L 105.3 26.8 Q 105.5 27.6 104.4 27.6 L 101 27.7 Q 99.6 27.8 99.2 29.3 L 89.2 29.8 Z'],
+      doors: ['M 43.6 32.3 L 43.4 49.2', 'M 71.6 30.3 L 71.6 49.2', 'M 88.4 29.9 L 88.4 34.4 Q 82.6 35.2 81.6 40.8'],
+      lights: ['M 12.5 35.5 Q 60 34.4 106.5 33.4'],
+      creases: [],
+      chrome: [],
+      handles: [[60.5, 33.5, 5.5], [80, 33.3, 5.5]],
+      mirror: 'M 45.8 30.8 L 50.3 30 Q 51.3 30.1 51.1 31.2 L 50.3 32.7 L 46.5 32.7 Z',
+      head: 'M 9.9 37.4 L 11.3 35.5 L 18.3 34.6 L 18.2 36.3 Q 14 37.5 10.2 38.4 Z',
+      tail: 'M 104 31.1 L 110.4 32 L 110.5 35.4 L 107.4 35.2 L 107.3 33.4 L 104.3 33 Z',
+      extra: '<path d="M 9.7 38.8 L 9.6 43.3 L 10.7 43.3 L 10.8 38.8 Z" fill="#1b2430"/>' +
+             '<path d="M 38.8 39.4 L 42.8 39 L 42.6 40.8 L 39.3 41.2 Z" fill="#1b2430" stroke="#c9d1db" stroke-width=".35"/>',
+      rails: { y: 18.5, x1: 62, x2: 97, tone: '#1b2430' },
+      sillTrim: true, cladding: false, rim: 0.68, spokes: 10,
+      mark: [50.2, 38.2, 15]
     },
-    cross: {
-      body: 'M 12 44 L 11 38 Q 11.3 32 15.5 31 L 36 28.5 L 45.5 19.5 Q 47.5 18 50.5 18 L 87 18 Q 92.5 18.3 96 21.5 L 103.5 28 Q 106.5 30.5 106.5 34 L 107 41 L 106 44 L 99 44 A 10 10 0 0 0 79 44 L 39 44 A 10 10 0 0 0 19 44 Z',
-      glass: ['M 38.5 28 L 46.5 20.5 L 62 20.5 L 62 28 Z', 'M 63.5 20.5 L 79 20.5 L 79 27.6 L 63.5 27.9 Z',
-              'M 80.5 20.5 L 87 20.5 Q 91.5 20.8 94 23.5 L 96.5 26.6 L 80.5 27.4 Z'],
-      doors: 'M62.75 28 L62.75 42 M79.75 27.6 L79.75 36', wheels: [29, 89], rails: [55, 88], cladding: true,
-      handles: [51, 70], handleY: 32, mark: [40.5, 31.8, 16],
-      head: 'M 11.6 33 L 19 31.6 L 19.4 33.3 L 12 34.8 Z', tail: 'M 98.5 28.6 L 106 32 L 106.3 34 L 98.5 31 Z'
+    q7: {
+      fx: 28, rx: 89.4, r: 8, cy: 46.5, sill: 50.1,
+      top: 'M 9.1 50.1 L 8.3 45.5 L 8.2 40.5 Q 8.3 37.4 9.9 36.3 L 12.3 35.5 Q 26 34.2 41.8 33.3 L 54.2 21.4 Q 55.3 20.5 57.4 20.5 L 99.6 21.2 Q 103.4 21.4 104.6 22.6 L 110 30 Q 111.4 31.4 111.6 33.6 L 111.8 44 Q 111.8 47.8 111.1 50.1',
+      dlo: 'M 44 31.9 L 55 22.5 Q 56 21.7 57.6 21.7 L 99.4 22.3 Q 101.6 22.5 102.6 23.6 L 107 30.9 Z',
+      glass: ['M 46.2 31.4 L 55.5 23.3 L 68.6 23.3 L 68.6 31.4 Z', 'M 70.2 23.4 L 86 23.6 L 86 31.1 L 70.2 31.3 Z',
+              'M 87.6 23.7 L 99 24.1 Q 100.8 24.3 101.6 25.2 L 105.2 30.5 L 87.6 30.9 Z'],
+      doors: ['M 42.4 33.6 L 42.2 49.4', 'M 69.4 31.6 L 69.4 49.4', 'M 86.8 31.1 L 86.8 35 Q 81.2 35.8 80.4 41.4'],
+      lights: ['M 12.5 37.1 L 110.8 35.9', 'M 18.6 40.2 Q 28 35.4 37.4 40.2', 'M 80 40.2 Q 89.4 35.4 98.8 40.2'],
+      creases: ['M 12.5 37.8 L 110.8 36.6'],
+      chrome: [],
+      handles: [[58, 34.7, 5.5], [77.5, 34.5, 5.5]],
+      mirror: 'M 45 32.1 L 49.4 31.3 Q 50.4 31.4 50.2 32.5 L 49.4 34 L 45.7 34 Z',
+      head: 'M 8.6 38.3 L 10 36.7 L 18.6 35.7 L 18.5 37.7 Q 13.6 38.7 8.9 39.5 Z',
+      tail: 'M 104 32.9 L 111.5 33.7 L 111.6 36.3 L 104.5 35.8 Z',
+      rails: { y: 19.8, x1: 60, x2: 98, tone: '#c9d1db' },
+      sillTrim: true, cladding: false, rim: 0.66, spokes: 10,
+      mark: [48.4, 39.6, 15]
+    },
+    atto3: {
+      fx: 31.75, rx: 87.55, r: 7.4, cy: 47.1, sill: 50.8,
+      top: 'M 15.3 50.8 L 14.5 46 L 14.4 41.8 Q 14.4 38.6 15.6 37.4 Q 16.6 36.6 18.5 36.4 Q 30 35.2 41.2 33.8 L 52.6 23.6 Q 53.8 22.6 55.8 22.5 L 89 22.6 Q 93.6 22.8 95.6 24.2 L 102.6 31.2 Q 104.4 32.8 104.6 35.4 L 104.8 45 Q 104.8 48.6 104.9 50.8',
+      // The beltline kicks up where the silver C-pillar trim starts.
+      dlo: 'M 43 32.6 L 53.4 24.3 Q 54.4 23.6 56 23.6 L 88.6 23.7 Q 92.2 23.9 93.8 25.3 L 97.6 29.3 L 84.6 29.7 L 81.6 31.9 Z',
+      glass: ['M 45.2 32.1 L 53.9 25 Q 54.6 24.5 55.9 24.5 L 66.6 24.5 L 66.6 32 Z', 'M 68.2 24.5 L 80.2 24.5 L 80.2 31.8 L 68.2 31.9 Z',
+              'M 81.8 24.5 L 88.4 24.6 Q 91.5 24.8 92.8 26 L 95.2 28.6 L 84.8 28.9 L 81.8 31 Z'],
+      doors: ['M 42 34.2 L 41.8 50.1', 'M 67.4 32 L 67.4 50.1', 'M 81 31.9 L 81 37.2 Q 80.2 38.4 80 41.8'],
+      lights: ['M 18 38.2 Q 60 36.8 104.2 35.5'],
+      creases: [],
+      chrome: [],
+      handles: [[55.5, 35, 5.5], [73.5, 34.7, 5]],
+      mirror: 'M 44 32.9 L 48.2 32.1 Q 49.2 32.2 49 33.3 L 48.2 34.7 L 44.6 34.7 Z',
+      head: 'M 15 38.7 L 16.4 37.2 L 25 36.3 L 24.6 37.5 Q 19.6 38.7 15.3 39.7 Z',
+      tail: 'M 98.6 32.3 L 104.6 33.5 L 104.7 35.1 L 98.8 34.1 Z',
+      extra: '<path d="M 81.6 31.9 L 84.6 29.7 L 97.6 29.3 L 98.7 30.4 L 85.2 30.9 L 82.5 32.7 Z" fill="#c8d0da" stroke="#8f9aa8" stroke-width=".25"/>' +
+             '<path d="M 87 30.8 L 88.4 29.6 M 90 30.7 L 91.4 29.5 M 93 30.6 L 94.4 29.4 M 96 30.5 L 97.2 29.4" stroke="#8f9aa8" stroke-width=".35"/>',
+      rails: { y: 21.6, x1: 60, x2: 88, tone: '#1b2430' },
+      sillTrim: true, cladding: true, rim: 0.64, spokes: 10,
+      mark: [47.6, 40.2, 14]
     }
   };
-  CAR_SHAPES.suvk = Object.assign({}, CAR_SHAPES.suv, {
-    // BMW-style forward kink at the base of the rear quarter window.
-    glass: [CAR_SHAPES.suv.glass[0], CAR_SHAPES.suv.glass[1],
-            'M 83.5 19.3 L 96 19.3 Q 100.5 19.3 102.8 22 L 105.5 26 L 104.6 27 L 94 27 Q 91 27 90 24.8 L 86 24.8 L 83.5 27 Z']
-  });
 
-  const carShape = (s, body, stroke, markTone) => {
-    const [fx, rx] = s.wheels;
-    const cx = (fx + rx) / 2;
-    const wheel = (x) => `<circle cx="${x}" cy="46.5" r="8"/>`;
+  const PAL_CAR_BLUE = { top: '#66a8da', base: '#4a90c4', low: '#3a77a6', stroke: '#2a5c82', hi: '#9ccbec', lo: '#2f6690' };
+  const PAL_CAR_RED  = { top: '#d65a5a', base: '#c23b3b', low: '#a33030', stroke: '#7a2626', hi: '#ec9a9a', lo: '#8a2828' };
+  const TRIM = '#1b2430';
+
+  /** One car spec + palette -> the inner SVG of its <symbol>. */
+  const carSvg = (id, s, p) => {
+    const R = s.r + 1.5, cyA = s.cy - 0.4;
+    const dx = Math.sqrt(R * R - (s.sill - cyA) ** 2);
+    const f = (n) => +n.toFixed(2);
+    const arch = (x) => `A ${R} ${R} 0 1 0 ${f(x - dx)} ${s.sill}`;
+    const body = `${s.top} L ${f(s.rx + dx)} ${s.sill} ${arch(s.rx)} L ${f(s.fx + dx)} ${s.sill} ${arch(s.fx)} Z`;
+    const well = (x) => `<path d="M ${f(x - dx)} ${s.sill} A ${R} ${R} 0 1 1 ${f(x + dx)} ${s.sill} Z" fill="#0d131b"/>`;
+    const flare = (x) => `<path d="M ${f(x - dx)} ${s.sill} A ${R} ${R} 0 1 1 ${f(x + dx)} ${s.sill}" fill="none" stroke="${TRIM}" stroke-width="1.8"/>`;
+    const len = s.rx - s.fx;
+    const wheel = (x) => {
+      const rimR = s.r * s.rim, spokeAt = [];
+      for (let i = 0; i < 5; i++) for (const off of [-8, 8]) spokeAt.push(((i * 72 + off - 90) * Math.PI) / 180);
+      return `<circle cx="${x}" cy="${s.cy}" r="${s.r}" fill="#141920"/>
+      <circle cx="${x}" cy="${s.cy}" r="${f(s.r - 0.9)}" fill="none" stroke="#2a313c" stroke-width=".5"/>
+      <circle cx="${x}" cy="${s.cy}" r="${f(rimR)}" fill="#2c343f"/>
+      <path d="${spokeAt.map((a) => `M ${f(x + Math.cos(a) * s.r * 0.2)} ${f(s.cy + Math.sin(a) * s.r * 0.2)} L ${f(x + Math.cos(a) * rimR * 0.95)} ${f(s.cy + Math.sin(a) * rimR * 0.95)}`).join(' ')}" stroke="url(#${id}-rim)" stroke-width="1.05" stroke-linecap="round"/>
+      <circle cx="${x}" cy="${s.cy}" r="${f(rimR)}" fill="none" stroke="#c3cbd5" stroke-width=".55"/>
+      <circle cx="${x}" cy="${s.cy}" r="${f(s.r * 0.2)}" fill="#9aa5b3"/>`;
+    };
+    const lineSet = (arr, stroke, w, op = 1) => arr.map((d) => `<path d="${d}" fill="none" stroke="${stroke}" stroke-width="${w}" stroke-linecap="round" opacity="${op}"/>`).join('');
     return `
-    <ellipse cx="${cx}" cy="54.6" rx="${(rx - fx) / 2 + 22}" ry="3" fill="#101D35" opacity=".16"/>
-    ${s.rails ? `<path d="M${s.rails[0]} 15.6 L${s.rails[1]} 15.6" stroke="#2a3542" stroke-width="1.3" stroke-linecap="round"/>
-    <path d="M${s.rails[0] + 2} 15.8 L${s.rails[0] + 2} 19 M${s.rails[1] - 2} 15.8 L${s.rails[1] - 2} 19" stroke="#2a3542" stroke-width="1"/>` : ''}
-    <path d="${s.body}" fill="${body}" stroke="${stroke}" stroke-width=".9" stroke-linejoin="round"/>
-    ${s.glass.map((d) => `<path d="${d}" fill="${GLASS}"/>`).join('')}
-    <path d="${s.doors}" stroke="${stroke}" stroke-width=".7" fill="none"/>
-    ${s.handles.map((x) => s.flushHandles
-      ? `<rect x="${x}" y="${s.handleY}" width="6" height=".8" rx=".4" fill="${stroke}"/>`
-      : `<rect x="${x}" y="${s.handleY}" width="5.5" height="1.4" rx=".6" fill="${stroke}"/>`).join('')}
-    ${mark(markTone, s.mark[0], s.mark[1], s.mark[2])}
-    ${s.cladding ? `<g fill="none" stroke="#24303d" stroke-width="2.2">
-      <path d="M${fx - 10} 44 A 10 10 0 0 1 ${fx + 10} 44"/><path d="M${rx - 10} 44 A 10 10 0 0 1 ${rx + 10} 44"/></g>
-    <path d="M${fx + 10} 43 L${rx - 10} 43" stroke="#24303d" stroke-width="2"/>` : ''}
-    <path d="${s.head}" fill="#f0f4f8"/>
-    <path d="${s.tail}" fill="#c93f3f"/>
-    <g fill="#161b24">${wheel(fx)}${wheel(rx)}</g>
-    <g fill="#4a5568">${[fx, rx].map((x) => `<circle cx="${x}" cy="46.5" r="4.8"/>`).join('')}</g>
-    <g fill="#1a2130">${[fx, rx].map((x) => `<circle cx="${x}" cy="46.5" r="1.8"/>`).join('')}</g>`;
+    <defs>
+      <linearGradient id="${id}-b" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="${p.top}"/><stop offset=".55" stop-color="${p.base}"/><stop offset="1" stop-color="${p.low}"/>
+      </linearGradient>
+      <linearGradient id="${id}-g" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#3a5a7c"/><stop offset="1" stop-color="#14263a"/>
+      </linearGradient>
+      <linearGradient id="${id}-rim" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#e3e8ee"/><stop offset="1" stop-color="#9aa5b3"/>
+      </linearGradient>
+    </defs>
+    <ellipse cx="${f((s.fx + s.rx) / 2)}" cy="54.8" rx="${f(len / 2 + 24)}" ry="2.6" fill="#101D35" opacity=".18"/>
+    ${s.rails ? `<path d="M ${s.rails.x1} ${s.rails.y} L ${s.rails.x2} ${s.rails.y} M ${s.rails.x1 + 1.5} ${s.rails.y} L ${s.rails.x1 + 2.5} ${s.rails.y + 1.6} M ${s.rails.x2 - 1.5} ${s.rails.y} L ${s.rails.x2 - 2.5} ${s.rails.y + 1.6}" stroke="${s.rails.tone}" stroke-width="1.1" stroke-linecap="round" fill="none"/>` : ''}
+    ${well(s.fx)}${well(s.rx)}
+    <path d="${body}" fill="url(#${id}-b)" stroke="${p.stroke}" stroke-width=".7" stroke-linejoin="round"/>
+    ${s.sillTrim ? `<path d="M ${f(s.fx + dx)} ${s.sill - 2.3} L ${f(s.rx - dx)} ${s.sill - 2.3} L ${f(s.rx - dx)} ${s.sill} L ${f(s.fx + dx)} ${s.sill} Z" fill="${TRIM}" opacity=".85"/>` : ''}
+    ${s.cladding ? flare(s.fx) + flare(s.rx) : ''}
+    <path d="${s.dlo}" fill="${TRIM}"/>
+    ${s.glass.map((d) => `<path d="${d}" fill="url(#${id}-g)"/>`).join('')}
+    ${lineSet(s.doors, p.lo, 0.5)}
+    ${lineSet(s.creases, p.lo, 0.45, 0.8)}
+    ${lineSet(s.lights, p.hi, 0.55, 0.6)}
+    ${lineSet(s.chrome, '#d5dbe2', 0.6)}
+    ${s.handles.map(([x, y, w, flush]) => `<rect x="${x}" y="${y}" width="${w}" height="${flush ? 0.7 : 1.2}" rx=".5" fill="${flush ? p.lo : TRIM}" opacity="${flush ? 1 : 0.75}"/>`).join('')}
+    <path d="${s.mirror}" fill="url(#${id}-b)" stroke="${p.stroke}" stroke-width=".45"/>
+    <path d="${s.head}" fill="#eef3f8" stroke="#9fb0c2" stroke-width=".3"/>
+    <path d="${s.tail}" fill="#c93f3f" stroke="#7d2222" stroke-width=".3"/>
+    ${s.extra || ''}
+    ${mark('white', s.mark[0], s.mark[1], s.mark[2])}
+    ${wheel(s.fx)}${wheel(s.rx)}`;
   };
-  const CAR_STYLE_SYMBOLS = Object.keys(CAR_SHAPES).map((k) =>
-    `<symbol id="art-car-${k}" viewBox="0 0 120 60">${carShape(CAR_SHAPES[k], '#4a90c4', '#2a5c82', 'white')}</symbol>` +
-    `<symbol id="art-car-${k}-red" viewBox="0 0 120 60">${carShape(CAR_SHAPES[k], '#c23b3b', '#7a2626', 'white')}</symbol>`).join('');
+
+  const CAR_STYLE_SYMBOLS = Object.keys(CARS).map((k) =>
+    `<symbol id="art-car-${k}" viewBox="0 0 120 60">${carSvg(`art-car-${k}`, CARS[k], PAL_CAR_BLUE)}</symbol>` +
+    `<symbol id="art-car-${k}-red" viewBox="0 0 120 60">${carSvg(`art-car-${k}-red`, CARS[k], PAL_CAR_RED)}</symbol>`).join('');
 
   /**
-   * Which body style a car is, from its make and model. Anything not
-   * recognised keeps the original sedan. Order matters: coupe-SUVs and
-   * long 7-seaters are checked before the general SUV list.
+   * Which drawing a car gets, from its make and model. The five fleet models
+   * get their own; other common models borrow the closest body style. Anything
+   * not recognised keeps the original sedan. Order matters.
    */
   const carStyle = (v) => {
     const s = `${v.make || ''} ${v.model || ''}`.toLowerCase();
-    if (/velar|evoque|range rover sport|\bx6\b|\bx4\b|\bq8\b|coupe suv|urus/.test(s)) return 'coupe';
-    if (/\bq7\b|xc90|kluger|land ?cruiser|prado|pajero|\bx7\b|\bgls\b|discovery(?! sport)|santa fe|sorento|cx-?9|cx-?90|palisade|everest|patrol|tahoe|fortuner/.test(s)) return 'long';
-    if (/atto|dolphin|kona|\bmg ?4\b|\bzs\b|seal u|ioniq ?5|\bev6\b|model y|niro|\bq2\b|\bq3\b|\bx1\b|\bx2\b|t-?roc|cx-?3\b|cx-?30|juke|venue|yaris cross|corolla cross|c-hr|jolion|eclipse cross/.test(s)) return 'cross';
-    if (/\bbmw\b/.test(s) && /\bx[3-5]\b/.test(s)) return 'suvk';
-    if (/touareg|tiguan|\bq5\b|rav ?4|cx-?5|cx-?60|outlander|forester|x-?trail|range rover|cayenne|\bglc\b|\bgle\b|xc60|macan|tucson|sportage|kodiaq|defender|discovery sport|grand cherokee|\bsuv\b/.test(s)) return 'suv';
+    if (/touareg/.test(s)) return 'touareg';
+    if (/velar/.test(s)) return 'velar';
+    if (/\bx5\b/.test(s)) return 'x5';
+    if (/\bq7\b/.test(s)) return 'q7';
+    if (/atto/.test(s)) return 'atto3';
+    if (/evoque|range rover sport|\bx6\b|\bx4\b|\bq8\b|coupe suv|urus/.test(s)) return 'velar';
+    if (/\bbmw\b/.test(s) && /\bx[3-7]\b/.test(s)) return 'x5';
+    if (/xc90|kluger|land ?cruiser|prado|pajero|\bgls\b|discovery(?! sport)|santa fe|sorento|cx-?9|cx-?90|palisade|everest|patrol|tahoe|fortuner/.test(s)) return 'q7';
+    if (/dolphin|kona|\bmg ?4\b|\bzs\b|seal u|ioniq ?5|\bev6\b|model y|niro|\bq2\b|\bq3\b|t-?roc|cx-?3\b|cx-?30|juke|venue|yaris cross|corolla cross|c-hr|jolion|eclipse cross/.test(s)) return 'atto3';
+    if (/tiguan|\bq5\b|rav ?4|cx-?5|cx-?60|outlander|forester|x-?trail|range rover|cayenne|\bglc\b|\bgle\b|xc60|macan|tucson|sportage|kodiaq|defender|discovery sport|grand cherokee|\bsuv\b/.test(s)) return 'touareg';
     return '';
   };
 
