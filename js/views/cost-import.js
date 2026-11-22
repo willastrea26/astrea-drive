@@ -368,6 +368,13 @@ AD.importFuelData = (function () {
         const litres = m.litres >= 0 ? toNum(r[m.litres]) : null;
         // Payments (negative) and $0 lines aren't spend.
         if (cost <= 0 && !(litres > 0)) { noValueRows++; return; }
+        // Nor are the payment-side lines that come through POSITIVE: a "DD
+        // DISHONOUR" re-charges a bounced direct debit (April 2026: +$14,525.01,
+        // which would otherwise land as unassigned spend). The fees that come
+        // with a dishonour ("DISHONOUR FEE", "SUSPENSION FEE") ARE real costs
+        // and stay in.
+        const productName = m.product >= 0 ? String(r[m.product] || '').trim() : '';
+        if (/^(DIRECT DEBIT PMT|CREDIT CARD PMT|DD DISHONOUR)$|\bPAYMENT\b/i.test(productName)) { noValueRows++; return; }
         let v = rego ? exact.get(rego) : null;
         if (!v && rego) {
           const cv = canon.get(canonRego(rego)); // look-alike (O/0, I/1…) fallback, unambiguous only
@@ -456,7 +463,7 @@ AD.importFuelData = (function () {
             ${stats.noRegoRows ? `<li>${stats.noRegoRows} row${s(stats.noRegoRows)} (${aud2(stats.noRegoAmount)}) on cards with no registration, usually cards issued to a person</li>` : ''}
             ${stats.unmatchedRows ? `<li>${stats.unmatchedRows} row${s(stats.unmatchedRows)} (${aud2(stats.unmatchedAmount)}) for rego${s(stats.unmatched.length)} not in the fleet: <span class="muted">${esc(stats.unmatched.slice(0, 12).join(', '))}${stats.unmatched.length > 12 ? ` +${stats.unmatched.length - 12} more` : ''}</span></li>` : ''}
           </ul>` : ''}
-        ${stats.noValueRows ? `<p class="fi-note-skip muted">${stats.noValueRows} payment${s(stats.noValueRows)} or $0 line${s(stats.noValueRows)} skipped (not spend).</p>` : ''}
+        ${stats.noValueRows ? `<p class="fi-note-skip muted">${stats.noValueRows} payment${s(stats.noValueRows)}, dishonoured payment${s(stats.noValueRows)} or $0 line${s(stats.noValueRows)} skipped (not spend).</p>` : ''}
         ${stats.duplicateRows ? `<p class="fi-note-skip muted">${stats.duplicateRows} repeated BP receipt${stats.duplicateRows === 1 ? '' : 's'} collapsed so it can’t be counted twice.</p>` : ''}
         ${stats.identityRows ? `<p class="fi-warn">${stats.identityRows} BP transaction${stats.identityRows === 1 ? '' : 's'} had no usable card/date/receipt identity and were skipped.</p>` : ''}
         ${stats.noFuel.length ? `<details class="fi-no-fuel"><summary>${stats.noFuel.length} fleet vehicle${stats.noFuel.length === 1 ? '' : 's'} with no fuel in this file</summary><p class="muted">${esc(stats.noFuel.join(', '))}</p></details>` : ''}
