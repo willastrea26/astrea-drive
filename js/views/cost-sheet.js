@@ -1165,6 +1165,28 @@ AD.views['cost-sheet'] = (function () {
     }));
   }
 
+  /**
+   * Fuel-card spend not tied to a vehicle: cards issued to a person (no rego
+   * on the statement) and regos not in the fleet register. Counted in total
+   * spend and Spend over time so the totals match the card statement, but in
+   * no vehicle's figures. Shown here so the gap between the vehicle list and
+   * the total is explained, not hidden.
+   */
+  function unassignedFuelNote() {
+    const rows = (AD.store.all('fuel_entries') || []).filter((r) => !r.vehicleId && Number(r.cost) > 0);
+    if (!rows.length) return '';
+    const cost = rows.reduce((t, r) => t + Number(r.cost || 0), 0);
+    const litres = rows.reduce((t, r) => t + Number(r.litres || 0), 0);
+    const cards = new Set(rows.map((r) => r.cardHolder || r.rego || '?')).size;
+    return `<div class="cs-subhead">Unassigned <span class="muted">(${cards} card${cards === 1 ? '' : 's'} · ${L.fmtAUD(cost)})</span></div>
+      <div class="cs-row cs-row-art cs-row-muted">
+        <span class="id"><span class="cs-id-text">Not tied to a vehicle<small class="cs-rego">person cards / regos not in the fleet</small></span></span>
+        <span></span>
+        <span class="cs-row-val">${Math.round(litres).toLocaleString('en-AU')}<small> L</small></span>
+        <span class="cs-row-meta">${L.fmtAUD(cost)} · ${rows.length} transaction${rows.length === 1 ? '' : 's'} · counted in total spend and Spend over time, not in any vehicle’s figures</span>
+      </div>`;
+  }
+
   function fuelLitreage() {
     const l0 = (n) => Math.round(n).toLocaleString('en-AU');
     const lines = AD.store.all('vehicles').filter((v) => !v.hired).map((v) => {
@@ -1209,6 +1231,7 @@ AD.views['cost-sheet'] = (function () {
       <figure class="viz-card">
         <figcaption><span class="viz-sub">Every vehicle with imported fuel-card data, most litres first. Hover any row for the litres purchased, the accumulated fuel cost, the number of fills and the average price per litre. This covers all imported transactions, not just the period selected above.</span></figcaption>
         <div class="cs-rows">${rows}</div>
+        ${unassignedFuelNote()}
         ${V.table(['Vehicle', 'Rego', 'Assigned driver', 'Litres', 'Fuel cost', 'Fills', 'Avg /L', 'Last fill'], tableRows)}
       </figure>
     </section>`;

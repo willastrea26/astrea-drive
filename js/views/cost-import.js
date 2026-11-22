@@ -272,7 +272,8 @@ AD.importFuelData = (function () {
         product: guess(H, [/product/i]),
         brand: guess(H, [/fuel brand/i, /brand/i]),
         docket: guess(H, [/receipt/i, /docket/i]),
-        card: guess(H, [/card number/i, /^card$/i])
+        card: guess(H, [/card number/i, /^card$/i]),
+        holder: guess(H, [/name on card/i, /card ?holder/i])
       };
       const pdfNote = parsed.pdfMeta
         ? `<p class="fi-note-skip">BP PDF: <b>${parsed.pdfMeta.transactions}</b> receipt-level transactions from ${parsed.pdfMeta.lineItems} product lines across ${parsed.pdfMeta.vehicleCards} vehicle cards. ${parsed.pdfMeta.feeRows} card fee rows (${Number(parsed.pdfMeta.feeTotal).toLocaleString('en-AU', { style: 'currency', currency: 'AUD' })}) were deliberately excluded.${parsed.pdfMeta.unreadableRows ? ` <b>${parsed.pdfMeta.unreadableRows}</b> dated row${parsed.pdfMeta.unreadableRows === 1 ? '' : 's'} could not be read.` : ''}</p>`
@@ -293,6 +294,7 @@ AD.importFuelData = (function () {
             ${colSelect('brand', 'Brand', false, def.brand)}
             ${colSelect('docket', 'Receipt / docket', false, def.docket)}
             ${colSelect('card', 'Card number', false, def.card)}
+            ${colSelect('holder', 'Name on card', false, def.holder)}
           </div>
         </details>`;
       container.innerHTML = `
@@ -376,10 +378,14 @@ AD.importFuelData = (function () {
           const cv = vehicleByCard(r);
           if (cv) { v = cv; viaCard = true; cardRows++; cardFixes.add(`${rawRego || '(blank)'} → ${cv.rego} (card …${cardKey(r[m.card]).slice(-4)})`); }
         }
+        // No fleet vehicle: still imported, as UNASSIGNED spend (no vehicle), so
+        // totals match the card statement. Counted in total spend and Spend over
+        // time; left out of anything worked out per vehicle. A row for a rego
+        // not in the fleet keeps that rego in its id, so re-importing after the
+        // vehicle is added to the register attaches it to the vehicle.
         if (!v) {
           if (!rego) { noRegoRows++; noRegoAmount += cost; }
           else { unmatched.add(rego); unmatchedRows++; unmatchedAmount += cost; }
-          return;
         }
         const date = m.date >= 0 ? toKey(r[m.date]) : '';
         const product = m.product >= 0 ? String(r[m.product] || '').trim() : '';
@@ -397,14 +403,19 @@ AD.importFuelData = (function () {
           // was loaded before PDF support still updates, rather than duplicates.
           // A card-matched row is keyed on the vehicle's real rego, so it keeps the
           // same id if WEX later corrects the rego on the card.
-          const baseId = hashId([viaCard ? normRego(v.rego) : rego, date, cost, litres || '', product].join('|'));
+          // A person card (no rego) is keyed on its card number instead.
+          const who = viaCard ? normRego(v.rego) : rego || ('CARD' + cardKey(card));
+          const baseId = hashId([who, date, cost, litres || '', product].join('|'));
           const n = (seenIds.get(baseId) || 0) + 1;
           seenIds.set(baseId, n);
           id = n === 1 ? baseId : `${baseId}-${n}`;
         }
         const source = parsed.provider === 'BP' ? `BP PDF · ${fileName}` : fileName;
-        rows.push({ id, vehicleId: v.id, rego: viaCard ? v.rego : rawRego, date: date || null, litres: litres != null ? litres : null, cost, product, brand: brand || parsed.provider || '', docket, source });
-        totalCost += cost; totalLitres += litres || 0; vehicles.add(v.id);
+        const row = { id, vehicleId: v ? v.id : null, rego: viaCard ? v.rego : rawRego, date: date || null, litres: litres != null ? litres : null, cost, product, brand: brand || parsed.provider || '', docket, source };
+        if (!v) row.cardHolder = m.holder >= 0 ? String(r[m.holder] || '').trim() : '';
+        rows.push(row);
+        totalCost += cost; totalLitres += litres || 0;
+        if (v) vehicles.add(v.id);
         if (date) { if (!minDate || date < minDate) minDate = date; if (!maxDate || date > maxDate) maxDate = date; }
       });
       // Every active, owned vehicle that never appears in this file at all —
@@ -435,13 +446,16 @@ AD.importFuelData = (function () {
           <div class="fi-stat fi-stat-good"><b>${rows.length}</b><span>transactions to import</span></div>
           <div class="fi-stat fi-stat-mint"><b>${aud(stats.totalCost)}</b><span>total spend</span></div>
           <div class="fi-stat"><b>${stats.vehicles}</b><span>vehicles matched</span></div>
-          <div class="fi-stat fi-stat-muted"><b>${stats.unmatchedRows + stats.noRegoRows + stats.noValueRows + stats.duplicateRows + stats.identityRows}</b><span>rows skipped</span></div>
+          <div class="fi-stat fi-stat-muted"><b>${stats.noValueRows + stats.duplicateRows + stats.identityRows}</b><span>rows skipped</span></div>
         </div>
         ${stats.cardRows ? `<p class="fi-note-skip">${stats.cardRows} row${s(stats.cardRows)} matched by card number, where the rego was blank or wrong: <span class="muted">${esc(stats.cardFixes.slice(0, 8).join(', '))}${stats.cardFixes.length > 8 ? ` +${stats.cardFixes.length - 8} more` : ''}</span></p>` : ''}
         ${stats.minDate ? `<p class="fi-note-skip">Covers <b>${esc(fmtDate(stats.minDate))}</b> to <b>${esc(fmtDate(stats.maxDate))}</b>.</p>` : ''}
         ${stats.fuzzyRows ? `<p class="fi-note-skip">${stats.fuzzyRows} row${stats.fuzzyRows === 1 ? '' : 's'} matched past a look-alike typo (O/0, I/1): <span class="muted">${esc(stats.fuzzy.slice(0, 8).join(', '))}${stats.fuzzy.length > 8 ? ` +${stats.fuzzy.length - 8} more` : ''}</span></p>` : ''}
-        ${stats.unmatchedRows ? `<p class="fi-note-skip">${stats.unmatchedRows} row${s(stats.unmatchedRows)} (${aud2(stats.unmatchedAmount)}) for ${stats.unmatched.length} rego${s(stats.unmatched.length)} not in the fleet: <span class="muted">${esc(stats.unmatched.slice(0, 12).join(', '))}${stats.unmatched.length > 12 ? ` +${stats.unmatched.length - 12} more` : ''}</span></p>` : ''}
-        ${stats.noRegoRows ? `<p class="fi-note-skip">${stats.noRegoRows} row${s(stats.noRegoRows)} (${aud2(stats.noRegoAmount)}) on cards with no registration, usually cards issued to a person rather than a vehicle, skipped.</p>` : ''}
+        ${stats.noRegoRows || stats.unmatchedRows ? `<p class="fi-note-skip"><b>${aud2(stats.noRegoAmount + stats.unmatchedAmount)}</b> imported as <b>unassigned</b> (not tied to a vehicle): counted in total spend and Spend over time, but not in any vehicle’s figures.</p>
+          <ul class="fi-list">
+            ${stats.noRegoRows ? `<li>${stats.noRegoRows} row${s(stats.noRegoRows)} (${aud2(stats.noRegoAmount)}) on cards with no registration, usually cards issued to a person</li>` : ''}
+            ${stats.unmatchedRows ? `<li>${stats.unmatchedRows} row${s(stats.unmatchedRows)} (${aud2(stats.unmatchedAmount)}) for rego${s(stats.unmatched.length)} not in the fleet: <span class="muted">${esc(stats.unmatched.slice(0, 12).join(', '))}${stats.unmatched.length > 12 ? ` +${stats.unmatched.length - 12} more` : ''}</span></li>` : ''}
+          </ul>` : ''}
         ${stats.noValueRows ? `<p class="fi-note-skip muted">${stats.noValueRows} payment${s(stats.noValueRows)} or $0 line${s(stats.noValueRows)} skipped (not spend).</p>` : ''}
         ${stats.duplicateRows ? `<p class="fi-note-skip muted">${stats.duplicateRows} repeated BP receipt${stats.duplicateRows === 1 ? '' : 's'} collapsed so it can’t be counted twice.</p>` : ''}
         ${stats.identityRows ? `<p class="fi-warn">${stats.identityRows} BP transaction${stats.identityRows === 1 ? '' : 's'} had no usable card/date/receipt identity and were skipped.</p>` : ''}
@@ -449,20 +463,32 @@ AD.importFuelData = (function () {
         ${rows.length ? `<p class="fi-note-skip muted">Re-importing the same file is safe — it updates existing rows instead of adding duplicates.${parsed.provider === 'BP' ? ' These receipt IDs are also reserved for the future BP API, so historical PDF rows will be updated rather than added again.' : ''}</p>` : '<p class="fi-warn">Nothing to import with these columns — check the mapping above.</p>'}`;
     }
 
-    async function doImport(container) {
-      const { rows, stats } = build(container);
+    async function doImport(container, vehiclesOnly) {
+      const built = build(container);
+      const stats = built.stats;
+      // Fallback for a database without update-fuel-unassigned.sql: matched rows only.
+      const rows = vehiclesOnly
+        ? built.rows.filter((r) => r.vehicleId).map((r) => { const c = { ...r }; delete c.cardHolder; return c; })
+        : built.rows;
       if (!rows.length) return;
       const btn = container.querySelector('#fi-import');
       btn.disabled = true; btn.textContent = 'Importing…';
       try {
         await AD.store.importFuel(rows);
-        AD.ui.toast(`Imported ${rows.length} fuel transaction${rows.length === 1 ? '' : 's'} across ${stats.vehicles} vehicle${stats.vehicles === 1 ? '' : 's'}.`, 'ok');
+        const unassigned = rows.filter((r) => !r.vehicleId).length;
+        AD.ui.toast(`Imported ${rows.length} fuel transaction${rows.length === 1 ? '' : 's'} across ${stats.vehicles} vehicle${stats.vehicles === 1 ? '' : 's'}${unassigned ? ` (${unassigned} unassigned)` : ''}.`, 'ok');
         close();
         if (onDone) onDone();
       } catch (e) {
         btn.disabled = false; btn.textContent = 'Import';
         const box = container.querySelector('#fi-preview');
         const msg = (e && (e.message || e.details)) || 'Import failed.';
+        if (!vehiclesOnly && /vehicleId|cardHolder|not-null|23502|PGRST204/i.test(msg + ' ' + (e && e.code))) {
+          box.insertAdjacentHTML('afterbegin', `<div class="fi-err">Unassigned fuel can’t be saved yet: run <b>update-fuel-unassigned.sql</b> in Supabase, then import again.
+            <p style="margin:8px 0 0"><button class="btn btn-secondary btn-sm" type="button" id="fi-vehicles-only">Import just the vehicle transactions for now</button></p></div>`);
+          box.querySelector('#fi-vehicles-only').onclick = () => doImport(container, true);
+          return;
+        }
         const friendly = /relation .*fuel_entries.* does not exist|could not find the table/i.test(msg)
           ? 'The fuel table hasn’t been created yet — run create-fuel-entries.sql in Supabase first.'
           : /ON CONFLICT DO UPDATE command cannot affect row a second time/i.test(msg)
