@@ -362,7 +362,8 @@ AD.views['cost-sheet'] = (function () {
     const step = max > 20000 ? 5000 : max > 8000 ? 2000 : max > 2000 ? 500 : max > 400 ? 100 : 20;
     return Math.ceil(max / step) * step;
   }
-  const fmtAxis = (n) => '$' + Math.round(n).toLocaleString('en-AU');
+  // Compact axis labels ($20k, $2.5k) so every gridline can carry one.
+  const fmtAxis = (n) => n >= 1000 ? '$' + (n / 1000).toLocaleString('en-AU', { maximumFractionDigits: 1 }) + 'k' : '$' + Math.round(n).toLocaleString('en-AU');
 
   /** TREND_WEEKS weekly totals ending with (and including) the week on screen. */
   function weeklyPoints(end) {
@@ -438,16 +439,27 @@ AD.views['cost-sheet'] = (function () {
 
     const anyFuel = points.some((p) => p.fuel > 0);
     const anyToll = points.some((p) => p.toll > 0);
-    const top = niceTop(Math.max(...points.map((p) => p.grand), 1) * 1.15);
-    const W = 880, H = 184, padL = 56, padR = 12, padT = 16, padB = 26;
+    // Each series is drawn at its OWN value from $0 (not stacked), so the pink
+    // tolls line is the toll cost, the blue line the fuel cost, and so on. A
+    // thin grey line carries the month's total, and the forecast continues it.
+    // Axis: 4–6 round steps, every gridline labelled.
+    const maxV = Math.max(...points.map((p) => p.grand), 1) * 1.06;
+    const rawStep = maxV / 5;
+    const mag = Math.pow(10, Math.floor(Math.log10(rawStep)));
+    const step = [1, 2, 2.5, 5, 10].map((k) => k * mag).find((s) => s >= rawStep);
+    const top = Math.ceil(maxV / step) * step;
+    const ticks = [];
+    for (let v = 0; v <= top + step / 2; v += step) ticks.push(v);
+    const W = 880, H = 210, padL = 56, padR = 12, padT = 16, padB = 26;
     const plotW = W - padL - padR, plotH = H - padT - padB, n = points.length;
     const x = (i) => padL + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2);
-    const y = (v) => padT + plotH - (Math.min(v, top) / top) * plotH;
-    // coords is the top (grand) line — marks, forecast and dots ride on it.
-    const coords = points.map((p, i) => ({ x: x(i), y: y(p.grand) }));
-    const maintCoords = points.map((p, i) => ({ x: x(i), y: y(p.maint) }));
-    const fuelTopCoords = points.map((p, i) => ({ x: x(i), y: y(p.fuelTop != null ? p.fuelTop : p.grand) })); // maintenance + fuel
-    const plannedCoords = points.map((p, i) => ({ x: x(i), y: y(p.planned) }));
+    const y = (v) => padT + plotH - (Math.max(0, Math.min(v, top)) / top) * plotH;
+    const series = (get) => points.map((p, i) => ({ x: x(i), y: y(get(p) || 0) }));
+    const coords = series((p) => p.grand);            // total — the forecast continues this line
+    const plannedCoords = series((p) => p.planned);
+    const unplannedCoords = series((p) => p.unplanned);
+    const fuelCoords = series((p) => p.fuel);
+    const tollCoords = series((p) => p.toll);
     const clampY = (v) => Math.max(padT, Math.min(padT + plotH, v));
     const spline = (pts) => pts.length < 2 ? `M${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}` : pts.reduce((d, p1, i) => {
       if (i === pts.length - 1) return d;
@@ -461,31 +473,26 @@ AD.views['cost-sheet'] = (function () {
       return `${d} C${c1x.toFixed(1)},${c1y.toFixed(1)} ${c2x.toFixed(1)},${c2y.toFixed(1)} ${p2.x.toFixed(1)},${p2.y.toFixed(1)}`;
     }, `M${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}`);
     const floorY = (padT + plotH).toFixed(1);
+    const areaOf = (c) => `${spline(c)} L${c[c.length - 1].x.toFixed(1)},${floorY} L${c[0].x.toFixed(1)},${floorY} Z`;
 
-    // Separate paths for historical vs forecast so fills and glow can't bleed
-    const histCoords = hasProj ? coords.slice(0, splitIdx + 1) : coords;          // grand (top)
-    const histMaint = hasProj ? maintCoords.slice(0, splitIdx + 1) : maintCoords;  // planned + unplanned
-    const histPlanned = hasProj ? plannedCoords.slice(0, splitIdx + 1) : plannedCoords;
-    const histFuelTop = hasProj ? fuelTopCoords.slice(0, splitIdx + 1) : fuelTopCoords;
-    const histGrandD = spline(histCoords);
-    const histFuelTopD = spline(histFuelTop);
-    const histMaintD = spline(histMaint);
+    // Actuals only (the forecast is drawn separately after NOW).
+    const hist = (c) => (hasProj ? c.slice(0, splitIdx + 1) : c);
+    const histCoords = hist(coords), histPlanned = hist(plannedCoords), histUnplanned = hist(unplannedCoords);
+    const histFuel = hist(fuelCoords), histToll = hist(tollCoords);
+    const histTotalD = spline(histCoords);
     const histPlannedD = spline(histPlanned);
-    const histLineD = histMaintD; // the maintenance total line keeps its amber styling
-    const areaD = `${histPlannedD} L${histPlanned[histPlanned.length - 1].x.toFixed(1)},${floorY} L${histPlanned[0].x.toFixed(1)},${floorY} Z`;
-    const bandD = `${histMaintD} ${spline([...histPlanned].reverse()).replace(/^M/, 'L')} Z`;     // unplanned: planned → maint
-    const fuelBandD = anyFuel ? `${histFuelTopD} ${spline([...histMaint].reverse()).replace(/^M/, 'L')} Z` : ''; // fuel: maint → maint + fuel
-    const tollBandD = anyToll ? `${histGrandD} ${spline([...histFuelTop].reverse()).replace(/^M/, 'L')} Z` : ''; // tolls: maint + fuel → grand
-    // Forecast: standalone zone after NOW — NOT connected to the actuals
+    const histUnplannedD = spline(histUnplanned);
+    const histFuelD = spline(histFuel);
+    const histTollD = spline(histToll);
+    // Forecast: standalone zone after NOW, NOT connected to the actuals.
     const projCoords = hasProj ? coords.slice(splitIdx + 1) : [];
     const projLineD = projCoords.length >= 2 ? spline(projCoords) : (projCoords.length === 1 ? `M${projCoords[0].x.toFixed(1)},${projCoords[0].y.toFixed(1)}` : '');
-    const projAreaD = projCoords.length ? `${projLineD.replace(/^M/, 'M')} L${projCoords[projCoords.length - 1].x.toFixed(1)},${floorY} L${projCoords[0].x.toFixed(1)},${floorY} Z` : '';
-    const gridY = [0, 0.5, 1].map((f) => padT + plotH * (1 - f));
+    const projAreaD = projCoords.length ? `${projLineD} L${projCoords[projCoords.length - 1].x.toFixed(1)},${floorY} L${projCoords[0].x.toFixed(1)},${floorY} Z` : '';
+
     const hline = (gy, cls) => `<line x1="${padL}" y1="${gy.toFixed(1)}" x2="${W - padR}" y2="${gy.toFixed(1)}" class="${cls}"></line>`;
-    const grid = gridY.map((gy) => hline(gy, 'cs-grid')).join('')
-      + [0.25, 0.75].map((f) => hline(padT + plotH * (1 - f), 'cs-grid cs-grid-minor')).join('')
+    const grid = ticks.map((v) => hline(y(v), v === 0 ? 'cs-grid' : 'cs-grid cs-grid-minor')).join('')
       + coords.map((p) => `<line x1="${p.x.toFixed(1)}" y1="${padT}" x2="${p.x.toFixed(1)}" y2="${padT + plotH}" class="cs-grid cs-grid-x"></line>`).join('');
-    const yTicks = [0, top / 2, top].map((v, i) => `<text class="cs-axis-y" x="${padL - 8}" y="${(gridY[i] + 4).toFixed(1)}" text-anchor="end">${fmtAxis(v)}</text>`).join('');
+    const yTicks = ticks.map((v) => `<text class="cs-axis-y" x="${padL - 8}" y="${(y(v) + 4).toFixed(1)}" text-anchor="end">${fmtAxis(v)}</text>`).join('');
 
     // X-axis labels — show the year suffix only at transitions so months don't repeat ambiguously
     let lastYr = '';
@@ -504,10 +511,16 @@ AD.views['cost-sheet'] = (function () {
       ? `<line x1="${nowX}" y1="${padT}" x2="${nowX}" y2="${padT + plotH}" class="cs-now-line"></line>
          <text class="cs-now-label" x="${nowX}" y="${padT - 4}" text-anchor="middle">Now</text>` : '';
 
-    // Each stacked line gets its own hover dot, in its own color, at its own
-    // height — showing what that line is made of plus the running total,
-    // rather than one ball on the top (grand) line standing in for all three.
-    const seriesDots = (seriesCoords, colorVar, tipRow, keep) => seriesCoords.map((c, i) => {
+    // One hover dot per line per period, at that line's own value. The grey
+    // total dot carries the full breakdown for the period.
+    const breakdown = (p) => [
+      ['Planned servicing', L.fmtAUD(p.planned), COLOR_PLANNED],
+      ['Unplanned repairs', L.fmtAUD(p.unplanned), COLOR_UNPLANNED],
+      ...(anyFuel ? [['Fuel', L.fmtAUD(p.fuel), COLOR_FUEL]] : []),
+      ...(anyToll ? [['Tolls', L.fmtAUD(p.toll || 0), COLOR_TOLL]] : []),
+      ['Total', L.fmtAUD(p.grand), 'var(--ink)']
+    ];
+    const seriesDots = (seriesCoords, colorVar, tipRows, keep) => seriesCoords.map((c, i) => {
       const p = points[i];
       if (keep && !keep(p)) return '';
       const isLast = i === splitIdx;
@@ -515,76 +528,65 @@ AD.views['cost-sheet'] = (function () {
       return `<g class="cs-mark${isLast ? ' cs-current' : ''}" style="--i:${i};--cs-line:${colorVar}">
         ${isLast ? `<circle cx="${cx}" cy="${cy}" r="9" class="cs-halo"></circle>` : ''}
         <circle cx="${cx}" cy="${cy}" r="4" class="cs-dot"></circle>
-        <circle cx="${cx}" cy="${cy}" r="10" class="cs-hit" ${V.tipAttr(p.full, [tipRow(p), ['Total', L.fmtAUD(p.grand), 'var(--ink)']])}></circle>
+        <circle cx="${cx}" cy="${cy}" r="10" class="cs-hit" ${V.tipAttr(p.full, tipRows(p))}></circle>
       </g>`;
     }).join('');
-    const plannedDots = seriesDots(histPlanned, COLOR_PLANNED, (p) => ['Planned servicing', L.fmtAUD(p.planned), COLOR_PLANNED]);
-    const maintDots = seriesDots(histMaint, COLOR_UNPLANNED, (p) => ['Unplanned repairs', L.fmtAUD(p.unplanned), COLOR_UNPLANNED]);
-    const fuelDots = anyFuel ? seriesDots(histFuelTop, COLOR_FUEL, (p) => ['Fuel', L.fmtAUD(p.fuel), COLOR_FUEL]) : '';
-    // Toll dots only on months/weeks that have tolls; elsewhere the top line is just fuel.
-    const tollDots = anyToll ? seriesDots(histCoords, COLOR_TOLL, (p) => ['Tolls', L.fmtAUD(p.toll), COLOR_TOLL], (p) => p.toll > 0) : '';
-    const grandDots = fuelDots + tollDots;
+    const one = (label, key, color) => (p) => [[label, L.fmtAUD(p[key] || 0), color], ['Month total', L.fmtAUD(p.grand), 'var(--ink)']];
+    const plannedDots = seriesDots(histPlanned, COLOR_PLANNED, one('Planned servicing', 'planned', COLOR_PLANNED));
+    const unplannedDots = seriesDots(histUnplanned, COLOR_UNPLANNED, one('Unplanned repairs', 'unplanned', COLOR_UNPLANNED));
+    const fuelDots = anyFuel ? seriesDots(histFuel, COLOR_FUEL, one('Fuel', 'fuel', COLOR_FUEL)) : '';
+    // Toll dots only on periods that have tolls (no imported statement = no dot).
+    const tollDots = anyToll ? seriesDots(histToll, COLOR_TOLL, one('Tolls', 'toll', COLOR_TOLL), (p) => p.toll > 0) : '';
+    const totalDots = seriesDots(histCoords, 'var(--ink-2)', breakdown);
     const projMarks = projCoords.map((c, j) => {
       const p = points[splitIdx + 1 + j];
       const cx = c.x.toFixed(1), cy = c.y.toFixed(1);
       return `<g class="cs-mark cs-proj-mark" style="--i:${splitIdx + 1 + j}">
         <circle cx="${cx}" cy="${cy}" r="4" class="cs-dot"></circle>
-        <circle cx="${cx}" cy="${cy}" r="16" class="cs-hit" ${V.tipAttr(p.full, [['Forecast', L.fmtAUD(p.total), 'var(--violet)']])}></circle>
+        <circle cx="${cx}" cy="${cy}" r="16" class="cs-hit" ${V.tipAttr(p.full, [['Forecast total', L.fmtAUD(p.total), 'var(--violet)']])}></circle>
       </g>`;
     }).join('');
-    const marks = plannedDots + maintDots + grandDots + projMarks;
-    const ariaDesc = points.map((p) => `${p.full}: ${L.fmtAUD(p.grand)} total, ${L.fmtAUD(p.fuel)} fuel, ${L.fmtAUD(p.toll || 0)} tolls, ${L.fmtAUD(p.unplanned)} unplanned`).join(', ');
+    const marks = plannedDots + unplannedDots + fuelDots + tollDots + totalDots + projMarks;
+    const ariaDesc = points.map((p) => `${p.full}: ${L.fmtAUD(p.grand)} total, ${L.fmtAUD(p.fuel)} fuel, ${L.fmtAUD(p.toll || 0)} tolls, ${L.fmtAUD(p.planned)} planned, ${L.fmtAUD(p.unplanned)} unplanned`).join(', ');
 
-    // The pink toll line is clipped to the stretches that actually have tolls
-    // (from the point before to the point after), and drawn UNDER the blue fuel
-    // line. Where there are no tolls the two lines coincide, and drawing pink
-    // across them made months without tolls look like toll months.
+    // Tolls only exist where a Linkt statement is imported: the pink line and
+    // its fill are clipped to those stretches, so periods with no statement
+    // don't show a pink line lying at $0.
     const tollRuns = [];
     if (anyToll) {
-      const hasT = histCoords.map((_, i) => points[i].toll > 0);
-      for (let i = 0; i < histCoords.length - 1; i++) {
-        if (!(hasT[i] || hasT[i + 1])) continue;
+      const hasT = histToll.map((_, i) => points[i].toll > 0);
+      // Join only neighbouring periods that BOTH have tolls: a period with no
+      // statement imported is missing data, not a $0 month, so the line stops.
+      for (let i = 0; i < histToll.length - 1; i++) {
+        if (!(hasT[i] && hasT[i + 1])) continue;
         const last = tollRuns[tollRuns.length - 1];
         if (last && last.to === i) last.to = i + 1; else tollRuns.push({ from: i, to: i + 1 });
       }
-      if (histCoords.length === 1 && hasT[0]) tollRuns.push({ from: 0, to: 0 });
+      if (histToll.length === 1 && hasT[0]) tollRuns.push({ from: 0, to: 0 });
     }
     const tollClip = tollRuns.map((r) => {
-      const x1 = histCoords[r.from].x - 1, x2 = histCoords[r.to].x + 1;
+      const x1 = histToll[r.from].x - 1, x2 = histToll[r.to].x + 1;
       return `<rect x="${x1.toFixed(1)}" y="0" width="${Math.max(2, x2 - x1).toFixed(1)}" height="${H}"></rect>`;
     }).join('');
-    const fuelLayer = (tollBandD
-      ? `<clipPath id="cs-toll-clip">${tollClip}</clipPath>
-         <path d="${tollBandD}" class="cs-band-toll"></path>
-         <path d="${histGrandD}" class="cs-line-toll" pathLength="1" clip-path="url(#cs-toll-clip)"></path>`
-      : '')
-      + (fuelBandD
-      ? `<path d="${fuelBandD}" class="cs-band-fuel"></path>
-         <path d="${histFuelTopD}" class="cs-line-grand" pathLength="1"></path>`
-      : '');
-    let svgBody;
-    if (hasProj) {
-      svgBody = `${grid}
-          <path d="${areaD}" class="cs-area"></path>
-          <path d="${bandD}" class="cs-band"></path>
-          ${fuelLayer}
-          <path d="${histPlannedD}" class="cs-line-planned" pathLength="1"></path>
-          <path d="${histLineD}" class="cs-line-path" pathLength="1"></path>
-          <g class="cs-proj-g">
+
+    // Back to front: fills, then the total, then each series line.
+    const layers = `
+          ${anyFuel ? `<path d="${areaOf(histFuel)}" class="cs-band-fuel"></path>` : ''}
+          ${anyToll ? `<clipPath id="cs-toll-clip">${tollClip}</clipPath>
+          <path d="${areaOf(histToll)}" class="cs-band-toll" clip-path="url(#cs-toll-clip)"></path>` : ''}
+          <path d="${histTotalD}" class="cs-line-total" pathLength="1"></path>
+          ${anyFuel ? `<path d="${histFuelD}" class="cs-line-grand" pathLength="1"></path>` : ''}
+          ${anyToll ? `<path d="${histTollD}" class="cs-line-toll" pathLength="1" clip-path="url(#cs-toll-clip)"></path>` : ''}
+          <path d="${histUnplannedD}" class="cs-line-path" pathLength="1"></path>
+          <path d="${histPlannedD}" class="cs-line-planned" pathLength="1"></path>`;
+    const svgBody = `${grid}
+          ${layers}
+          ${hasProj ? `<g class="cs-proj-g">
             ${projAreaD ? `<path d="${projAreaD}" class="cs-proj-area"></path>` : ''}
             ${projLineD ? `<path d="${projLineD}" class="cs-line-path" pathLength="1"></path>` : ''}
           </g>
-          ${nowMarker}
+          ${nowMarker}` : ''}
           ${yTicks}${xTicks}${marks}`;
-    } else {
-      svgBody = `${grid}
-          <path d="${areaD}" class="cs-area"></path>
-          <path d="${bandD}" class="cs-band"></path>
-          ${fuelLayer}
-          <path d="${histPlannedD}" class="cs-line-planned" pathLength="1"></path>
-          <path d="${histLineD}" class="cs-line-path" pathLength="1"></path>
-          ${yTicks}${xTicks}${marks}`;
-    }
 
     const legendItems = [
       { label: 'Planned servicing', color: COLOR_PLANNED },
@@ -592,7 +594,8 @@ AD.views['cost-sheet'] = (function () {
     ];
     if (anyFuel) legendItems.push({ label: 'Fuel (imported)', color: COLOR_FUEL });
     if (anyToll) legendItems.push({ label: 'Tolls (Linkt)', color: COLOR_TOLL });
-    if (hasProj) legendItems.push({ label: 'Forecast', color: 'var(--violet)' });
+    legendItems.push({ label: 'Total', color: 'var(--ink-2)' });
+    if (hasProj) legendItems.push({ label: 'Forecast (total)', color: 'var(--violet)' });
 
     return `<figure class="viz-card">
       <figcaption><h3>Spend over time</h3><span class="viz-sub">${isMonthly ? TREND_MONTHS + ' months' : TREND_WEEKS + ' weeks'} to ${T.fmtKey(end)}${hasProj ? ' + ' + PROJ_MONTHS + '-month forecast' : ''}</span></figcaption>
@@ -658,11 +661,9 @@ AD.views['cost-sheet'] = (function () {
           ${svgBody}
         </svg>
       </div>
-      ${anyFuel
-        ? V.table([isMonthly ? 'Month' : 'Week starting', 'Planned', 'Unplanned', 'Fuel', 'Total'],
-          points.map((p) => [p.full, L.fmtAUD(p.planned), L.fmtAUD(p.unplanned), L.fmtAUD(p.fuel), L.fmtAUD(p.grand)]))
-        : V.table([isMonthly ? 'Month' : 'Week starting', 'Planned', 'Unplanned', 'Total'],
-          points.map((p) => [p.full, L.fmtAUD(p.planned), L.fmtAUD(p.unplanned), L.fmtAUD(p.total)]))}
+      ${V.table([isMonthly ? 'Month' : 'Week starting', 'Planned', 'Unplanned'].concat(anyFuel ? ['Fuel'] : [], anyToll ? ['Tolls'] : [], ['Total']),
+        points.map((p) => [p.full, L.fmtAUD(p.planned), L.fmtAUD(p.unplanned)]
+          .concat(anyFuel ? [L.fmtAUD(p.fuel)] : [], anyToll ? [L.fmtAUD(p.toll || 0)] : [], [L.fmtAUD(p.grand)])))}
     </figure>`;
   }
 

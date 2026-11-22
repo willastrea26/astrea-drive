@@ -3379,3 +3379,7 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 .cs-line-toll { fill: none; stroke: #f472b6; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; opacity: .95; }
 .anim-in .cs-band-toll { animation: fade .8s cubic-bezier(.22,.61,.36,1) .5s backwards; }
 .anim-in .cs-line-toll { stroke-dasharray: 1; animation: draw-line 1.2s cubic-bezier(.22,.61,.36,1) backwards; }
+
+/* Spend over time — the month's total, a quiet dashed line the forecast continues */
+.cs-line-total { fill: none; stroke: var(--ink-2); stroke-width: 1.4; stroke-dasharray: 4 3; opacity: .7; }
+.anim-in .cs-line-total { animation: fade .8s cubic-bezier(.22,.61,.36,1) .3s backwards; }
