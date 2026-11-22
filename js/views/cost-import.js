@@ -325,8 +325,30 @@ AD.importFuelData = (function () {
     function build(container) {
       const m = readMapping(container);
       const { exact, canon } = regoMaps();
-      const rows = [], unmatched = new Set(), fuzzy = new Set();
-      let blankRows = 0, unmatchedRows = 0, fuzzyRows = 0, duplicateRows = 0, identityRows = 0, totalCost = 0, totalLitres = 0;
+      const rows = [], unmatched = new Set(), fuzzy = new Set(), cardFixes = new Set();
+      let noValueRows = 0, noRegoRows = 0, noRegoAmount = 0, unmatchedRows = 0, unmatchedAmount = 0, cardRows = 0,
+        fuzzyRows = 0, duplicateRows = 0, identityRows = 0, totalCost = 0, totalLitres = 0;
+
+      // Card-number fallback. A WEX card normally belongs to one vehicle, so when
+      // a row's rego is blank or not in the fleet (e.g. a stray "5"), the vehicle
+      // the same card is recorded against on its OTHER rows in this file is used.
+      // Only when that card points at exactly one fleet vehicle; never a guess.
+      const cardKey = (c) => String(c == null ? '' : c).replace(/\D/g, '');
+      const cardVehicles = new Map();
+      if (m.card >= 0) {
+        parsed.rows.forEach((r) => {
+          const ck = cardKey(r[m.card]), rg = normRego(r[m.rego]);
+          if (!ck || !rg) return;
+          const cv = exact.get(rg) || canon.get(canonRego(rg));
+          if (!cv) return;
+          if (!cardVehicles.has(ck)) cardVehicles.set(ck, new Set());
+          cardVehicles.get(ck).add(cv);
+        });
+      }
+      const vehicleByCard = (r) => {
+        const set = m.card >= 0 ? cardVehicles.get(cardKey(r[m.card])) : null;
+        return set && set.size === 1 ? [...set][0] : null;
+      };
       let minDate = '', maxDate = '';
       const vehicles = new Set();
       // Some rows are genuinely identical on every exported field — e.g. two
@@ -338,16 +360,27 @@ AD.importFuelData = (function () {
       // 3rd... get a numbered suffix, so each stays its own saved row.
       const seenIds = new Map();
       parsed.rows.forEach((r) => {
-        const rego = normRego(r[m.rego]);
+        const rawRego = String(r[m.rego] || '').trim();
+        const rego = normRego(rawRego);
         const cost = toNum(r[m.cost]) || 0;
         const litres = m.litres >= 0 ? toNum(r[m.litres]) : null;
-        if (!rego || (cost <= 0 && !(litres > 0))) { blankRows++; return; }
-        let v = exact.get(rego);
-        if (!v) {
+        // Payments (negative) and $0 lines aren't spend.
+        if (cost <= 0 && !(litres > 0)) { noValueRows++; return; }
+        let v = rego ? exact.get(rego) : null;
+        if (!v && rego) {
           const cv = canon.get(canonRego(rego)); // look-alike (O/0, I/1…) fallback, unambiguous only
-          if (cv) { v = cv; fuzzyRows++; fuzzy.add(`${String(r[m.rego] || '').trim()} → ${v.rego}`); }
+          if (cv) { v = cv; fuzzyRows++; fuzzy.add(`${rawRego} → ${v.rego}`); }
         }
-        if (!v) { unmatched.add(rego); unmatchedRows++; return; }
+        let viaCard = false;
+        if (!v) {
+          const cv = vehicleByCard(r);
+          if (cv) { v = cv; viaCard = true; cardRows++; cardFixes.add(`${rawRego || '(blank)'} → ${cv.rego} (card …${cardKey(r[m.card]).slice(-4)})`); }
+        }
+        if (!v) {
+          if (!rego) { noRegoRows++; noRegoAmount += cost; }
+          else { unmatched.add(rego); unmatchedRows++; unmatchedAmount += cost; }
+          return;
+        }
         const date = m.date >= 0 ? toKey(r[m.date]) : '';
         const product = m.product >= 0 ? String(r[m.product] || '').trim() : '';
         const brand = m.brand >= 0 ? String(r[m.brand] || '').trim() : '';
@@ -362,13 +395,15 @@ AD.importFuelData = (function () {
         } else {
           // Preserve the established WEX identity so re-importing a file that
           // was loaded before PDF support still updates, rather than duplicates.
-          const baseId = hashId([rego, date, cost, litres || '', product].join('|'));
+          // A card-matched row is keyed on the vehicle's real rego, so it keeps the
+          // same id if WEX later corrects the rego on the card.
+          const baseId = hashId([viaCard ? normRego(v.rego) : rego, date, cost, litres || '', product].join('|'));
           const n = (seenIds.get(baseId) || 0) + 1;
           seenIds.set(baseId, n);
           id = n === 1 ? baseId : `${baseId}-${n}`;
         }
         const source = parsed.provider === 'BP' ? `BP PDF · ${fileName}` : fileName;
-        rows.push({ id, vehicleId: v.id, rego: String(r[m.rego] || '').trim(), date: date || null, litres: litres != null ? litres : null, cost, product, brand: brand || parsed.provider || '', docket, source });
+        rows.push({ id, vehicleId: v.id, rego: viaCard ? v.rego : rawRego, date: date || null, litres: litres != null ? litres : null, cost, product, brand: brand || parsed.provider || '', docket, source });
         totalCost += cost; totalLitres += litres || 0; vehicles.add(v.id);
         if (date) { if (!minDate || date < minDate) minDate = date; if (!maxDate || date > maxDate) maxDate = date; }
       });
@@ -378,7 +413,7 @@ AD.importFuelData = (function () {
       const noFuel = AD.store.all('vehicles')
         .filter((x) => !x.hired && !seenVehicles.has(x.id))
         .map((x) => x.id).sort();
-      return { rows, stats: { unmatched: [...unmatched], unmatchedRows, blankRows, duplicateRows, identityRows, fuzzy: [...fuzzy], fuzzyRows, totalCost, totalLitres, vehicles: vehicles.size, totalRows: parsed.rows.length, minDate, maxDate, noFuel } };
+      return { rows, stats: { unmatched: [...unmatched], unmatchedRows, unmatchedAmount, noValueRows, noRegoRows, noRegoAmount, cardRows, cardFixes: [...cardFixes], duplicateRows, identityRows, fuzzy: [...fuzzy], fuzzyRows, totalCost, totalLitres, vehicles: vehicles.size, totalRows: parsed.rows.length, minDate, maxDate, noFuel } };
     }
 
     function renderPreview(container) {
@@ -393,17 +428,21 @@ AD.importFuelData = (function () {
       const { rows, stats } = build(container);
       btn.disabled = rows.length === 0;
       const aud = (n) => n.toLocaleString('en-AU', { style: 'currency', currency: 'AUD', maximumFractionDigits: 0 });
+      const aud2 = (n) => n.toLocaleString('en-AU', { style: 'currency', currency: 'AUD' });
+      const s = (n) => (n === 1 ? '' : 's');
       box.innerHTML = `
         <div class="fi-stats">
           <div class="fi-stat fi-stat-good"><b>${rows.length}</b><span>transactions to import</span></div>
           <div class="fi-stat fi-stat-mint"><b>${aud(stats.totalCost)}</b><span>total spend</span></div>
           <div class="fi-stat"><b>${stats.vehicles}</b><span>vehicles matched</span></div>
-          <div class="fi-stat fi-stat-muted"><b>${stats.unmatchedRows + stats.blankRows + stats.duplicateRows + stats.identityRows}</b><span>rows skipped</span></div>
+          <div class="fi-stat fi-stat-muted"><b>${stats.unmatchedRows + stats.noRegoRows + stats.noValueRows + stats.duplicateRows + stats.identityRows}</b><span>rows skipped</span></div>
         </div>
+        ${stats.cardRows ? `<p class="fi-note-skip">${stats.cardRows} row${s(stats.cardRows)} matched by card number, where the rego was blank or wrong: <span class="muted">${esc(stats.cardFixes.slice(0, 8).join(', '))}${stats.cardFixes.length > 8 ? ` +${stats.cardFixes.length - 8} more` : ''}</span></p>` : ''}
         ${stats.minDate ? `<p class="fi-note-skip">Covers <b>${esc(fmtDate(stats.minDate))}</b> to <b>${esc(fmtDate(stats.maxDate))}</b>.</p>` : ''}
         ${stats.fuzzyRows ? `<p class="fi-note-skip">${stats.fuzzyRows} row${stats.fuzzyRows === 1 ? '' : 's'} matched past a look-alike typo (O/0, I/1): <span class="muted">${esc(stats.fuzzy.slice(0, 8).join(', '))}${stats.fuzzy.length > 8 ? ` +${stats.fuzzy.length - 8} more` : ''}</span></p>` : ''}
-        ${stats.unmatchedRows ? `<p class="fi-note-skip">${stats.unmatchedRows} row${stats.unmatchedRows === 1 ? '' : 's'} for ${stats.unmatched.length} rego${stats.unmatched.length === 1 ? '' : 's'} not in the fleet: <span class="muted">${esc(stats.unmatched.slice(0, 12).join(', '))}${stats.unmatched.length > 12 ? ` +${stats.unmatched.length - 12} more` : ''}</span></p>` : ''}
-        ${stats.blankRows ? `<p class="fi-note-skip muted">${stats.blankRows} row${stats.blankRows === 1 ? '' : 's'} with no fuel or cost (e.g. $0 lines) skipped.</p>` : ''}
+        ${stats.unmatchedRows ? `<p class="fi-note-skip">${stats.unmatchedRows} row${s(stats.unmatchedRows)} (${aud2(stats.unmatchedAmount)}) for ${stats.unmatched.length} rego${s(stats.unmatched.length)} not in the fleet: <span class="muted">${esc(stats.unmatched.slice(0, 12).join(', '))}${stats.unmatched.length > 12 ? ` +${stats.unmatched.length - 12} more` : ''}</span></p>` : ''}
+        ${stats.noRegoRows ? `<p class="fi-note-skip">${stats.noRegoRows} row${s(stats.noRegoRows)} (${aud2(stats.noRegoAmount)}) on cards with no registration, usually cards issued to a person rather than a vehicle, skipped.</p>` : ''}
+        ${stats.noValueRows ? `<p class="fi-note-skip muted">${stats.noValueRows} payment${s(stats.noValueRows)} or $0 line${s(stats.noValueRows)} skipped (not spend).</p>` : ''}
         ${stats.duplicateRows ? `<p class="fi-note-skip muted">${stats.duplicateRows} repeated BP receipt${stats.duplicateRows === 1 ? '' : 's'} collapsed so it can’t be counted twice.</p>` : ''}
         ${stats.identityRows ? `<p class="fi-warn">${stats.identityRows} BP transaction${stats.identityRows === 1 ? '' : 's'} had no usable card/date/receipt identity and were skipped.</p>` : ''}
         ${stats.noFuel.length ? `<details class="fi-no-fuel"><summary>${stats.noFuel.length} fleet vehicle${stats.noFuel.length === 1 ? '' : 's'} with no fuel in this file</summary><p class="muted">${esc(stats.noFuel.join(', '))}</p></details>` : ''}
