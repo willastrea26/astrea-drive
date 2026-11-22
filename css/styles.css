@@ -3383,3 +3383,11 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 /* Spend over time — the month's total, a quiet dashed line the forecast continues */
 .cs-line-total { fill: none; stroke: var(--ink-2); stroke-width: 1.4; stroke-dasharray: 4 3; opacity: .7; }
 .anim-in .cs-line-total { animation: fade .8s cubic-bezier(.22,.61,.36,1) .3s backwards; }
+
+/* Spend over time — Breakdown / Total switch, and the red Total view */
+.cs-trend-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.cs-trend-controls .seg { margin-bottom: 0; }
+.cs-area-total { fill: url(#cs-total-grad); stroke: none; }
+.cs-line-total-red { fill: none; stroke: var(--red); stroke-width: 2.4; stroke-linejoin: round; stroke-linecap: round; filter: url(#cs-glow-red); }
+.anim-in .cs-area-total { animation: fade .8s cubic-bezier(.22,.61,.36,1) .45s backwards; }
+.anim-in .cs-line-total-red { stroke-dasharray: 1; animation: draw-line 1.2s cubic-bezier(.22,.61,.36,1) backwards; }

@@ -20,7 +20,7 @@ AD.views['cost-sheet'] = (function () {
   const PROJ_MONTHS = 6;  // months to project forward from current
   const MIN_USAGE_DAYS = 14;    // days of GPS readings before a vehicle is shown — the stacked bar shows a one-off repair for what it is
   const THIN_USAGE_DAYS = 60;   // below this, the rate is shown but flagged "Thin data"
-  let root = null, start = '', end = '', scope = 'year', period = 'month', usageMode = 'km';
+  let root = null, start = '', end = '', scope = 'year', period = 'month', usageMode = 'km', trendView = 'split';   // trendView: Spend over time as 'split' (each cost) or 'total'
   const PROJ_STORE_KEY = 'ad-cost-proj-overrides';
   let projOverrides = (() => { try { const v = JSON.parse(localStorage.getItem(PROJ_STORE_KEY)) || {}; /* migrate old {planned,unplanned} format */ for (const k of Object.keys(v)) { if (typeof v[k] === 'object') v[k] = (v[k].planned || 0) + (v[k].unplanned || 0); } return v; } catch { return {}; } })();
   function saveOverrides() { try { localStorage.setItem(PROJ_STORE_KEY, JSON.stringify(projOverrides)); } catch {} }
@@ -168,6 +168,7 @@ AD.views['cost-sheet'] = (function () {
     start = periodStart(scope, anchor);
     period = params.period === 'week' ? 'week' : 'month';
     usageMode = params.use === 'hr' ? 'hr' : 'km';
+    trendView = params.view === 'total' ? 'total' : 'split';
     fresh = true;
     draw();
   }
@@ -284,6 +285,7 @@ AD.views['cost-sheet'] = (function () {
     el.querySelector('#w-jump').onchange = (e) => { if (e.target.value) go(periodStart(scope, e.target.value)); };
     el.querySelectorAll('[data-scope]').forEach((b) => (b.onclick = () => setScope(b.dataset.scope)));
     el.querySelectorAll('[data-period]').forEach((b) => (b.onclick = () => setPeriod(b.dataset.period)));
+    el.querySelectorAll('[data-trendview]').forEach((b) => (b.onclick = () => { if (b.dataset.trendview === trendView) return; trendView = b.dataset.trendview; fresh = true; setParams(); draw(); }));
     el.querySelectorAll('[data-use]').forEach((b) => (b.onclick = () => { if (b.dataset.use === usageMode) return; usageMode = b.dataset.use; setParams(); draw(); }));
     bindTollAssign(el);
     bindProjectionInputs();
@@ -314,7 +316,7 @@ AD.views['cost-sheet'] = (function () {
   }
 
   function setParams() {
-    AD.setParams({ week: start === periodStart(scope, T.todayKey()) ? '' : start, period: period === 'month' ? '' : period, scope: scope === 'year' ? '' : scope, use: usageMode === 'km' ? '' : usageMode });
+    AD.setParams({ week: start === periodStart(scope, T.todayKey()) ? '' : start, period: period === 'month' ? '' : period, scope: scope === 'year' ? '' : scope, use: usageMode === 'km' ? '' : usageMode, view: trendView === 'split' ? '' : trendView });
   }
 
   /** One row per calendar month over the trailing year, each bar split planned against unplanned. */
@@ -537,7 +539,11 @@ AD.views['cost-sheet'] = (function () {
     const fuelDots = anyFuel ? seriesDots(histFuel, COLOR_FUEL, one('Fuel', 'fuel', COLOR_FUEL)) : '';
     // Toll dots only on periods that have tolls (no imported statement = no dot).
     const tollDots = anyToll ? seriesDots(histToll, COLOR_TOLL, one('Tolls', 'toll', COLOR_TOLL), (p) => p.toll > 0) : '';
-    const totalDots = seriesDots(histCoords, 'var(--ink-2)', breakdown);
+    // Two views (switch above the chart): 'split' draws each cost as its own
+    // line; 'total' draws one red total-spend line. Either way the hover shows
+    // what the period is made of.
+    const showTotal = trendView === 'total';
+    const totalDots = showTotal ? seriesDots(histCoords, 'var(--red)', breakdown) : '';
     const projMarks = projCoords.map((c, j) => {
       const p = points[splitIdx + 1 + j];
       const cx = c.x.toFixed(1), cy = c.y.toFixed(1);
@@ -546,7 +552,7 @@ AD.views['cost-sheet'] = (function () {
         <circle cx="${cx}" cy="${cy}" r="16" class="cs-hit" ${V.tipAttr(p.full, [['Forecast total', L.fmtAUD(p.total), 'var(--violet)']])}></circle>
       </g>`;
     }).join('');
-    const marks = plannedDots + unplannedDots + fuelDots + tollDots + totalDots + projMarks;
+    const marks = (showTotal ? totalDots : plannedDots + unplannedDots + fuelDots + tollDots) + projMarks;
     const ariaDesc = points.map((p) => `${p.full}: ${L.fmtAUD(p.grand)} total, ${L.fmtAUD(p.fuel)} fuel, ${L.fmtAUD(p.toll || 0)} tolls, ${L.fmtAUD(p.planned)} planned, ${L.fmtAUD(p.unplanned)} unplanned`).join(', ');
 
     // Tolls only exist where a Linkt statement is imported: the pink line and
@@ -569,12 +575,14 @@ AD.views['cost-sheet'] = (function () {
       return `<rect x="${x1.toFixed(1)}" y="0" width="${Math.max(2, x2 - x1).toFixed(1)}" height="${H}"></rect>`;
     }).join('');
 
-    // Back to front: fills, then the total, then each series line.
-    const layers = `
+    // Back to front: fills, then each series line (or, in the Total view, the
+    // single red total line and its fill).
+    const layers = showTotal ? `
+          <path d="${areaOf(histCoords)}" class="cs-area-total"></path>
+          <path d="${histTotalD}" class="cs-line-total-red" pathLength="1"></path>` : `
           ${anyFuel ? `<path d="${areaOf(histFuel)}" class="cs-band-fuel"></path>` : ''}
           ${anyToll ? `<clipPath id="cs-toll-clip">${tollClip}</clipPath>
           <path d="${areaOf(histToll)}" class="cs-band-toll" clip-path="url(#cs-toll-clip)"></path>` : ''}
-          <path d="${histTotalD}" class="cs-line-total" pathLength="1"></path>
           ${anyFuel ? `<path d="${histFuelD}" class="cs-line-grand" pathLength="1"></path>` : ''}
           ${anyToll ? `<path d="${histTollD}" class="cs-line-toll" pathLength="1" clip-path="url(#cs-toll-clip)"></path>` : ''}
           <path d="${histUnplannedD}" class="cs-line-path" pathLength="1"></path>
@@ -588,20 +596,25 @@ AD.views['cost-sheet'] = (function () {
           ${nowMarker}` : ''}
           ${yTicks}${xTicks}${marks}`;
 
-    const legendItems = [
+    const legendItems = showTotal ? [{ label: 'Total spend', color: 'var(--red)' }] : [
       { label: 'Planned servicing', color: COLOR_PLANNED },
       { label: 'Unplanned repairs', color: COLOR_UNPLANNED }
     ];
-    if (anyFuel) legendItems.push({ label: 'Fuel (imported)', color: COLOR_FUEL });
-    if (anyToll) legendItems.push({ label: 'Tolls (Linkt)', color: COLOR_TOLL });
-    legendItems.push({ label: 'Total', color: 'var(--ink-2)' });
+    if (!showTotal && anyFuel) legendItems.push({ label: 'Fuel (imported)', color: COLOR_FUEL });
+    if (!showTotal && anyToll) legendItems.push({ label: 'Tolls (Linkt)', color: COLOR_TOLL });
     if (hasProj) legendItems.push({ label: 'Forecast (total)', color: 'var(--violet)' });
 
     return `<figure class="viz-card">
       <figcaption><h3>Spend over time</h3><span class="viz-sub">${isMonthly ? TREND_MONTHS + ' months' : TREND_WEEKS + ' weeks'} to ${T.fmtKey(end)}${hasProj ? ' + ' + PROJ_MONTHS + '-month forecast' : ''}</span></figcaption>
-      <div class="seg cs-period" role="group" aria-label="Chart period">
-        <button type="button" data-period="week" class="${period === 'week' ? 'on' : ''}">Weekly</button>
-        <button type="button" data-period="month" class="${period === 'month' ? 'on' : ''}">Monthly</button>
+      <div class="cs-trend-controls">
+        <div class="seg cs-period" role="group" aria-label="Chart period">
+          <button type="button" data-period="week" class="${period === 'week' ? 'on' : ''}">Weekly</button>
+          <button type="button" data-period="month" class="${period === 'month' ? 'on' : ''}">Monthly</button>
+        </div>
+        <div class="seg cs-period" role="group" aria-label="Show">
+          <button type="button" data-trendview="split" class="${showTotal ? '' : 'on'}">Breakdown</button>
+          <button type="button" data-trendview="total" class="${showTotal ? 'on' : ''}">Total</button>
+        </div>
       </div>
       ${V.legend(legendItems, { counts: false })}
       <div class="cs-line-wrap">
@@ -622,6 +635,17 @@ AD.views['cost-sheet'] = (function () {
               <stop offset="60%" style="stop-color:var(--cs-blue);stop-opacity:.14"></stop>
               <stop offset="100%" style="stop-color:var(--cs-blue);stop-opacity:.04"></stop>
             </linearGradient>
+            <linearGradient id="cs-total-grad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" style="stop-color:var(--red);stop-opacity:.32"></stop>
+              <stop offset="60%" style="stop-color:var(--red);stop-opacity:.12"></stop>
+              <stop offset="100%" style="stop-color:var(--red);stop-opacity:.02"></stop>
+            </linearGradient>
+            <filter id="cs-glow-red" filterUnits="userSpaceOnUse" x="0" y="0" width="${W}" height="${H}">
+              <feGaussianBlur in="SourceGraphic" stdDeviation="2.5" result="blur"/>
+              <feFlood flood-color="var(--red)" flood-opacity=".45"/>
+              <feComposite in2="blur" operator="in"/>
+              <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
             <linearGradient id="cs-band-toll-grad" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" style="stop-color:${COLOR_TOLL};stop-opacity:.34"></stop>
               <stop offset="60%" style="stop-color:${COLOR_TOLL};stop-opacity:.14"></stop>
