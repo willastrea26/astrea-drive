@@ -30,6 +30,13 @@ AD.views['cost-sheet'] = (function () {
   let fresh = true;
 
   const mondayOf = (key) => T.addDays(key, -T.dayOfWeek(key));
+  /**
+   * The last day the charts draw as actual spend: the period's end, but never
+   * past today. On the Year view the period ends 31 December, and drawing the
+   * months after today as real $0 months dragged the line to the floor and put
+   * "Now" on a month that hasn't happened; those months belong to the forecast.
+   */
+  const chartEnd = () => (end && end < T.todayKey() ? end : T.todayKey());
 
   /** The start of the week/month/year containing `key`, for whichever scope is on screen. */
   function periodStart(sc, key) {
@@ -189,7 +196,7 @@ AD.views['cost-sheet'] = (function () {
 
     // Projected rest-of-year spend for the KPI — not meaningful once you're
     // already looking at a whole year, so it only appears in week/month view.
-    const projForKpi = scope === 'year' ? [] : projectedMonths(end);
+    const projForKpi = scope === 'year' ? [] : projectedMonths(chartEnd());
     const curYear = T.parseKey(end).y;
     const restOfYearMonths = projForKpi.filter(p => { const yr = parseInt(p.key.split(' ')[1]); return yr === curYear; });
     const projRestTotal = restOfYearMonths.reduce((n, p) => n + p.total, 0);
@@ -228,10 +235,10 @@ AD.views['cost-sheet'] = (function () {
         ${restOfYearMonths.length ? kpi('Projected to year-end', L.fmtAUD(projRestTotal), `<small class="cs-delta">${restOfYearMonths.length} month${restOfYearMonths.length === 1 ? '' : 's'} remaining · ${L.fmtAUD(projMonthAvg)}/mo avg</small>`) : ''}
       </div>
 
-      ${trend(end)}
+      ${trend(chartEnd())}
 
       <div class="cs-pair">
-        ${months(end)}
+        ${months(chartEnd())}
         ${movers(now, base)}
       </div>
 
@@ -245,7 +252,7 @@ AD.views['cost-sheet'] = (function () {
 
       <p class="section-foot muted small">Spend is recorded services plus resolved defects, counted on the day the service was recorded or the defect was resolved; imported fuel-card spend is shown as its own band on Spend over time, folded into Cost vs usage, and broken out on its own in Fuel cost per km. Planned is scheduled servicing; unplanned is a defect repair. The KPIs above cover servicing, repairs and fuel for the ${cfg.label} on screen, against the average of the ${cfg.baselineN} ${cfg.baselineN === 1 ? cfg.label : cfg.plural} before. Running cost divides a vehicle's spend by the distance or hours covered between its first and last service in the window, so it needs at least two services to show a rate.</p>
 
-      ${projection(end)}`;
+      ${projection(chartEnd())}`;
 
     detailsRestore(el, openDetails);
 
@@ -355,11 +362,12 @@ AD.views['cost-sheet'] = (function () {
       const key = dt.toISOString().slice(0, 7);
       const rows = rowsForMonth(key);
       const maint = sum(rows), fuel = fuelForMonth(key);
+      const toDate = key === T.todayKey().slice(0, 7);
       return {
         total: maint, maint, fuel, grand: maint + fuel, planned: sumKind(rows, PLANNED), unplanned: sumKind(rows, UNPLANNED),
         label: T.MONTHS[dt.getUTCMonth()].slice(0, 3),
         short: `${T.MONTHS[dt.getUTCMonth()].slice(0, 3)} ${String(dt.getUTCFullYear()).slice(2)}`,
-        full: `${T.MONTHS[dt.getUTCMonth()]} ${dt.getUTCFullYear()}`
+        full: `${T.MONTHS[dt.getUTCMonth()]} ${dt.getUTCFullYear()}${toDate ? ' (to date)' : ''}`
       };
     });
   }
@@ -367,8 +375,11 @@ AD.views['cost-sheet'] = (function () {
   /** Projected future months — one flat forecast value per month. */
   function projectedMonths(end) {
     const { y, m } = T.parseKey(end);
+    // Average the last three COMPLETE months: the month still running is only
+    // partly in, and would pull the forecast down.
+    const skip = end.slice(0, 7) === T.todayKey().slice(0, 7) ? 1 : 0;
     const recent = Array.from({ length: 3 }, (_, i) => {
-      const dt = new Date(Date.UTC(y, m - 1 - i, 1));
+      const dt = new Date(Date.UTC(y, m - 1 - i - skip, 1));
       const key = dt.toISOString().slice(0, 7);
       return sum(rowsForMonth(key)) + fuelForMonth(key); // forecast total cost incl fuel
     });
@@ -622,7 +633,7 @@ AD.views['cost-sheet'] = (function () {
   function bindProjectionInputs() {
     const section = root.querySelector('#cs-proj-section');
     if (!section) return;
-    const proj = projectedMonths(end);
+    const proj = projectedMonths(chartEnd());
     section.querySelectorAll('.cs-proj-input').forEach((inp) => {
       inp.addEventListener('change', () => {
         const idx = +inp.dataset.idx;
