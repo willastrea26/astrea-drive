@@ -247,10 +247,17 @@ AD.importFuelData = (function () {
         } catch (e) {
           btn.disabled = false; btn.textContent = `Import ${rows.length.toLocaleString('en-AU')} toll lines`;
           const msg = (e && (e.message || e.details)) || 'Import failed.';
-          const friendly = /toll_entries|could not find the table|does not exist/i.test(msg)
-            ? 'The tolls table hasn’t been created yet: run create-toll-entries.sql in Supabase first, then try again.'
-            : msg;
-          container.querySelector('.fi-actions').insertAdjacentHTML('beforebegin', `<p class="fi-err">${esc(friendly)}</p>`);
+          // Only a genuinely missing table gets the "run the SQL" advice; anything
+          // else (a permissions or column error that merely mentions the table)
+          // shows Supabase's own message. Either way the raw error is shown, so a
+          // problem can be diagnosed from a screenshot.
+          const code = (e && e.code) || '';
+          const missing = code === '42P01' || code === 'PGRST205' || /relation .*toll_entries.* does not exist|could not find the table/i.test(msg);
+          const friendly = missing
+            ? 'The tolls table hasn’t been created yet: run create-toll-entries.sql in Supabase first. If you already have, run  notify pgrst, \'reload schema\';  in the SQL Editor, then try again.'
+            : 'The import didn’t save.';
+          container.querySelector('.fi-actions').insertAdjacentHTML('beforebegin',
+            `<p class="fi-err">${esc(friendly)}<br><small class="muted">Supabase said: ${esc(msg)}${code ? ` (${esc(code)})` : ''}</small></p>`);
         }
       };
     }
