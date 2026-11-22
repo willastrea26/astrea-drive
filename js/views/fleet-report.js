@@ -89,7 +89,7 @@ AD.fleetReport = (function () {
     // latest transaction date is reported too: a month that looks cheap may
     // simply not have its statement in yet.
     const fuel = (AD.store.all('fuel_entries') || [])
-      .map((f) => ({ vehicleId: f.vehicleId, date: f.date ? String(f.date).slice(0, 10) : '', cost: cost(f.cost), litres: cost(f.litres) }))
+      .map((f) => ({ vehicleId: f.vehicleId, date: f.date ? String(f.date).slice(0, 10) : '', cost: cost(f.cost), litres: cost(f.litres), product: f.product || '' }))
       .filter((f) => f.date && f.date <= reportEnd && f.cost > 0);
     const fuelThrough = fuel.reduce((m, f) => (f.date > m ? f.date : m), '');
 
@@ -107,7 +107,7 @@ AD.fleetReport = (function () {
       mo.planned   = svc.reduce((t, s) => t + cost(s.cost), 0);
       mo.unplanned = def.reduce((t, d) => t + cost(d.cost), 0);
       mo.fuel      = fl.reduce((t, f) => t + f.cost, 0);
-      mo.litres    = fl.reduce((t, f) => t + f.litres, 0);
+      mo.litres    = fl.filter((f) => L.isFuelPurchase(f)).reduce((t, f) => t + f.litres, 0);   // fuel litres, not AdBlue
       mo.fuelCount = fl.length;
       mo.total     = mo.planned + mo.unplanned + mo.fuel;
       mo.svcCount  = svc.length;

@@ -187,9 +187,30 @@ AD.logic = (function () {
   }
 
   /**
+   * Is a fuel-card row an actual fuel purchase (a "fill")? A card statement
+   * also carries transaction / management fees, surcharges, AdBlue, food and
+   * sundries — in March 2026 only 188 of 537 WEX rows were fuel. A fill has
+   * litres and a fuel product: diesel (incl. ULS / premium), unleaded (ULP,
+   * Ultra Pulp, premium), E10 / E85, autogas / LPG. A BP receipt holding
+   * "Diesel + AdBlue" counts (it contains fuel); AdBlue on its own doesn't.
+   * Rows imported without a product name count as fills when they have litres.
+   */
+  const FUEL_PRODUCT = /DIESEL|PULP|UNLEADED|\bULP\b|PETROL|\bE10\b|\bE85\b|AUTOGAS|\bLPG\b|^PREMIUM$/i;
+  function isFuelPurchase(r) {
+    if (!(Number(r.litres) > 0)) return false;
+    const p = String(r.product || '').trim();
+    return !p || FUEL_PRODUCT.test(p);
+  }
+
+  /**
    * Imported fuel-card spend for a vehicle. Optional fromKey/toKey (YYYY-MM-DD,
-   * inclusive) limit the window; omit for all-time. Returns total cost, litres
-   * and the transaction count, or null if nothing imported for the vehicle.
+   * inclusive) limit the window; omit for all-time. null if nothing imported.
+   *   cost      — everything charged to the vehicle's card (fuel, AdBlue, fees…): spend
+   *   fuelCost  — actual fuel purchases only
+   *   litres    — fuel litres only (AdBlue litres would inflate L/100km)
+   *   fills     — number of fuel purchases; count — every row
+   *   otherCost — fees, AdBlue and other items (cost − fuelCost)
+   *   lastFill  — date of the latest fuel purchase; lastDate — of any row
    */
   function fuelFor(v, fromKey, toKey) {
     const rows = (S().all('fuel_entries') || []).filter((r) => {
@@ -200,14 +221,18 @@ AD.logic = (function () {
       return true;
     });
     if (!rows.length) return null;
-    let cost = 0, litres = 0, lastDate = '';
+    let cost = 0, fuelCost = 0, litres = 0, fills = 0, lastDate = '', lastFill = '';
     rows.forEach((r) => {
-      cost += Number(r.cost) || 0;
-      litres += Number(r.litres) || 0;
+      const c = Number(r.cost) || 0;
       const d = r.date ? String(r.date).slice(0, 10) : '';
+      cost += c;
       if (d > lastDate) lastDate = d;
+      if (isFuelPurchase(r)) {
+        fuelCost += c; litres += Number(r.litres) || 0; fills++;
+        if (d > lastFill) lastFill = d;
+      }
     });
-    return { cost, litres, count: rows.length, lastDate };
+    return { cost, fuelCost, otherCost: cost - fuelCost, litres, fills, count: rows.length, lastDate, lastFill };
   }
 
   /**
@@ -238,8 +263,10 @@ AD.logic = (function () {
 
     const fromKey = withKm[0].day, toKey = withKm[withKm.length - 1].day;
     const spanDays = T.daysBetween(fromKey, toKey) + 1;
+    // Fuel purchases only: card fees and AdBlue aren't fuel, and AdBlue litres
+    // would inflate L/100km.
     const fuel = fuelFor(v, fromKey, toKey);
-    const fuelCost = fuel ? fuel.cost : 0;
+    const fuelCost = fuel ? fuel.fuelCost : 0;
     const litres = fuel ? fuel.litres : 0;
     const hasFuel = !!(fuel && (fuelCost > 0 || litres > 0));
 
@@ -250,7 +277,7 @@ AD.logic = (function () {
       fromKey, toKey,
       hasFuel,
       fuelCost, litres,
-      fuelTxns: fuel ? fuel.count : 0,
+      fuelTxns: fuel ? fuel.fills : 0,
       costPerKm: hasFuel && fuelCost > 0 ? fuelCost / kmTotal : null,
       litresPer100: hasFuel && litres > 0 ? (litres / kmTotal) * 100 : null
     };
@@ -284,7 +311,7 @@ AD.logic = (function () {
 
     const litres = (S().all('fuel_entries') || []).reduce((n, r) => {
       const d = r.date ? String(r.date).slice(0, 10) : '';
-      return d && d >= yearStart ? n + (Number(r.litres) || 0) : n;
+      return d && d >= yearStart && isFuelPurchase(r) ? n + (Number(r.litres) || 0) : n;   // fuel litres, not AdBlue
     }, 0);
 
     // Rolling window — one row per vehicle, each already an aggregate.
@@ -623,7 +650,7 @@ AD.logic = (function () {
   }
 
   return {
-    serviceState, serviceTriggers, usageRate, workHours, workHoursDaily, tripStats, fuelFor, fuelEconomy, gpsTotals, vehicleCostsFor, HOURS_TYPES,
+    serviceState, serviceTriggers, usageRate, workHours, workHoursDaily, tripStats, fuelFor, isFuelPurchase, fuelEconomy, gpsTotals, vehicleCostsFor, HOURS_TYPES,
     regoState, attentionTone, openDefects, fmtKm, fmtHours, fmtAUD, driverName, userName,
     vacTrucks, schedulableVehicles, bookingsFor, activeAt, overlaps, conflictIds, driverConflictIds, nextBooking, locate, hasCoords,
     bookingCategory, bookingTitle, SOON_DAYS, SOON_KM, SOON_HOURS, URGENT_HOURS,

@@ -1173,7 +1173,7 @@ AD.views.vehicle = (function () {
       fuelCell = `${rate(fe.costPerKm)}/km<span class="sub">${fe.litresPer100 != null ? fe.litresPer100.toFixed(1) + ' L/100km · ' : ''}${L.fmtAUD(fe.fuelCost)} ÷ ${n0(fe.kmTotal)} km · ${short(fe.fromKey, fe.toKey)}</span>`;
     } else {
       const all = L.fuelFor(v);
-      fuelCell = `${faint('No fuel to match yet')}<span class="sub">${n0(fe.kmTotal)} km since ${T.fmtKey(fe.fromKey).slice(0, 5)}, no fills dated in those days${all && all.lastDate ? ` · latest fill ${T.fmtKey(all.lastDate)}` : ''}</span>`;
+      fuelCell = `${faint('No fuel to match yet')}<span class="sub">${n0(fe.kmTotal)} km since ${T.fmtKey(fe.fromKey).slice(0, 5)}, no fills dated in those days${all && all.lastFill ? ` · latest fill ${T.fmtKey(all.lastFill)}` : ''}</span>`;
     }
 
     // Total: fuel + servicing + repairs over the same span of daily GPS data.
@@ -1248,7 +1248,7 @@ AD.views.vehicle = (function () {
       : '';
     const fuel = L.fuelFor(v);
     const fuelFact = fuel
-      ? `<div><dt>Fuel (imported)</dt><dd>${L.fmtAUD(fuel.cost)}<span class="sub">${fuel.litres ? Math.round(fuel.litres).toLocaleString('en-AU') + ' L · ' : ''}${fuel.count} transaction${fuel.count === 1 ? '' : 's'} from fuel-card data</span></dd></div>`
+      ? `<div><dt>Fuel (imported)</dt><dd>${L.fmtAUD(fuel.fuelCost)}<span class="sub">${fuel.litres ? Math.round(fuel.litres).toLocaleString('en-AU') + ' L · ' : ''}${fuel.fills} fill${fuel.fills === 1 ? '' : 's'}${fuel.otherCost > 0.005 ? ` · +${L.fmtAUD(fuel.otherCost)} fees, AdBlue &amp; other` : ''}</span></dd></div>`
       : '';
     const costFacts = costPerKmFacts(v, services, defects, isHours, faint);
     const openDefs = defects.filter((d) => d.status !== 'Resolved');

@@ -158,7 +158,7 @@ AD.views['cost-sheet'] = (function () {
   // imported fill was, so "no fuel" never reads as "no fuel ever".
   const lastFillNote = (v) => {
     const f = L.fuelFor(v);
-    return f && f.lastDate ? ` · latest fill on record ${T.fmtKey(f.lastDate)}` : ` · no fuel-card fills on record for this vehicle`;
+    return f && f.lastFill ? ` · latest fill on record ${T.fmtKey(f.lastFill)}` : ` · no fuel-card fills on record for this vehicle`;
   };
 
   function render(el, params) {
@@ -944,7 +944,7 @@ AD.views['cost-sheet'] = (function () {
         ...(fe.costPerKm != null ? [['Fuel cost / km', fmtFuelRate(fe.costPerKm), COLOR_FUEL]] : []),
         ...(fe.litresPer100 != null ? [['Fuel economy', fmtL100(fe.litresPer100), COLOR_FUEL]] : []),
         ['Fuel used', `${fe.litres.toFixed(0)} L · ${L.fmtAUD(fe.fuelCost)}`, 'var(--muted)'],
-        ['Transactions', `${fe.fuelTxns} fill${fe.fuelTxns === 1 ? '' : 's'}`, 'var(--muted)'],
+        ['Fills', `${fe.fuelTxns} fill${fe.fuelTxns === 1 ? '' : 's'}`, 'var(--muted)'],
         ['Distance (GPS)', `${km0(fe.kmTotal)} km`, 'var(--mint)'],
         ['Over', window, 'var(--muted)'],
         ...(fe.costPerKm != null ? [[`= ${L.fmtAUD(fe.fuelCost)} ÷ ${km0(fe.kmTotal)} km`, fmtFuelRate(fe.costPerKm) + '/km', 'var(--ink)']] : [])
@@ -1225,14 +1225,15 @@ AD.views['cost-sheet'] = (function () {
     const rows = (AD.store.all('fuel_entries') || []).filter((r) => !r.vehicleId && Number(r.cost) > 0);
     if (!rows.length) return '';
     const cost = rows.reduce((t, r) => t + Number(r.cost || 0), 0);
-    const litres = rows.reduce((t, r) => t + Number(r.litres || 0), 0);
+    const fills = rows.filter(L.isFuelPurchase);
+    const litres = fills.reduce((t, r) => t + Number(r.litres || 0), 0);   // fuel litres, not AdBlue
     const cards = new Set(rows.map((r) => r.cardHolder || r.rego || '?')).size;
     return `<div class="cs-subhead">Unassigned <span class="muted">(${cards} card${cards === 1 ? '' : 's'} · ${L.fmtAUD(cost)})</span></div>
       <div class="cs-row cs-row-art cs-row-muted">
         <span class="id"><span class="cs-id-text">Not tied to a vehicle<small class="cs-rego">person cards / regos not in the fleet</small></span></span>
         <span></span>
         <span class="cs-row-val">${Math.round(litres).toLocaleString('en-AU')}<small> L</small></span>
-        <span class="cs-row-meta">${L.fmtAUD(cost)} · ${rows.length} transaction${rows.length === 1 ? '' : 's'} · counted in total spend and Spend over time, not in any vehicle’s figures</span>
+        <span class="cs-row-meta">${L.fmtAUD(cost)} · ${fills.length} fill${fills.length === 1 ? '' : 's'} of ${rows.length} transaction${rows.length === 1 ? '' : 's'} · counted in total spend and Spend over time, not in any vehicle’s figures</span>
       </div>`;
   }
 
@@ -1241,7 +1242,7 @@ AD.views['cost-sheet'] = (function () {
     const lines = AD.store.all('vehicles').filter((v) => !v.hired).map((v) => {
       const f = L.fuelFor(v); // no window → all-time
       if (!f || !(f.litres > 0)) return null;
-      return { v, litres: f.litres, cost: f.cost, fills: f.count, cpl: f.litres > 0 ? f.cost / f.litres : null, lastDate: f.lastDate };
+      return { v, litres: f.litres, cost: f.fuelCost, other: f.otherCost, fills: f.fills, cpl: f.litres > 0 ? f.fuelCost / f.litres : null, lastDate: f.lastFill };
     }).filter(Boolean).sort((a, b) => b.litres - a.litres);
 
     if (!lines.length) {
@@ -1259,7 +1260,8 @@ AD.views['cost-sheet'] = (function () {
       const art = (AD.art && AD.art.forVehicle(l.v, 44)) || '';
       return `<a class="cs-row cs-row-art" href="${vehHref(l.v.id)}" style="--i:${i}" ${V.tipAttr(l.v.id, [
       ['Litres purchased', l0(l.litres) + ' L', COLOR_FUEL],
-      ['Fuel cost (total)', L.fmtAUD(l.cost), 'var(--cs-amber)'],
+      ['Fuel cost', L.fmtAUD(l.cost), 'var(--cs-amber)'],
+      ...(l.other > 0.005 ? [['Fees, AdBlue & other', L.fmtAUD(l.other), 'var(--muted)']] : []),
       ['Fills', String(l.fills), 'var(--muted)'],
       ...(l.cpl != null ? [['Average price', '$' + l.cpl.toFixed(2) + '/L', 'var(--muted)']] : []),
       ...(l.lastDate ? [['Last fill', T.fmtKey(l.lastDate), 'var(--muted)']] : [])
@@ -1267,21 +1269,23 @@ AD.views['cost-sheet'] = (function () {
       <span class="id">${art ? `<span class="cs-veh-art">${art}</span>` : ''}<span class="cs-id-text">${esc(l.v.id)}${l.v.rego ? `<small class="cs-rego">${esc(l.v.rego)}</small>` : ''}</span></span>
       <span class="cs-hbar"><i class="cs-fuel" style="width:${(l.litres / top) * 100}%"></i></span>
       <span class="cs-row-val">${l0(l.litres)}<small> L</small></span>
-      <span class="cs-row-meta">${L.fmtAUD(l.cost)} total · ${l.fills} fill${l.fills === 1 ? '' : 's'}${l.cpl != null ? ` · $${l.cpl.toFixed(2)}/L avg` : ''}</span>
+      <span class="cs-row-meta">${L.fmtAUD(l.cost)} fuel · ${l.fills} fill${l.fills === 1 ? '' : 's'}${l.cpl != null ? ` · $${l.cpl.toFixed(2)}/L avg` : ''}${l.other > 0.005 ? ` · +${L.fmtAUD(l.other)} fees, AdBlue &amp; other` : ''}</span>
     </a>`;
     }).join('');
 
     const tableRows = lines.map((l) => [l.v.id, l.v.rego || '—', L.driverName(l.v.driverId) || '—',
       l0(l.litres) + ' L', L.fmtAUD(l.cost), String(l.fills),
-      l.cpl != null ? '$' + l.cpl.toFixed(2) : '—', l.lastDate ? T.fmtKey(l.lastDate) : '—']);
+      l.cpl != null ? '$' + l.cpl.toFixed(2) : '—', L.fmtAUD(l.other || 0), l.lastDate ? T.fmtKey(l.lastDate) : '—']);
+    const totalOther = lines.reduce((n, l) => n + (l.other || 0), 0);
+    const totalFills = lines.reduce((n, l) => n + l.fills, 0);
 
     return `<section class="section">
-      ${sectionHead({ title: 'Fuel purchased by vehicle', meta: `${lines.length} vehicle${lines.length === 1 ? '' : 's'} · ${l0(totalLitres)} L · ${L.fmtAUD(totalCost)} total · all imported fuel-card data` })}
+      ${sectionHead({ title: 'Fuel purchased by vehicle', meta: `${lines.length} vehicle${lines.length === 1 ? '' : 's'} · ${l0(totalLitres)} L · ${totalFills.toLocaleString('en-AU')} fills · ${L.fmtAUD(totalCost)} fuel · all imported fuel-card data` })}
       <figure class="viz-card">
-        <figcaption><span class="viz-sub">Every vehicle with imported fuel-card data, most litres first. Hover any row for the litres purchased, the accumulated fuel cost, the number of fills and the average price per litre. This covers all imported transactions, not just the period selected above.</span></figcaption>
+        <figcaption><span class="viz-sub">Diesel and petrol purchases only, most litres first: fills, litres and fuel cost leave out card fees, AdBlue and other items (${L.fmtAUD(totalOther)}, shown per vehicle), which still count in total spend. Hover any row for the detail. Covers all imported transactions, not just the period selected above.</span></figcaption>
         <div class="cs-rows">${rows}</div>
         ${unassignedFuelNote()}
-        ${V.table(['Vehicle', 'Rego', 'Assigned driver', 'Litres', 'Fuel cost', 'Fills', 'Avg /L', 'Last fill'], tableRows)}
+        ${V.table(['Vehicle', 'Rego', 'Assigned driver', 'Litres', 'Fuel cost', 'Fills', 'Avg /L', 'Fees & other', 'Last fill'], tableRows)}
       </figure>
     </section>`;
   }
