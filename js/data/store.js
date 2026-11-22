@@ -47,12 +47,32 @@ AD.store = (function () {
   // Optional tables that failed to load (usually: migration not run yet),
   // so a page can say "run the setup SQL" instead of failing on save.
   const unavailable = new Set();
-  async function loadOptional(table, build, columns = '*') {
+  // Supabase returns at most 1,000 rows per request (the project's max-rows
+  // setting), however high a .limit() asks for. Tables that can grow past that
+  // — fuel transactions, daily telematics — are fetched page by page, ordered
+  // on a unique key so no row is skipped or repeated between pages. Without
+  // this, rows past the first 1,000 were saved but never loaded, so an import
+  // looked lost after a refresh.
+  async function loadOptional(table, build, columns = '*', order = null) {
     try {
-      const { data, error } = await build(sb().from(table).select(columns));
-      if (error) { unavailable.add(table); return []; }
+      if (!order) {
+        const { data, error } = await build(sb().from(table).select(columns));
+        if (error) { unavailable.add(table); return []; }
+        unavailable.delete(table);
+        return data || [];
+      }
+      const out = [];
+      for (let from = 0; from < 500000;) {
+        let q = build(sb().from(table).select(columns));
+        order.forEach((col) => { q = q.order(col, { ascending: true }); });
+        const { data, error } = await q.range(from, from + 999);
+        if (error) { unavailable.add(table); return []; }
+        if (!data || !data.length) break;
+        out.push(...data);
+        from += data.length;   // step by what came back, in case the server caps pages lower than 1,000
+      }
       unavailable.delete(table);
-      return data || [];
+      return out;
     } catch (e) {
       unavailable.add(table);
       return [];
@@ -71,16 +91,16 @@ AD.store = (function () {
     const dailySince = rollingSince < yearSince ? rollingSince : yearSince;
     const [results, readings, workHours, tripStats, workDaily, fuel, vehicleCosts, syncLog, employees, employeeDocs, techDevices, equipment, employeeRates] = await Promise.all([
       Promise.all(TABLES.map(query)),
-      loadOptional('odometer_readings', (q) => q.gte('readDate', since)),
+      loadOptional('odometer_readings', (q) => q.gte('readDate', since), '*', ['id']),
       loadOptional('vehicle_work_hours', (q) => q),
       loadOptional('vehicle_trip_stats', (q) => q),
-      loadOptional('vehicle_work_hours_daily', (q) => q.gte('day', dailySince).limit(20000)),
-      loadOptional('fuel_entries', (q) => q),
+      loadOptional('vehicle_work_hours_daily', (q) => q.gte('day', dailySince), '*', ['day', 'vehicleId']),
+      loadOptional('fuel_entries', (q) => q, '*', ['id']),
       // Kept optional so the app still loads before the vehicle-costs migration
       // has been applied. The Costs tab can already show fuel, services and
       // repairs, while manual rego / insurance entries become available as soon
       // as the table exists.
-      loadOptional('vehicle_costs', (q) => q),
+      loadOptional('vehicle_costs', (q) => q, '*', ['id']),
       // GPS sync run history (dashboard's "Telematic inputs") — most recent first.
       // Not "details" (the per-vehicle breakdown): the dashboard fetches that
       // for one run only when it's clicked, so it isn't downloaded 100 times over.
@@ -150,11 +170,12 @@ AD.store = (function () {
     tollsState = 'loading';
     const out = [];
     try {
-      for (let from = 0; ; from += 1000) {
+      for (let from = 0; from < 1000000;) {
         const { data, error } = await sb().from('toll_entries').select(TOLL_COLS).order('id').range(from, from + 999);
         if (error) { unavailable.add('toll_entries'); tollsState = 'missing'; db.toll_entries = []; emit('toll_entries'); return tollsState; }
-        out.push(...(data || []));
-        if (!data || data.length < 1000) break;
+        if (!data || !data.length) break;
+        out.push(...data);
+        from += data.length;
       }
       unavailable.delete('toll_entries');
       db.toll_entries = out;
