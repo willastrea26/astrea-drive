@@ -203,7 +203,13 @@ AD.views['cost-sheet'] = (function () {
     const avgFuel = avgOf(base.map((w) => fuelBetween(w.from, w.to)));
     const avgPlanned = avgOf(base.map((w) => sumKind(w.rows, PLANNED)));
     const tollNow = tollBetween(start, end), avgToll = avgOf(base.map((w) => tollBetween(w.from, w.to)));
-    const showToll = (AD.store.all('toll_entries') || []).length > 0;
+    // The Toll share card always shows; with no toll data it says why.
+    const tollState = AD.store.tollsState ? AD.store.tollsState() : 'missing';
+    const haveTolls = (AD.store.all('toll_entries') || []).length > 0;
+    const tollFoot = haveTolls ? null
+      : tollState === 'missing' ? '<small class="cs-delta">Not set up yet: run create-toll-entries.sql</small>'
+      : tollState === 'ready' ? '<small class="cs-delta">No Linkt statement imported yet</small>'
+      : '<small class="cs-delta">Loading toll data…</small>';
     const pctOf = (n) => (spend ? (n / spend) * 100 : 0);
     const sliceFoot = (amt, avgAmt) => !spend ? '<small class="cs-delta">Nothing recorded</small>'
       : `<small class="cs-delta">${L.fmtAUD(amt)} of ${L.fmtAUD(spend)}${haveBaseline && avgSpend ? ` · ${Math.round((avgAmt / avgSpend) * 100)}% avg` : ''}</small>`;
@@ -241,12 +247,12 @@ AD.views['cost-sheet'] = (function () {
           <input type="date" id="w-jump" class="cs-jump" value="${start}" aria-label="Go to ${cfg.label}">`
       })}
 
-      <div class="cs-kpis" style="--cs-kpi-n:${4 + (showToll ? 1 : 0) + (restOfYearMonths.length ? 1 : 0)}" role="group" aria-label="This ${cfg.label} against the average ${cfg.label}">
+      <div class="cs-kpis" style="--cs-kpi-n:${5 + (restOfYearMonths.length ? 1 : 0)}" role="group" aria-label="This ${cfg.label} against the average ${cfg.label}">
         ${kpi('Total spend', L.fmtAUD(spend), delta(spend, avgSpend, haveBaseline, L.fmtAUD, true), 'spend')}
         ${kpi('Unplanned share', `${Math.round(share)}%`, shareFoot, 'unplanned')}
         ${kpi('Fuel share', `${Math.round(pctOf(fuelNow))}%`, sliceFoot(fuelNow, avgFuel), 'fuel')}
         ${kpi('Planned servicing share', `${Math.round(pctOf(planned))}%`, sliceFoot(planned, avgPlanned), 'planned')}
-        ${showToll ? kpi('Toll share', `${Math.round(pctOf(tollNow))}%`, sliceFoot(tollNow, avgToll), 'toll') : ''}
+        ${kpi('Toll share', haveTolls ? `${Math.round(pctOf(tollNow))}%` : '—', tollFoot || sliceFoot(tollNow, avgToll), 'toll')}
         ${restOfYearMonths.length ? kpi('Projected to year-end', L.fmtAUD(projRestTotal), `<small class="cs-delta">${restOfYearMonths.length} month${restOfYearMonths.length === 1 ? '' : 's'} remaining · ${L.fmtAUD(projMonthAvg)}/mo avg</small>`) : ''}
       </div>
 
