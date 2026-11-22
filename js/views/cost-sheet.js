@@ -507,8 +507,9 @@ AD.views['cost-sheet'] = (function () {
     // Each stacked line gets its own hover dot, in its own color, at its own
     // height — showing what that line is made of plus the running total,
     // rather than one ball on the top (grand) line standing in for all three.
-    const seriesDots = (seriesCoords, colorVar, tipRow) => seriesCoords.map((c, i) => {
+    const seriesDots = (seriesCoords, colorVar, tipRow, keep) => seriesCoords.map((c, i) => {
       const p = points[i];
+      if (keep && !keep(p)) return '';
       const isLast = i === splitIdx;
       const cx = c.x.toFixed(1), cy = c.y.toFixed(1);
       return `<g class="cs-mark${isLast ? ' cs-current' : ''}" style="--i:${i};--cs-line:${colorVar}">
@@ -520,7 +521,8 @@ AD.views['cost-sheet'] = (function () {
     const plannedDots = seriesDots(histPlanned, COLOR_PLANNED, (p) => ['Planned servicing', L.fmtAUD(p.planned), COLOR_PLANNED]);
     const maintDots = seriesDots(histMaint, COLOR_UNPLANNED, (p) => ['Unplanned repairs', L.fmtAUD(p.unplanned), COLOR_UNPLANNED]);
     const fuelDots = anyFuel ? seriesDots(histFuelTop, COLOR_FUEL, (p) => ['Fuel', L.fmtAUD(p.fuel), COLOR_FUEL]) : '';
-    const tollDots = anyToll ? seriesDots(histCoords, COLOR_TOLL, (p) => ['Tolls', L.fmtAUD(p.toll), COLOR_TOLL]) : '';
+    // Toll dots only on months/weeks that have tolls; elsewhere the top line is just fuel.
+    const tollDots = anyToll ? seriesDots(histCoords, COLOR_TOLL, (p) => ['Tolls', L.fmtAUD(p.toll), COLOR_TOLL], (p) => p.toll > 0) : '';
     const grandDots = fuelDots + tollDots;
     const projMarks = projCoords.map((c, j) => {
       const p = points[splitIdx + 1 + j];
@@ -533,13 +535,32 @@ AD.views['cost-sheet'] = (function () {
     const marks = plannedDots + maintDots + grandDots + projMarks;
     const ariaDesc = points.map((p) => `${p.full}: ${L.fmtAUD(p.grand)} total, ${L.fmtAUD(p.fuel)} fuel, ${L.fmtAUD(p.toll || 0)} tolls, ${L.fmtAUD(p.unplanned)} unplanned`).join(', ');
 
-    const fuelLayer = (fuelBandD
+    // The pink toll line is clipped to the stretches that actually have tolls
+    // (from the point before to the point after), and drawn UNDER the blue fuel
+    // line. Where there are no tolls the two lines coincide, and drawing pink
+    // across them made months without tolls look like toll months.
+    const tollRuns = [];
+    if (anyToll) {
+      const hasT = histCoords.map((_, i) => points[i].toll > 0);
+      for (let i = 0; i < histCoords.length - 1; i++) {
+        if (!(hasT[i] || hasT[i + 1])) continue;
+        const last = tollRuns[tollRuns.length - 1];
+        if (last && last.to === i) last.to = i + 1; else tollRuns.push({ from: i, to: i + 1 });
+      }
+      if (histCoords.length === 1 && hasT[0]) tollRuns.push({ from: 0, to: 0 });
+    }
+    const tollClip = tollRuns.map((r) => {
+      const x1 = histCoords[r.from].x - 1, x2 = histCoords[r.to].x + 1;
+      return `<rect x="${x1.toFixed(1)}" y="0" width="${Math.max(2, x2 - x1).toFixed(1)}" height="${H}"></rect>`;
+    }).join('');
+    const fuelLayer = (tollBandD
+      ? `<clipPath id="cs-toll-clip">${tollClip}</clipPath>
+         <path d="${tollBandD}" class="cs-band-toll"></path>
+         <path d="${histGrandD}" class="cs-line-toll" pathLength="1" clip-path="url(#cs-toll-clip)"></path>`
+      : '')
+      + (fuelBandD
       ? `<path d="${fuelBandD}" class="cs-band-fuel"></path>
          <path d="${histFuelTopD}" class="cs-line-grand" pathLength="1"></path>`
-      : '')
-      + (tollBandD
-      ? `<path d="${tollBandD}" class="cs-band-toll"></path>
-         <path d="${histGrandD}" class="cs-line-toll" pathLength="1"></path>`
       : '');
     let svgBody;
     if (hasProj) {
@@ -608,25 +629,26 @@ AD.views['cost-sheet'] = (function () {
               <stop offset="50%" style="stop-color:var(--violet);stop-opacity:.12"></stop>
               <stop offset="100%" style="stop-color:var(--violet);stop-opacity:0"></stop>
             </linearGradient>
-            <filter id="cs-glow-mint" x="-12%" y="-12%" width="124%" height="124%">
+            <!-- userSpaceOnUse: a perfectly flat line (e.g. no repairs all year) has a zero-height box, which a percentage filter region turns invisible. -->
+            <filter id="cs-glow-mint" filterUnits="userSpaceOnUse" x="0" y="0" width="${W}" height="${H}">
               <feGaussianBlur in="SourceGraphic" stdDeviation="2.5" result="blur"/>
               <feFlood flood-color="var(--mint)" flood-opacity=".45"/>
               <feComposite in2="blur" operator="in"/>
               <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
             </filter>
-            <filter id="cs-glow-amber" x="-12%" y="-12%" width="124%" height="124%">
+            <filter id="cs-glow-amber" filterUnits="userSpaceOnUse" x="0" y="0" width="${W}" height="${H}">
               <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="blur"/>
               <feFlood flood-color="var(--cs-amber)" flood-opacity=".4"/>
               <feComposite in2="blur" operator="in"/>
               <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
             </filter>
-            <filter id="cs-glow-blue" x="-12%" y="-12%" width="124%" height="124%">
+            <filter id="cs-glow-blue" filterUnits="userSpaceOnUse" x="0" y="0" width="${W}" height="${H}">
               <feGaussianBlur in="SourceGraphic" stdDeviation="2.5" result="blur"/>
               <feFlood flood-color="var(--cs-blue)" flood-opacity=".4"/>
               <feComposite in2="blur" operator="in"/>
               <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
             </filter>
-            <filter id="cs-glow-violet" x="-12%" y="-12%" width="124%" height="124%">
+            <filter id="cs-glow-violet" filterUnits="userSpaceOnUse" x="0" y="0" width="${W}" height="${H}">
               <feGaussianBlur in="SourceGraphic" stdDeviation="2.5" result="blur"/>
               <feFlood flood-color="var(--violet)" flood-opacity=".5"/>
               <feComposite in2="blur" operator="in"/>

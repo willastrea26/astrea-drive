@@ -165,8 +165,12 @@ AD.store = (function () {
    */
   const TOLL_COLS = 'id,vehicleId,date,plate,tag,class,road,kind,amount,statement,periodStart,periodEnd';
   let tollsState = 'idle';   // idle | loading | ready | missing
+  let tollsReloadQueued = false;
   async function loadTolls(force) {
-    if (tollsState === 'loading' || (!force && (tollsState === 'ready' || tollsState === 'missing'))) return tollsState;
+    // A forced reload (after an import) that arrives mid-load runs again once
+    // the current load finishes, so freshly imported lines always show.
+    if (tollsState === 'loading') { if (force) tollsReloadQueued = true; return tollsState; }
+    if (!force && (tollsState === 'ready' || tollsState === 'missing')) return tollsState;
     tollsState = 'loading';
     const out = [];
     try {
@@ -183,6 +187,7 @@ AD.store = (function () {
     } catch (e) {
       unavailable.add('toll_entries'); tollsState = 'missing'; db.toll_entries = [];
     }
+    if (tollsReloadQueued) { tollsReloadQueued = false; return loadTolls(true); }
     emit('toll_entries');
     return tollsState;
   }
