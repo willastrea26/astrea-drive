@@ -3359,7 +3359,7 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 .cs-hbar i.cs-seg-unplanned, .cs-legend-swatch.cs-seg-unplanned { background: var(--cs-amber); }
 
 /* Cost sheet — Tolls (Linkt) */
-.cs-hbar i.cs-toll { background: #8b7ee8; }  /* a light violet that reads on the dark cards */
+.cs-hbar i.cs-toll { background: #f472b6; }  /* tolls are pink everywhere; violet is the forecast */
 .cs-toll-roads { margin: 6px 0 4px; }
 .cs-toll-roads .hb-row { grid-template-columns: 180px minmax(0, 1fr) 96px; }
 .cs-toll-loose .id { display: flex; align-items: center; }
@@ -3373,3 +3373,9 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 .cs-toll-loose .cs-id-text { white-space: nowrap; }
 .cs-toll-assign { white-space: nowrap; }
 .cs-toll-more > summary { cursor: pointer; margin: 6px 8px; font-size: 12.5px; color: var(--blue); }
+
+/* Cost sheet — tolls band on Spend over time (pink, on top of fuel) */
+.cs-band-toll { fill: url(#cs-band-toll-grad); stroke: none; }
+.cs-line-toll { fill: none; stroke: #f472b6; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; opacity: .95; }
+.anim-in .cs-band-toll { animation: fade .8s cubic-bezier(.22,.61,.36,1) .5s backwards; }
+.anim-in .cs-line-toll { stroke-dasharray: 1; animation: draw-line 1.2s cubic-bezier(.22,.61,.36,1) backwards; }

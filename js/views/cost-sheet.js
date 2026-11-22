@@ -107,6 +107,17 @@ AD.views['cost-sheet'] = (function () {
   const fuelBetween = (from, to) => fuelRows().filter((r) => r.date >= from && r.date <= to).reduce((n, r) => n + r.cost, 0);
   const fuelForMonth = (key) => fuelRows().filter((r) => r.date.slice(0, 7) === key).reduce((n, r) => n + r.cost, 0);
 
+  // Imported Linkt toll charges (trips + No Tag fees, less account credits),
+  // the fourth slice of spend. Loaded on demand (see tolls()), so the first
+  // paint can be without them; the page redraws once they arrive. They only
+  // cover the statements imported, the same as fuel.
+  const COLOR_TOLL = '#f472b6';
+  const tollRows = () => (AD.store.all('toll_entries') || [])
+    .filter((r) => r.date)
+    .map((r) => ({ date: String(r.date).slice(0, 10), cost: Number(r.amount) || 0 }));
+  const tollBetween = (from, to) => tollRows().filter((r) => r.date >= from && r.date <= to).reduce((n, r) => n + r.cost, 0);
+  const tollForMonth = (key) => tollRows().filter((r) => r.date.slice(0, 7) === key).reduce((n, r) => n + r.cost, 0);
+
   /** The scope's own trailing baseline — the N periods (weeks/months/years) immediately before `curStart`. */
   function baseline(curStart) {
     let cursor = curStart;
@@ -134,7 +145,7 @@ AD.views['cost-sheet'] = (function () {
     return `<small class="cs-delta cs-delta-${tone}">${arrow} ${Math.abs(pct)}% · ${fmt(avg)} avg</small>`;
   }
 
-  const TONE_VAR = { worse: 'var(--red)', better: 'var(--green)', spend: 'var(--red)', unplanned: 'var(--cs-amber)', fuel: 'var(--cs-blue)', planned: 'var(--mint)' };
+  const TONE_VAR = { worse: 'var(--red)', better: 'var(--green)', spend: 'var(--red)', unplanned: 'var(--cs-amber)', fuel: 'var(--cs-blue)', planned: 'var(--mint)', toll: COLOR_TOLL };
   const kpi = (label, value, foot, tone) => `<div class="cs-kpi"${tone ? ` style="--cs-tone:${TONE_VAR[tone]}"` : ''}><span>${esc(label)}</span><strong>${value}</strong>${foot}</div>`;
   const fmtChange = (n) => Math.abs(n) < 0.005 ? '—' : (n > 0 ? '+' : '−') + L.fmtAUD(Math.abs(n));
   const median = (nums) => {
@@ -169,9 +180,10 @@ AD.views['cost-sheet'] = (function () {
     const isCurrent = start === thisStart;
     const now = rowsBetween(start, end);
     const base = baseline(start);
-    const haveBaseline = base.some((w) => w.rows.length || fuelBetween(w.from, w.to) > 0);
+    const haveBaseline = base.some((w) => w.rows.length || fuelBetween(w.from, w.to) > 0 || tollBetween(w.from, w.to) > 0);
 
-    const spend = sum(now) + fuelBetween(start, end), avgSpend = avgOf(base.map((w) => sum(w.rows) + fuelBetween(w.from, w.to)));
+    const spend = sum(now) + fuelBetween(start, end) + tollBetween(start, end);
+    const avgSpend = avgOf(base.map((w) => sum(w.rows) + fuelBetween(w.from, w.to) + tollBetween(w.from, w.to)));
 
     // Share rather than dollars: unplanned spend rises with a heavy period either way,
     // but the proportion is what says whether maintenance is keeping ahead of failure.
@@ -190,6 +202,8 @@ AD.views['cost-sheet'] = (function () {
     const fuelNow = fuelBetween(start, end), planned = sumKind(now, PLANNED);
     const avgFuel = avgOf(base.map((w) => fuelBetween(w.from, w.to)));
     const avgPlanned = avgOf(base.map((w) => sumKind(w.rows, PLANNED)));
+    const tollNow = tollBetween(start, end), avgToll = avgOf(base.map((w) => tollBetween(w.from, w.to)));
+    const showToll = (AD.store.all('toll_entries') || []).length > 0;
     const pctOf = (n) => (spend ? (n / spend) * 100 : 0);
     const sliceFoot = (amt, avgAmt) => !spend ? '<small class="cs-delta">Nothing recorded</small>'
       : `<small class="cs-delta">${L.fmtAUD(amt)} of ${L.fmtAUD(spend)}${haveBaseline && avgSpend ? ` · ${Math.round((avgAmt / avgSpend) * 100)}% avg` : ''}</small>`;
@@ -227,11 +241,12 @@ AD.views['cost-sheet'] = (function () {
           <input type="date" id="w-jump" class="cs-jump" value="${start}" aria-label="Go to ${cfg.label}">`
       })}
 
-      <div class="cs-kpis" style="--cs-kpi-n:${restOfYearMonths.length ? 5 : 4}" role="group" aria-label="This ${cfg.label} against the average ${cfg.label}">
+      <div class="cs-kpis" style="--cs-kpi-n:${4 + (showToll ? 1 : 0) + (restOfYearMonths.length ? 1 : 0)}" role="group" aria-label="This ${cfg.label} against the average ${cfg.label}">
         ${kpi('Total spend', L.fmtAUD(spend), delta(spend, avgSpend, haveBaseline, L.fmtAUD, true), 'spend')}
         ${kpi('Unplanned share', `${Math.round(share)}%`, shareFoot, 'unplanned')}
         ${kpi('Fuel share', `${Math.round(pctOf(fuelNow))}%`, sliceFoot(fuelNow, avgFuel), 'fuel')}
         ${kpi('Planned servicing share', `${Math.round(pctOf(planned))}%`, sliceFoot(planned, avgPlanned), 'planned')}
+        ${showToll ? kpi('Toll share', `${Math.round(pctOf(tollNow))}%`, sliceFoot(tollNow, avgToll), 'toll') : ''}
         ${restOfYearMonths.length ? kpi('Projected to year-end', L.fmtAUD(projRestTotal), `<small class="cs-delta">${restOfYearMonths.length} month${restOfYearMonths.length === 1 ? '' : 's'} remaining · ${L.fmtAUD(projMonthAvg)}/mo avg</small>`) : ''}
       </div>
 
@@ -250,7 +265,7 @@ AD.views['cost-sheet'] = (function () {
 
       ${costVsUsage()}
 
-      <p class="section-foot muted small">Spend is recorded services plus resolved defects, counted on the day the service was recorded or the defect was resolved; imported fuel-card spend is shown as its own band on Spend over time, folded into Cost vs usage, and broken out on its own in Fuel cost per km. Planned is scheduled servicing; unplanned is a defect repair. The KPIs above cover servicing, repairs and fuel for the ${cfg.label} on screen, against the average of the ${cfg.baselineN} ${cfg.baselineN === 1 ? cfg.label : cfg.plural} before. Running cost divides a vehicle's spend by the distance or hours covered between its first and last service in the window, so it needs at least two services to show a rate.</p>
+      <p class="section-foot muted small">Spend is recorded services plus resolved defects, counted on the day the service was recorded or the defect was resolved; imported fuel-card spend and Linkt tolls are shown as their own bands on Spend over time and counted in total spend; folded into Cost vs usage, and broken out on its own in Fuel cost per km. Planned is scheduled servicing; unplanned is a defect repair. The KPIs above cover servicing, repairs and fuel for the ${cfg.label} on screen, against the average of the ${cfg.baselineN} ${cfg.baselineN === 1 ? cfg.label : cfg.plural} before. Running cost divides a vehicle's spend by the distance or hours covered between its first and last service in the window, so it needs at least two services to show a rate.</p>
 
       ${projection(chartEnd())}`;
 
@@ -300,6 +315,7 @@ AD.views['cost-sheet'] = (function () {
   function months(end) {
     const pts = monthlyPoints(end);
     const anyFuel = pts.some((p) => p.fuel > 0);
+    const anyToll = pts.some((p) => p.toll > 0);
     const top = Math.max(...pts.map((p) => p.grand), 1);
     const pct = (v) => (v / top) * 100;
     const rows = pts.map((p, i) => `
@@ -307,6 +323,7 @@ AD.views['cost-sheet'] = (function () {
         ['Planned', L.fmtAUD(p.planned), COLOR_PLANNED],
         ['Unplanned', L.fmtAUD(p.unplanned), COLOR_UNPLANNED],
         ...(p.fuel ? [['Fuel', L.fmtAUD(p.fuel), COLOR_FUEL]] : []),
+        ...(p.toll ? [['Tolls', L.fmtAUD(p.toll), COLOR_TOLL]] : []),
         ['Total', L.fmtAUD(p.grand), 'var(--ink)']
       ])}>
         <span class="hb-label">${esc(p.short)}</span>
@@ -314,18 +331,22 @@ AD.views['cost-sheet'] = (function () {
           ${p.planned ? `<i style="width:${pct(p.planned)}%;background:${COLOR_PLANNED}"></i>` : ''}
           ${p.unplanned ? `<i style="width:${pct(p.unplanned)}%;background:${COLOR_UNPLANNED}"></i>` : ''}
           ${p.fuel ? `<i style="width:${pct(p.fuel)}%;background:${COLOR_FUEL}"></i>` : ''}
+          ${p.toll > 0 ? `<i style="width:${pct(p.toll)}%;background:${COLOR_TOLL}"></i>` : ''}
         </span>
         <span class="hb-val">${p.grand ? L.fmtAUD(p.grand) : '—'}</span>
       </div>`).join('');
     const legend = [{ label: 'Planned servicing', color: COLOR_PLANNED }, { label: 'Unplanned repairs', color: COLOR_UNPLANNED }];
     if (anyFuel) legend.push({ label: 'Fuel', color: COLOR_FUEL });
+    if (anyToll) legend.push({ label: 'Tolls', color: COLOR_TOLL });
+    const head = ['Month', 'Planned', 'Unplanned'].concat(anyFuel ? ['Fuel'] : [], anyToll ? ['Tolls'] : [], ['Total']);
+    const tableRows = pts.map((p) => [p.full, L.fmtAUD(p.planned), L.fmtAUD(p.unplanned)]
+      .concat(anyFuel ? [L.fmtAUD(p.fuel)] : [], anyToll ? [L.fmtAUD(p.toll)] : [], [L.fmtAUD(p.grand)]));
+    const what = ['servicing', 'repairs'].concat(anyFuel ? ['fuel'] : [], anyToll ? ['tolls'] : []);
     return `<figure class="viz-card">
-      <figcaption><h3>Month by month</h3><span class="viz-sub">${TREND_MONTHS} months to ${T.fmtKey(end)} · servicing, repairs${anyFuel ? ' and fuel' : ''}</span></figcaption>
+      <figcaption><h3>Month by month</h3><span class="viz-sub">${TREND_MONTHS} months to ${T.fmtKey(end)} · ${what.slice(0, -1).join(', ')} and ${what[what.length - 1]}</span></figcaption>
       ${V.legend(legend, { counts: false })}
       <div class="hb cs-months">${rows}</div>
-      ${anyFuel
-        ? V.table(['Month', 'Planned', 'Unplanned', 'Fuel', 'Total'], pts.map((p) => [p.full, L.fmtAUD(p.planned), L.fmtAUD(p.unplanned), L.fmtAUD(p.fuel), L.fmtAUD(p.grand)]))
-        : V.table(['Month', 'Planned', 'Unplanned', 'Total'], pts.map((p) => [p.full, L.fmtAUD(p.planned), L.fmtAUD(p.unplanned), L.fmtAUD(p.total)]))}
+      ${V.table(head, tableRows)}
     </figure>`;
   }
 
@@ -346,9 +367,9 @@ AD.views['cost-sheet'] = (function () {
       const showMonth = p.m !== lastMonth;
       lastMonth = p.m;
       const rows = rowsBetween(from, T.addDays(from, 6));
-      const maint = sum(rows), fuel = fuelBetween(from, T.addDays(from, 6));
+      const maint = sum(rows), fuel = fuelBetween(from, T.addDays(from, 6)), toll = tollBetween(from, T.addDays(from, 6));
       return {
-        total: maint, maint, fuel, grand: maint + fuel, planned: sumKind(rows, PLANNED), unplanned: sumKind(rows, UNPLANNED),
+        total: maint, maint, fuel, toll, fuelTop: maint + fuel, grand: maint + fuel + toll, planned: sumKind(rows, PLANNED), unplanned: sumKind(rows, UNPLANNED),
         label: showMonth ? `${p.d} ${T.MONTHS[p.m - 1].slice(0, 3)}` : String(p.d), full: `Week of ${T.fmtKey(from)}`
       };
     });
@@ -361,10 +382,10 @@ AD.views['cost-sheet'] = (function () {
       const dt = new Date(Date.UTC(y, m - 1 - (TREND_MONTHS - 1 - i), 1));
       const key = dt.toISOString().slice(0, 7);
       const rows = rowsForMonth(key);
-      const maint = sum(rows), fuel = fuelForMonth(key);
+      const maint = sum(rows), fuel = fuelForMonth(key), toll = tollForMonth(key);
       const toDate = key === T.todayKey().slice(0, 7);
       return {
-        total: maint, maint, fuel, grand: maint + fuel, planned: sumKind(rows, PLANNED), unplanned: sumKind(rows, UNPLANNED),
+        total: maint, maint, fuel, toll, fuelTop: maint + fuel, grand: maint + fuel + toll, planned: sumKind(rows, PLANNED), unplanned: sumKind(rows, UNPLANNED),
         label: T.MONTHS[dt.getUTCMonth()].slice(0, 3),
         short: `${T.MONTHS[dt.getUTCMonth()].slice(0, 3)} ${String(dt.getUTCFullYear()).slice(2)}`,
         full: `${T.MONTHS[dt.getUTCMonth()]} ${dt.getUTCFullYear()}${toDate ? ' (to date)' : ''}`
@@ -381,7 +402,7 @@ AD.views['cost-sheet'] = (function () {
     const recent = Array.from({ length: 3 }, (_, i) => {
       const dt = new Date(Date.UTC(y, m - 1 - i - skip, 1));
       const key = dt.toISOString().slice(0, 7);
-      return sum(rowsForMonth(key)) + fuelForMonth(key); // forecast total cost incl fuel
+      return sum(rowsForMonth(key)) + fuelForMonth(key) + tollForMonth(key); // forecast total cost incl fuel and tolls
     });
     const avgTotal = avgOf(recent);
     return Array.from({ length: PROJ_MONTHS }, (_, i) => {
@@ -389,7 +410,7 @@ AD.views['cost-sheet'] = (function () {
       const key = T.MONTHS[dt.getUTCMonth()] + ' ' + dt.getUTCFullYear();
       const total = projOverrides[key] != null ? projOverrides[key] : avgTotal;
       return {
-        total, maint: total, fuel: 0, grand: total, planned: total, unplanned: 0,
+        total, maint: total, fuel: 0, toll: 0, fuelTop: total, grand: total, planned: total, unplanned: 0,
         label: T.MONTHS[dt.getUTCMonth()].slice(0, 3),
         short: T.MONTHS[dt.getUTCMonth()].slice(0, 3) + ' ' + String(dt.getUTCFullYear()).slice(2),
         full: key + ' (forecast)',
@@ -410,6 +431,7 @@ AD.views['cost-sheet'] = (function () {
     const hasProj = proj.length > 0;
 
     const anyFuel = points.some((p) => p.fuel > 0);
+    const anyToll = points.some((p) => p.toll > 0);
     const top = niceTop(Math.max(...points.map((p) => p.grand), 1) * 1.15);
     const W = 880, H = 184, padL = 56, padR = 12, padT = 16, padB = 26;
     const plotW = W - padL - padR, plotH = H - padT - padB, n = points.length;
@@ -418,6 +440,7 @@ AD.views['cost-sheet'] = (function () {
     // coords is the top (grand) line — marks, forecast and dots ride on it.
     const coords = points.map((p, i) => ({ x: x(i), y: y(p.grand) }));
     const maintCoords = points.map((p, i) => ({ x: x(i), y: y(p.maint) }));
+    const fuelTopCoords = points.map((p, i) => ({ x: x(i), y: y(p.fuelTop != null ? p.fuelTop : p.grand) })); // maintenance + fuel
     const plannedCoords = points.map((p, i) => ({ x: x(i), y: y(p.planned) }));
     const clampY = (v) => Math.max(padT, Math.min(padT + plotH, v));
     const spline = (pts) => pts.length < 2 ? `M${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}` : pts.reduce((d, p1, i) => {
@@ -437,13 +460,16 @@ AD.views['cost-sheet'] = (function () {
     const histCoords = hasProj ? coords.slice(0, splitIdx + 1) : coords;          // grand (top)
     const histMaint = hasProj ? maintCoords.slice(0, splitIdx + 1) : maintCoords;  // planned + unplanned
     const histPlanned = hasProj ? plannedCoords.slice(0, splitIdx + 1) : plannedCoords;
+    const histFuelTop = hasProj ? fuelTopCoords.slice(0, splitIdx + 1) : fuelTopCoords;
     const histGrandD = spline(histCoords);
+    const histFuelTopD = spline(histFuelTop);
     const histMaintD = spline(histMaint);
     const histPlannedD = spline(histPlanned);
     const histLineD = histMaintD; // the maintenance total line keeps its amber styling
     const areaD = `${histPlannedD} L${histPlanned[histPlanned.length - 1].x.toFixed(1)},${floorY} L${histPlanned[0].x.toFixed(1)},${floorY} Z`;
     const bandD = `${histMaintD} ${spline([...histPlanned].reverse()).replace(/^M/, 'L')} Z`;     // unplanned: planned → maint
-    const fuelBandD = anyFuel ? `${histGrandD} ${spline([...histMaint].reverse()).replace(/^M/, 'L')} Z` : ''; // fuel: maint → grand
+    const fuelBandD = anyFuel ? `${histFuelTopD} ${spline([...histMaint].reverse()).replace(/^M/, 'L')} Z` : ''; // fuel: maint → maint + fuel
+    const tollBandD = anyToll ? `${histGrandD} ${spline([...histFuelTop].reverse()).replace(/^M/, 'L')} Z` : ''; // tolls: maint + fuel → grand
     // Forecast: standalone zone after NOW — NOT connected to the actuals
     const projCoords = hasProj ? coords.slice(splitIdx + 1) : [];
     const projLineD = projCoords.length >= 2 ? spline(projCoords) : (projCoords.length === 1 ? `M${projCoords[0].x.toFixed(1)},${projCoords[0].y.toFixed(1)}` : '');
@@ -487,7 +513,9 @@ AD.views['cost-sheet'] = (function () {
     }).join('');
     const plannedDots = seriesDots(histPlanned, COLOR_PLANNED, (p) => ['Planned servicing', L.fmtAUD(p.planned), COLOR_PLANNED]);
     const maintDots = seriesDots(histMaint, COLOR_UNPLANNED, (p) => ['Unplanned repairs', L.fmtAUD(p.unplanned), COLOR_UNPLANNED]);
-    const grandDots = anyFuel ? seriesDots(histCoords, COLOR_FUEL, (p) => ['Fuel', L.fmtAUD(p.fuel), COLOR_FUEL]) : '';
+    const fuelDots = anyFuel ? seriesDots(histFuelTop, COLOR_FUEL, (p) => ['Fuel', L.fmtAUD(p.fuel), COLOR_FUEL]) : '';
+    const tollDots = anyToll ? seriesDots(histCoords, COLOR_TOLL, (p) => ['Tolls', L.fmtAUD(p.toll), COLOR_TOLL]) : '';
+    const grandDots = fuelDots + tollDots;
     const projMarks = projCoords.map((c, j) => {
       const p = points[splitIdx + 1 + j];
       const cx = c.x.toFixed(1), cy = c.y.toFixed(1);
@@ -497,12 +525,16 @@ AD.views['cost-sheet'] = (function () {
       </g>`;
     }).join('');
     const marks = plannedDots + maintDots + grandDots + projMarks;
-    const ariaDesc = points.map((p) => `${p.full}: ${L.fmtAUD(p.grand)} total, ${L.fmtAUD(p.fuel)} fuel, ${L.fmtAUD(p.unplanned)} unplanned`).join(', ');
+    const ariaDesc = points.map((p) => `${p.full}: ${L.fmtAUD(p.grand)} total, ${L.fmtAUD(p.fuel)} fuel, ${L.fmtAUD(p.toll || 0)} tolls, ${L.fmtAUD(p.unplanned)} unplanned`).join(', ');
 
-    const fuelLayer = fuelBandD
+    const fuelLayer = (fuelBandD
       ? `<path d="${fuelBandD}" class="cs-band-fuel"></path>
-         <path d="${histGrandD}" class="cs-line-grand" pathLength="1"></path>`
-      : '';
+         <path d="${histFuelTopD}" class="cs-line-grand" pathLength="1"></path>`
+      : '')
+      + (tollBandD
+      ? `<path d="${tollBandD}" class="cs-band-toll"></path>
+         <path d="${histGrandD}" class="cs-line-toll" pathLength="1"></path>`
+      : '');
     let svgBody;
     if (hasProj) {
       svgBody = `${grid}
@@ -532,6 +564,7 @@ AD.views['cost-sheet'] = (function () {
       { label: 'Unplanned repairs', color: COLOR_UNPLANNED }
     ];
     if (anyFuel) legendItems.push({ label: 'Fuel (imported)', color: COLOR_FUEL });
+    if (anyToll) legendItems.push({ label: 'Tolls (Linkt)', color: COLOR_TOLL });
     if (hasProj) legendItems.push({ label: 'Forecast', color: 'var(--violet)' });
 
     return `<figure class="viz-card">
@@ -558,6 +591,11 @@ AD.views['cost-sheet'] = (function () {
               <stop offset="0%" style="stop-color:var(--cs-blue);stop-opacity:.32"></stop>
               <stop offset="60%" style="stop-color:var(--cs-blue);stop-opacity:.14"></stop>
               <stop offset="100%" style="stop-color:var(--cs-blue);stop-opacity:.04"></stop>
+            </linearGradient>
+            <linearGradient id="cs-band-toll-grad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" style="stop-color:${COLOR_TOLL};stop-opacity:.34"></stop>
+              <stop offset="60%" style="stop-color:${COLOR_TOLL};stop-opacity:.14"></stop>
+              <stop offset="100%" style="stop-color:${COLOR_TOLL};stop-opacity:.04"></stop>
             </linearGradient>
             <linearGradient id="cs-proj-area-grad" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" style="stop-color:var(--violet);stop-opacity:.30"></stop>
@@ -1003,8 +1041,8 @@ AD.views['cost-sheet'] = (function () {
    * the average price per litre.
    */
   /**
-   * Tolls, from imported Linkt statements: kept as their own section, not
-   * folded into the spend figures above. Weekly / monthly / yearly figures are
+   * Tolls, from imported Linkt statements: the detail behind the pink tolls
+   * band in Spend over time and the Toll share card. Weekly / monthly / yearly figures are
    * the imported statements' daily average (total ÷ the days the statements
    * cover) scaled up, so they're a run rate, not a calendar total. Each line is
    * attributed to a vehicle from the CURRENT register (plate, or the vehicle's
@@ -1101,7 +1139,7 @@ AD.views['cost-sheet'] = (function () {
     const topRoad = (g) => { const e = [...g.roads.entries()].sort((a, b) => b[1] - a[1])[0]; return e ? e[0] : ''; };
     const SHOW = 12;
     const vehRows = vehicles.slice(0, SHOW).map((g, i) => `<a class="cs-row cs-row-art cs-fuelkm-row" href="${vehHref(g.v.id)}" style="--i:${i}" ${V.tipAttr(g.v.id, [
-        ['Tolls', aud2(g.total), '#8b7ee8'],
+        ['Tolls', aud2(g.total), COLOR_TOLL],
         ['Trips', g.trips.toLocaleString('en-AU'), 'var(--muted)'],
         ...(g.fees ? [['No Tag fees', `${g.fees} · ${aud2(g.feeAmt)}`, 'var(--amber)']] : []),
         ...(topRoad(g) ? [['Most used', topRoad(g), 'var(--muted)']] : []),
@@ -1141,7 +1179,7 @@ AD.views['cost-sheet'] = (function () {
       .concat(looseList.map((g) => [g.tag ? `Tag ${g.tag}` : `Plate ${g.plate}`, '', String(g.count - g.fees), String(g.fees), aud2(g.total), aud2((g.total / coverDays) * 7)]));
 
     const body = `
-      <figcaption><span class="viz-sub">Linkt toll trips and fees by vehicle. Kept separate from the spend figures above. Weekly, monthly and yearly figures are the daily average of the imported statements; amounts include GST.</span></figcaption>
+      <figcaption><span class="viz-sub">Linkt toll trips and fees by vehicle. Included in total spend and Spend over time above (pink). Weekly, monthly and yearly figures are the daily average of the imported statements; amounts include GST.</span></figcaption>
       ${kpis}
       <div class="cs-rows">${vehRows}</div>
       ${vehicles.length > SHOW ? `<p class="cs-more">${vehicles.length - SHOW} more vehicle${vehicles.length - SHOW === 1 ? '' : 's'} in the table.</p>` : ''}
