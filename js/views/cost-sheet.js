@@ -558,10 +558,14 @@ AD.views['cost-sheet'] = (function () {
     const histUnplannedD = spline(histUnplanned);
     const histFuelD = spline(histFuel);
     const histTollD = spline(histToll);
-    // Forecast: standalone zone after NOW, NOT connected to the actuals.
+    // Forecast: continues on from the last real point (NOW), dashed violet so
+    // it reads as a forecast; its dots sit only on the forecast months.
     const projCoords = hasProj ? coords.slice(splitIdx + 1) : [];
-    const projLineD = projCoords.length >= 2 ? spline(projCoords) : (projCoords.length === 1 ? `M${projCoords[0].x.toFixed(1)},${projCoords[0].y.toFixed(1)}` : '');
-    const projAreaD = projCoords.length ? `${projLineD} L${projCoords[projCoords.length - 1].x.toFixed(1)},${floorY} L${projCoords[0].x.toFixed(1)},${floorY} Z` : '';
+    const projPath = hasProj ? coords.slice(splitIdx) : [];
+    // Straight segments: the forecast is a flat average, and a smoothed curve
+    // would overshoot it and suggest a bump that isn't forecast.
+    const projLineD = projPath.length >= 2 ? projPath.map((p, i) => `${i ? 'L' : 'M'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ') : '';
+    const projAreaD = projLineD ? `${projLineD} L${projPath[projPath.length - 1].x.toFixed(1)},${floorY} L${projPath[0].x.toFixed(1)},${floorY} Z` : '';
 
     const hline = (gy, cls) => `<line x1="${padL}" y1="${gy.toFixed(1)}" x2="${W - padR}" y2="${gy.toFixed(1)}" class="${cls}"></line>`;
     const grid = ticks.map((v) => hline(y(v), v === 0 ? 'cs-grid' : 'cs-grid cs-grid-minor')).join('')
@@ -684,7 +688,7 @@ AD.views['cost-sheet'] = (function () {
           ${layers}
           ${hasProj ? `<g class="cs-proj-g">
             ${projAreaD ? `<path d="${projAreaD}" class="cs-proj-area"></path>` : ''}
-            ${projLineD ? `<path d="${projLineD}" class="cs-line-path" pathLength="1"></path>` : ''}
+            ${projLineD ? `<path d="${projLineD}" class="cs-line-path"></path>` : ''}
           </g>
           ${nowMarker}` : ''}
           ${yTicks}${xTicks}${marks}`;
