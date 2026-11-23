@@ -171,9 +171,9 @@ AD.views['cost-sheet'] = (function () {
     const anchor = /^\d{4}-\d{2}-\d{2}$/.test(params.week || '') ? params.week : T.todayKey();
     start = periodStart(scope, anchor);
     period = params.period === 'week' ? 'week' : 'month';
-    usageMode = params.use === 'hr' ? 'hr' : 'km';
+    usageMode = ['hr', 'fuel'].includes(params.use) ? params.use : 'km';   // Cost vs usage: per km, per engine hour, or fuel per km
     trendView = params.view === 'total' ? 'total' : 'split';
-    fuelView = ['fuel', 'perkm', 'tolls'].includes(params.fv) ? params.fv : 'fuel';
+    fuelView = params.fv === 'tolls' ? 'tolls' : 'fuel';
     fresh = true;
     draw();
   }
@@ -808,6 +808,11 @@ AD.views['cost-sheet'] = (function () {
    * Independent of the week/month/year selector, like Fuel cost per km.
    */
   function costVsUsage() {
+    // One switch in the heading: total running cost per km or per engine hour,
+    // or fuel alone per km (with L/100km), which used to be its own section.
+    const useOpt = (key, label) => `<button type="button" data-use="${key}" class="${usageMode === key ? 'on' : ''}">${label}</button>`;
+    const usageSwitch = `<div class="seg" role="group" aria-label="Measure">${useOpt('km', 'Cost per km')}${useOpt('hr', 'Cost per hour')}${useOpt('fuel', 'Fuel per km')}</div>`;
+    if (usageMode === 'fuel') return fuelPerKm(usageSwitch);
     const WINDOW = USAGE_WINDOW_DAYS, MIN_DAYS = MIN_USAGE_DAYS, THIN_DAYS = THIN_USAGE_DAYS;
     const HIGH = 1.3, LOW = 0.6; // 30%+ above the median rate is costly; under 60% of the median use is low use
     const perHr = usageMode === 'hr';
@@ -844,16 +849,12 @@ AD.views['cost-sheet'] = (function () {
     const noSpend = tracked.filter((l) => l.use > 0 && !(l.spend > 0));
     const idle = tracked.filter((l) => !(l.use > 0));
 
-    const toggle = `<div class="seg cs-period cs-use-seg" role="group" aria-label="Measure cost against">
-        <button type="button" data-use="km" class="${perHr ? '' : 'on'}">Per km</button>
-        <button type="button" data-use="hr" class="${perHr ? 'on' : ''}">Per engine hour</button>
-      </div>`;
     const caption = `<figcaption><span class="viz-sub">Spend (fuel, servicing and repairs) ÷ the ${perHr ? 'engine hours' : 'kilometres'} the GPS recorded, over the same days. ${perHr ? 'Engine hours count stationary work, so this is the fairer measure for vac trucks.' : 'Distance suits tippers, utes and anything that earns its keep on the road.'} Hover a vehicle for the full working.</span></figcaption>`;
 
     if (!tracked.length) {
       return `<section class="section">
-        ${sectionHead({ title: 'Cost vs usage', meta: `Spend per ${perHr ? 'engine hour' : 'kilometre'} · from the daily GPS data` })}
-        <figure class="viz-card">${caption}${toggle}<p class="empty">No GPS-tracked vehicle has ${MIN_DAYS} days of daily ${perHr ? 'engine-hour' : 'distance'} data yet. The nightly sync adds a day for every tracked vehicle, so they appear here on their own.</p></figure>
+        ${sectionHead({ title: 'Cost vs usage', meta: `Spend per ${perHr ? 'engine hour' : 'kilometre'} · from the daily GPS data`, actions: usageSwitch })}
+        <figure class="viz-card">${caption}<p class="empty">No GPS-tracked vehicle has ${MIN_DAYS} days of daily ${perHr ? 'engine-hour' : 'distance'} data yet. The nightly sync adds a day for every tracked vehicle, so they appear here on their own.</p></figure>
       </section>`;
     }
 
@@ -946,10 +947,9 @@ AD.views['cost-sheet'] = (function () {
       fmtUse(l.use), `${l.days} days`]);
 
     return `<section class="section">
-      ${sectionHead({ title: 'Cost vs usage', meta: `${tracked.length} GPS-tracked vehicle${tracked.length === 1 ? '' : 's'} · spend ÷ ${perHr ? 'engine hours' : 'distance'} over the same days (${dayLabel} days of data, up to ${WINDOW})` })}
+      ${sectionHead({ title: 'Cost vs usage', meta: `${tracked.length} GPS-tracked vehicle${tracked.length === 1 ? '' : 's'} · spend ÷ ${perHr ? 'engine hours' : 'distance'} over the same days (${dayLabel} days of data, up to ${WINDOW})`, actions: usageSwitch })}
       <figure class="viz-card">
         ${caption}
-        ${toggle}
         ${kpis}
         ${rated.length ? `<div class="cs-rows">${rows}</div>${legend}` : ''}
         ${quietRows ? `<div class="cs-subhead">Tracked, but nothing to measure yet <span class="muted">(${noSpend.length + idle.length})</span></div>
@@ -982,7 +982,7 @@ AD.views['cost-sheet'] = (function () {
 
     if (!lines.length) {
       return `<section class="section">
-        ${sectionHead({ title: 'Fuel & tolls', meta: 'Fuel cost per km · real fuel ÷ real distance driven', actions })}
+        ${sectionHead({ title: 'Cost vs usage', meta: 'Fuel per km · real fuel ÷ real distance driven', actions })}
         <figure class="viz-card"><p class="empty">No GPS-tracked vehicle has at least ${MIN_DAYS} days of daily distance data yet. As the nightly sync builds up daily kilometres for the vac trucks and tippers, their fuel cost per kilometre appears here.</p></figure>
       </section>`;
     }
@@ -1075,7 +1075,7 @@ AD.views['cost-sheet'] = (function () {
     const dayLabel = dMin === dMax ? `${dMin} days` : `${dMin}–${dMax} days`;
 
     return `<section class="section">
-      ${sectionHead({ title: 'Fuel & tolls', actions, meta: `Fuel cost per km · ${lines.length} GPS-tracked vehicle${lines.length === 1 ? '' : 's'} · real fuel ÷ real distance, matched day-for-day (${dayLabel} of data)` })}
+      ${sectionHead({ title: 'Cost vs usage', actions, meta: `Fuel per km · ${lines.length} GPS-tracked vehicle${lines.length === 1 ? '' : 's'} · real fuel ÷ real distance, matched day-for-day (${dayLabel} of data)` })}
       <figure class="viz-card">
         <figcaption><span class="viz-sub">Fuel-card spend ÷ the distance the GPS recorded over the same days. Hover a vehicle for the full working.</span></figcaption>
         ${kpis}
@@ -1304,8 +1304,8 @@ AD.views['cost-sheet'] = (function () {
    */
   function fuelAndTolls() {
     const opt = (key, label) => `<button type="button" data-fuelview="${key}" class="${fuelView === key ? 'on' : ''}">${label}</button>`;
-    const sw = `<div class="seg" role="group" aria-label="Show">${opt('fuel', 'Fuel purchased')}${opt('perkm', 'Fuel cost per km')}${opt('tolls', 'Tolls')}</div>`;
-    return fuelView === 'tolls' ? tolls(sw) : fuelView === 'perkm' ? fuelPerKm(sw) : fuelLitreage(sw);
+    const sw = `<div class="seg" role="group" aria-label="Show">${opt('fuel', 'Fuel')}${opt('tolls', 'Tolls')}</div>`;
+    return fuelView === 'tolls' ? tolls(sw) : fuelLitreage(sw);
   }
 
   function fuelLitreage(actions = '') {
