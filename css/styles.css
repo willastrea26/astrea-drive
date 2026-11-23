@@ -3415,3 +3415,5 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 @media (max-width: 1100px) { .cost-kpis.cost-kpis-6 { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 600px) { .cost-kpis.cost-kpis-6 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .cs-hbar i.cs-seg-toll, .cs-legend-swatch.cs-seg-toll { background: #f472b6; }
+/* Cost vs usage: a vehicle still building up its 28 days of GPS + fuel data */
+.cs-hbar i.cs-progress { background: var(--muted); opacity: .55; }
