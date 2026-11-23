@@ -155,8 +155,8 @@ AD.views['cost-sheet'] = (function () {
   const vehHref = (id) => `#/vehicle/${encodeURIComponent(id)}`;
   // Long per-vehicle lists show the top 10; the rest sit behind "Show all".
   const LIST_SHOW = 10;
-  const topRows = (rowsArr, noun = 'vehicles') => rowsArr.slice(0, LIST_SHOW).join('')
-    + (rowsArr.length > LIST_SHOW ? `<details class="cs-show-all"><summary>Show all ${rowsArr.length} ${noun}</summary><div class="cs-rows">${rowsArr.slice(LIST_SHOW).join('')}</div></details>` : '');
+  const topRows = (rowsArr, noun = 'vehicles', show = LIST_SHOW) => rowsArr.slice(0, show).join('')
+    + (rowsArr.length > show ? `<details class="cs-show-all"><summary>Show all ${rowsArr.length} ${noun}</summary><div class="cs-rows">${rowsArr.slice(show).join('')}</div></details>` : '');
   const changeTone = (n) => n > 0.005 ? 'cs-delta-worse' : n < -0.005 ? 'cs-delta-better' : '';
   // For a vehicle with GPS data but no fuel in that window: when its latest
   // imported fill was, so "no fuel" never reads as "no fuel ever".
@@ -306,7 +306,7 @@ AD.views['cost-sheet'] = (function () {
 
       <div class="cs-pair">
         ${months(chartEnd())}
-        ${movers(now, base)}
+        ${topSpendingVehicles()}
       </div>
 
       ${fuelAndTolls()}
@@ -795,6 +795,86 @@ AD.views['cost-sheet'] = (function () {
    * the ones that explain the headline figure. A vehicle that didn't move says
    * nothing, so it stays out of the chart and only appears in the table view.
    */
+  /**
+   * Top spending vehicles for the period on screen (week / month / year):
+   * everything charged to each vehicle — fuel card, Linkt tolls, planned
+   * servicing, unplanned repairs — highest first, each bar split by type so
+   * the reason a vehicle is expensive is visible. Spend that isn't tied to a
+   * vehicle (person cards, unlinked toll tags) is noted underneath, so the
+   * list adds up to the Total spend card. (What moved — each vehicle against
+   * its own average — needs a previous period to compare with; movers() is
+   * kept for when there's a year of history.)
+   */
+  function topSpendingVehicles() {
+    const cfg = SCOPE_CFG[scope];
+    const from = start, to = end;
+    const inP = (d) => d && d >= from && d <= to;
+    const totals = new Map();
+    const get = (id) => {
+      if (!totals.has(id)) totals.set(id, { fuel: 0, toll: 0, planned: 0, unplanned: 0 });
+      return totals.get(id);
+    };
+    let looseFuel = 0, looseToll = 0;
+    fuelRows().forEach((r) => { if (!inP(r.date)) return; if (r.vehicleId) get(r.vehicleId).fuel += r.cost; else looseFuel += r.cost; });
+    rowsBetween(from, to).forEach((r) => { if (!r.vehicleId) return; get(r.vehicleId)[r.kind === PLANNED ? 'planned' : 'unplanned'] += r.cost; });
+    const byVeh = L.tollsByVehicle ? L.tollsByVehicle() : new Map();
+    let tollAssigned = 0;
+    byVeh.forEach((rows, id) => rows.forEach((r) => {
+      const d = String(r.date).slice(0, 10);
+      if (inP(d)) { const a = Number(r.amount) || 0; get(id).toll += a; tollAssigned += a; }
+    }));
+    looseToll = tollBetween(from, to) - tollAssigned;   // unlinked tags, shared tags, account credits
+
+    const lines = [...totals.entries()].map(([id, t]) => {
+      const v = AD.store.get('vehicles', id) || { id };
+      return { v, ...t, total: t.fuel + t.toll + t.planned + t.unplanned };
+    }).filter((l) => l.total > 0.005).sort((a, b) => b.total - a.total);
+
+    const head = `<figcaption><h3>Top spending vehicles</h3><span class="viz-sub">This ${cfg.label} · fuel, tolls, servicing and repairs per vehicle, highest first</span></figcaption>`;
+    if (!lines.length) {
+      return `<figure class="viz-card">${head}<p class="empty">No costs recorded against any vehicle this ${cfg.label}.</p></figure>`;
+    }
+    const top = lines[0].total || 1;
+    const parts = [['fuel', 'Fuel', 'cs-seg-fuel', COLOR_FUEL], ['toll', 'Tolls', 'cs-seg-toll', COLOR_TOLL],
+      ['planned', 'Servicing', 'cs-seg-planned', COLOR_PLANNED], ['unplanned', 'Repairs', 'cs-seg-unplanned', COLOR_UNPLANNED]];
+    const idCell = (v) => {
+      const art = (AD.art && AD.art.forVehicle(v, 44)) || '';
+      return `<span class="id">${art ? `<span class="cs-veh-art">${art}</span>` : ''}<span class="cs-id-text">${esc(v.id)}${v.rego ? `<small class="cs-rego">${esc(v.rego)}</small>` : ''}</span></span>`;
+    };
+    const rows = lines.map((l, i) => {
+      let left = 0;
+      const segs = parts.filter(([k]) => l[k] > 0).map(([k, , cls], j) => {
+        const w = (l[k] / top) * 100;
+        const s = `<i class="${cls}" style="left:${left}%;width:${w}%;--i:${j}"></i>`;
+        left += w;
+        return s;
+      }).join('');
+      const drv = l.v.driverId ? L.driverName(l.v.driverId) : '';
+      const split = parts.filter(([k]) => l[k] > 0).map(([k, label]) => `${label} ${L.fmtAUD(l[k])}`).join(' · ');
+      return `<a class="cs-row cs-row-art" href="${vehHref(l.v.id)}" style="--i:${i}" ${V.tipAttr(l.v.id, [
+          ...parts.filter(([k]) => l[k] > 0).map(([k, label, , color]) => [label, L.fmtAUD(l[k]), color]),
+          ['Total', L.fmtAUD(l.total), 'var(--ink)']
+        ])}>
+        ${idCell(l.v)}
+        <span class="cs-hbar cs-stack">${segs}</span>
+        <span class="cs-row-val">${L.fmtAUD(l.total)}</span>
+        <span class="cs-row-meta">${drv ? `<span class="cs-driver">${esc(drv)}</span> · ` : ''}${split}</span>
+      </a>`;
+    });
+    const used = parts.filter(([k]) => lines.some((l) => l[k] > 0));
+    const legend = `<p class="cs-legend">${used.map(([, label, cls]) => `<span><i class="cs-legend-swatch ${cls}"></i>${label}</span>`).join('')}</p>`;
+    const loose = looseFuel + looseToll;
+    const tableRows = lines.map((l) => [l.v.id, l.v.rego || '', l.v.driverId ? L.driverName(l.v.driverId) || '—' : '—',
+      L.fmtAUD(l.fuel), L.fmtAUD(l.toll), L.fmtAUD(l.planned), L.fmtAUD(l.unplanned), L.fmtAUD(l.total)]);
+    return `<figure class="viz-card">
+      ${head}
+      ${legend}
+      <div class="cs-rows">${topRows(rows, 'vehicles', 8)}</div>
+      ${Math.abs(loose) > 0.5 ? `<p class="cs-more">Plus ${L.fmtAUD(loose)} not tied to a vehicle (person fuel cards, unlinked toll tags, account credits), which is in Total spend.</p>` : ''}
+      ${V.table(['Vehicle', 'Rego', 'Assigned driver', 'Fuel', 'Tolls', 'Servicing', 'Repairs', 'Total'], tableRows)}
+    </figure>`;
+  }
+
   function movers(now, base) {
     const cfg = SCOPE_CFG[scope];
     const avgLabel = `${cfg.baselineN}-${cfg.label} average`;
