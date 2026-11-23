@@ -189,7 +189,10 @@ AD.linkt = (function () {
     for (let p = 1; p <= doc.numPages; p++) {
       const page = await doc.getPage(p);
       const content = await page.getTextContent();
-      pages.push(AD.bpPdf.itemsToLines(content.items));
+      const lines = AD.bpPdf.itemsToLines(content.items);
+      // Positioned text too, for the BP Fleet Control Report's landscape pages.
+      lines.cells = AD.bpPdf.cellsOf(content.items, page.getViewport({ scale: 1 }));
+      pages.push(lines);
     }
     return pages;
   }

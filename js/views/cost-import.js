@@ -148,7 +148,7 @@ AD.importFuelData = (function () {
           const pages = await AD.linkt.readPages(file, pdfjs);
           if (AD.linkt.isLinkt(pages)) { renderLinktStep(container, pages); return; }
           const result = AD.bpPdf.parsePages(pages, AD.store.all('vehicles'));
-          if (!result.rows.length) throw new Error('No BP fuel transactions could be read from this PDF. Use the BP Plus Vehicle Analysis report or export the transactions to Excel.');
+          if (!result.rows.length) throw new Error('No BP fuel transactions could be read from this PDF. Use the BP Plus Vehicle Analysis or Fleet Control Report (By Card Number), or export the transactions to Excel.');
           parsed = { headers: result.headers, rows: result.rows, provider: 'BP', pdfMeta: result.meta };
           renderMapStep(container);
           return;
@@ -282,8 +282,16 @@ AD.importFuelData = (function () {
         card: guess(H, [/card number/i, /^card$/i]),
         holder: guess(H, [/name on card/i, /card ?holder/i])
       };
-      const pdfNote = parsed.pdfMeta
-        ? `<p class="fi-note-skip">BP PDF: <b>${parsed.pdfMeta.transactions}</b> receipt-level transactions from ${parsed.pdfMeta.lineItems} product lines across ${parsed.pdfMeta.vehicleCards} vehicle cards. ${parsed.pdfMeta.feeRows} card fee rows (${Number(parsed.pdfMeta.feeTotal).toLocaleString('en-AU', { style: 'currency', currency: 'AUD' })}) were deliberately excluded.${parsed.pdfMeta.unreadableRows ? ` <b>${parsed.pdfMeta.unreadableRows}</b> dated row${parsed.pdfMeta.unreadableRows === 1 ? '' : 's'} could not be read.` : ''}</p>`
+      const aud = (n) => Number(n).toLocaleString('en-AU', { style: 'currency', currency: 'AUD' });
+      const pm = parsed.pdfMeta;
+      // Fleet Control Report: check the read against BP's own account summary.
+      const rec = pm && pm.reconcile;
+      const recOk = rec && Math.abs(rec.expected - rec.parsed) < 0.05;
+      const pdfNote = pm
+        ? `<p class="fi-note-skip">BP PDF${pm.format ? ` (${esc(pm.format)})` : ''}: <b>${pm.transactions}</b> receipt-level transactions from ${pm.lineItems} product lines across ${pm.vehicleCards} vehicle cards${pm.personCards ? ` and ${pm.personCards} person card${pm.personCards === 1 ? '' : 's'}${parsed.rows.some((r) => r[9]) ? ' (their fuel is imported as spend not tied to a vehicle)' : ' (card fees only, no fuel)'}` : ''}. ${pm.feeRows} card fee rows (${aud(pm.feeTotal)}) were deliberately excluded.${pm.unreadableRows ? ` <b>${pm.unreadableRows}</b> dated row${pm.unreadableRows === 1 ? '' : 's'} could not be read.` : ''}</p>
+          ${rec ? (recOk
+            ? `<p class="fi-note-skip">✓ Matches BP’s account summary: ${aud(rec.parsed)} of fuel, AdBlue and other products (the account total less card fees).</p>`
+            : `<p class="fi-warn">Doesn’t match BP’s account summary: read ${aud(rec.parsed)}, BP’s products total is ${aud(rec.expected)}. Check before importing.</p>`) : ''}`
         : '';
       const isBpPdf = parsed.provider === 'BP';
       parsed.fixedMapping = isBpPdf ? def : null;
