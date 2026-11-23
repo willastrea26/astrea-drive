@@ -504,7 +504,9 @@ AD.views['cost-sheet'] = (function () {
   function trend(end) {
     const isMonthly = period === 'month';
     const actuals = isMonthly ? monthlyPoints(end) : weeklyPoints(end);
-    const proj = isMonthly && trendView === 'total' ? projectedMonths(end) : [];
+    // Total view: six forecast months. Breakdown: just next month, where every
+    // cost's line meets at the forecast total.
+    const proj = !isMonthly ? [] : trendView === 'total' ? projectedMonths(end) : projectedMonths(end).slice(0, 1);
     const points = actuals.concat(proj);
     const splitIdx = actuals.length - 1;
     const hasProj = proj.length > 0;
@@ -516,7 +518,7 @@ AD.views['cost-sheet'] = (function () {
     // thin grey line carries the month's total, and the forecast continues it.
     // Axis: 4–6 round steps, every gridline labelled.
     // Total view scales to the total; Breakdown to its tallest single line.
-    const peak = (p) => (trendView === 'total' ? p.grand : Math.max(p.fuel || 0, p.toll || 0, p.planned || 0, p.unplanned || 0));
+    const peak = (p) => (trendView === 'total' || p.projected ? p.grand : Math.max(p.fuel || 0, p.toll || 0, p.planned || 0, p.unplanned || 0));
     const maxV = Math.max(...points.map(peak), 1) * 1.06;
     const rawStep = maxV / 5;
     const mag = Math.pow(10, Math.floor(Math.log10(rawStep)));
@@ -566,6 +568,21 @@ AD.views['cost-sheet'] = (function () {
     // would overshoot it and suggest a bump that isn't forecast.
     const projLineD = projPath.length >= 2 ? projPath.map((p, i) => `${i ? 'L' : 'M'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ') : '';
     const projAreaD = projLineD ? `${projLineD} L${projPath[projPath.length - 1].x.toFixed(1)},${floorY} L${projPath[0].x.toFixed(1)},${floorY} Z` : '';
+    // Breakdown: each cost's line runs on from its last real point (tolls from
+    // their last month with a statement) and they all meet at the forecast total.
+    let convergeD = '';
+    if (hasProj && trendView !== 'total' && projCoords.length) {
+      const target = projCoords[0];
+      const starts = [];
+      if (anyFuel) starts.push(histFuel[splitIdx]);
+      if (anyToll) {
+        let i = splitIdx;
+        while (i > 0 && !(points[i].toll > 0)) i--;
+        if (points[i].toll > 0) starts.push(histToll[i]);
+      }
+      starts.push(histPlanned[splitIdx], histUnplanned[splitIdx]);
+      convergeD = starts.map((s) => `M${s.x.toFixed(1)},${s.y.toFixed(1)} L${target.x.toFixed(1)},${target.y.toFixed(1)}`).join(' ');
+    }
 
     const hline = (gy, cls) => `<line x1="${padL}" y1="${gy.toFixed(1)}" x2="${W - padR}" y2="${gy.toFixed(1)}" class="${cls}"></line>`;
     const grid = ticks.map((v) => hline(y(v), v === 0 ? 'cs-grid' : 'cs-grid cs-grid-minor')).join('')
@@ -641,11 +658,13 @@ AD.views['cost-sheet'] = (function () {
         ...(b.maintN ? [[`Servicing (${months(b.maintN)})`, L.fmtAUD(b.planned), COLOR_PLANNED], [`Repairs (${months(b.maintN)})`, L.fmtAUD(b.unplanned), COLOR_UNPLANNED]] : [])
       ];
     };
+    const meet = !!convergeD;   // Breakdown's one solid forecast dot
     const projMarks = projCoords.map((c, j) => {
       const p = points[splitIdx + 1 + j];
       const cx = c.x.toFixed(1), cy = c.y.toFixed(1);
-      return `<g class="cs-mark cs-proj-mark" style="--i:${splitIdx + 1 + j}">
-        <circle cx="${cx}" cy="${cy}" r="4" class="cs-dot"></circle>
+      return `<g class="cs-mark cs-proj-mark${meet ? ' cs-proj-meet' : ''}" style="--i:${splitIdx + 1 + j}">
+        ${meet ? `<circle cx="${cx}" cy="${cy}" r="11" class="cs-halo"></circle>` : ''}
+        <circle cx="${cx}" cy="${cy}" r="${meet ? 6 : 4}" class="cs-dot"></circle>
         <circle cx="${cx}" cy="${cy}" r="16" class="cs-hit" ${V.tipAttr(p.full, forecastTip(p))}></circle>
       </g>`;
     }).join('');
@@ -687,8 +706,9 @@ AD.views['cost-sheet'] = (function () {
     const svgBody = `${grid}
           ${layers}
           ${hasProj ? `<g class="cs-proj-g">
+            ${convergeD ? `<path d="${convergeD}" class="cs-line-path"></path>` : `
             ${projAreaD ? `<path d="${projAreaD}" class="cs-proj-area"></path>` : ''}
-            ${projLineD ? `<path d="${projLineD}" class="cs-line-path"></path>` : ''}
+            ${projLineD ? `<path d="${projLineD}" class="cs-line-path"></path>` : ''}`}
           </g>
           ${nowMarker}` : ''}
           ${yTicks}${xTicks}${marks}`;
@@ -700,10 +720,10 @@ AD.views['cost-sheet'] = (function () {
       { label: 'Planned servicing', color: COLOR_PLANNED },
       { label: 'Unplanned repairs', color: COLOR_UNPLANNED }
     ];
-    if (hasProj) legendItems.push({ label: 'Forecast (average month, not actual spend)', color: 'var(--violet)' });
+    if (hasProj) legendItems.push({ label: showTotal ? 'Forecast (average month, not actual spend)' : 'Next month’s forecast (all costs together)', color: 'var(--violet)' });
 
     return `<figure class="viz-card">
-      <figcaption><h3>Spend over time</h3><span class="viz-sub">${isMonthly ? TREND_MONTHS + ' months' : TREND_WEEKS + ' weeks'} to ${T.fmtKey(end)}${hasProj ? ' + ' + PROJ_MONTHS + '-month forecast' : ''}</span></figcaption>
+      <figcaption><h3>Spend over time</h3><span class="viz-sub">${isMonthly ? TREND_MONTHS + ' months' : TREND_WEEKS + ' weeks'} to ${T.fmtKey(end)}${hasProj ? (showTotal ? ' + ' + PROJ_MONTHS + '-month forecast' : ' + next month’s forecast') : ''}</span></figcaption>
       <div class="cs-trend-controls">
         <div class="seg cs-period" role="group" aria-label="Chart period">
           <button type="button" data-period="week" class="${period === 'week' ? 'on' : ''}">Weekly</button>
