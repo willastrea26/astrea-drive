@@ -11,24 +11,27 @@ window.AD = window.AD || {};
 AD.fleetReport = (function () {
   const L = AD.logic, T = AD.time;
 
-  // Astrea palette, in ExcelJS's AARRGGBB format.
+  // Astrea brand palette (colour guide), in ExcelJS's AARRGGBB format: blue
+  // #1F68DB and white first, navy #002A54 for text and dark fills. Status
+  // colours (red/amber) only for state; "good" uses the brand blue.
   const COLOR = {
-    navy:      'FF12283D',  // sidebar / primary brand
-    navy2:     'FF1E3A52',
-    paper:     'FF2C4762',
-    mint:      'FF5FE0B4',  // accent + "under target" positive
-    mintSoft:  'FFCFF5E6',
-    ink:       'FF1E3148',  // body text
-    muted:     'FF657C92',
-    rule:      'FFD6DEE5',
-    ruleSoft:  'FFEDF2F6',
+    navy:      'FF002A54',  // dark brand colour — headers, text
+    navy2:     'FF113D6E',
+    paper:     'FF1F68DB',
+    mint:      'FF1F68DB',  // accent (was mint): the brand blue
+    mintSoft:  'FFECF3FD',
+    blue:      'FF1F68DB',
+    ink:       'FF002A54',  // body text
+    muted:     'FF7A8CA3',
+    rule:      'FFDDE4ED',
+    ruleSoft:  'FFF4F7FB',
     white:     'FFFFFFFF',
-    red:       'FFD9534F',  // over target / overdue
-    redSoft:   'FFFDE2E1',
-    amber:     'FFD98A1F',
-    amberSoft: 'FFFBE9CC',
-    green:     'FF2F8F56',  // on target / clear
-    greenSoft: 'FFDCF1E4'
+    red:       'FFD64545',  // expired / overdue / critical
+    redSoft:   'FFFCECEC',
+    amber:     'FFE3A008',  // due soon
+    amberSoft: 'FFFDF4DD',
+    green:     'FF1F68DB',  // clear / fine — brand blue (green is kept for actions)
+    greenSoft: 'FFECF3FD'
   };
 
   const FONT_HEAD = 'Calibri';
@@ -58,7 +61,7 @@ AD.fleetReport = (function () {
   // Fetch the horizontal Astrea mark for the cover sheet.
   async function loadLogo() {
     try {
-      const r = await fetch('assets/logo-horizontal-navy.png', { signal: AbortSignal.timeout(15000) });
+      const r = await fetch('assets/logo-lockup.png', { signal: AbortSignal.timeout(15000) });   // white logo, transparent — sits on the brand-blue band
       if (!r.ok) return null;
       return await r.arrayBuffer();
     } catch (e) { return null; }
@@ -517,15 +520,15 @@ AD.fleetReport = (function () {
       pageSetup: { orientation: 'portrait', paperSize: 9, margins: { left: 0.5, right: 0.5, top: 0.5, bottom: 0.5, header: 0.3, footer: 0.3 } }
     });
 
-    // Navy band
+    // Brand-blue band
     ws.getColumn(1).width = 4;
     for (let c = 2; c <= 10; c++) ws.getColumn(c).width = 12;
 
-    // Band rows 1..7 — solid navy, logo on left, title on right.
+    // Band rows 1..7 — solid brand blue, white logo on the left.
     for (let r = 1; r <= 7; r++) {
       ws.getRow(r).height = 24;
       for (let c = 1; c <= 10; c++) {
-        ws.getCell(r, c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR.navy } };
+        ws.getCell(r, c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR.blue } };
       }
     }
 
@@ -542,7 +545,7 @@ AD.fleetReport = (function () {
     ws.mergeCells('B9:J10');
     const title = ws.getCell('B9');
     title.value = 'Monthly Fleet Report';
-    title.font = { name: FONT_HEAD, size: 32, bold: true, color: { argb: COLOR.navy } };
+    title.font = { name: FONT_HEAD, size: 32, bold: true, color: { argb: COLOR.blue } };   // headings in brand blue (typography guide)
     title.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
 
     ws.mergeCells('B11:J11');
@@ -556,7 +559,7 @@ AD.fleetReport = (function () {
     ws.getCell('B12').font = { name: FONT_BODY, size: 10, color: { argb: COLOR.muted } };
     ws.getCell('B12').alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
 
-    // Mint accent rule under the title.
+    // Brand-blue rule under the title.
     for (let c = 2; c <= 10; c++) {
       ws.getCell(14, c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR.mint } };
     }
