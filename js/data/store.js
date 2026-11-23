@@ -190,10 +190,19 @@ AD.store = (function () {
       const pages = Math.ceil(total / TOLL_PAGE);
       const got = new Array(pages);
       let next = 0, short = false;
+      // One page, retried up to three times: with ~30 pages in flight, a single
+      // dropped request used to fail the whole load and leave tolls out silently.
+      const fetchPage = async (p) => {
+        for (let attempt = 1; ; attempt++) {
+          const res = await sb().from('toll_entries').select(TOLL_COLS).order('id').range(p * TOLL_PAGE, p * TOLL_PAGE + TOLL_PAGE - 1);
+          if (!res.error || attempt >= 3) return res;
+          await new Promise((r) => setTimeout(r, 600 * attempt));
+        }
+      };
       const worker = async () => {
         while (next < pages) {
           const p = next++;
-          const { data, error } = await sb().from('toll_entries').select(TOLL_COLS).order('id').range(p * TOLL_PAGE, p * TOLL_PAGE + TOLL_PAGE - 1);
+          const { data, error } = await fetchPage(p);
           if (error) throw error;
           got[p] = data || [];
           if (p < pages - 1 && got[p].length < TOLL_PAGE) short = true;   // server pages smaller than 1,000

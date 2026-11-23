@@ -318,6 +318,9 @@ AD.fleetReport = (function () {
       mtdActual, daysInMonth, dayOfMonth,
       ytdActual, monthsElapsedFull,
       tollThrough, tollsNotIn, noTag, sharedTags, fuelGaps, noFuelOnCard,
+      // What the totals are made of, for the report to state plainly.
+      tollsLoaded: AD.store.tollsState ? AD.store.tollsState() === 'ready' : true,
+      fuelCards: model ? model.fuelCardCoverage().map((c) => ({ card: c.card, from: c.from, to: c.to })) : [],
       svcOverdue, svcSoon, svcOk,
       regoExp, regoSoon, regoOk, regoUnknown,
       openDefects,
@@ -670,8 +673,9 @@ AD.fleetReport = (function () {
     const curMonthName = data.period.name;
     const cm = data.curMonth;
     const yf = data.yearForecast;
-    const split = [['Fuel', cm.fuel], ['Tolls', cm.toll], ['Servicing', cm.planned], ['Repairs', cm.unplanned]]
-      .filter(([, n]) => n > 0.5).map(([l, n]) => `${l} ${aud(n)}`).join(' · ') || 'Nothing recorded';
+    const split = ([['Fuel', cm.fuel], ['Tolls', cm.toll], ['Servicing', cm.planned], ['Repairs', cm.unplanned]]
+      .filter(([, n]) => n > 0.5).map(([l, n]) => `${l} ${aud(n)}`).join(' · ') || 'Nothing recorded')
+      + (data.tollsLoaded ? '' : ' · Linkt tolls could not be loaded, so they are NOT included — generate again');
 
     sectionBar(ws, 4, 'B', 'F', 'Spend and forecast');
 
@@ -1245,9 +1249,14 @@ AD.fleetReport = (function () {
     if (!S.tollsState || !S.loadTolls) return;
     if (S.tollsState() === 'ready' || S.tollsState() === 'missing') return;
     if (notify) notify('Loading Linkt tolls… this can take up to a minute');
-    try { await S.loadTolls(); } catch (e) { return; }
+    try { await S.loadTolls(); } catch (e) { /* checked below */ }
     const t0 = Date.now();
     while (S.tollsState() === 'loading' && Date.now() - t0 < 180000) await new Promise((r) => setTimeout(r, 500));
+    // One more go if it failed: a report without tolls is missing ~$20k a month.
+    if (S.tollsState() === 'missing') {
+      if (notify) notify('Retrying the Linkt tolls…');
+      try { await S.loadTolls(true); } catch (e) { /* the report says tolls are missing */ }
+    }
   }
 
   async function generate(onProgress, options = {}) {

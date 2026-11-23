@@ -253,123 +253,130 @@ AD.fleetReportPdf = (function () {
     return g.text(String(str), x, y, { size: 6.75, color: C.muted, ...o });
   }
 
-  /* The Astrea Drive mark is a road: an "A" whose two edges converge on the
-     horizon, with centre dashes shrinking toward it. Drawn large and faint as
-     the cover's one piece of decoration. */
-  function roadMotif(g, apexX, apexY, baseY, spread, opacity) {
+  /* The Astrea Drive mark, drawn from the logo's own vector (assets/
+     logo-drive-mark.svg, viewBox 360 × 410): an "A" that is a road — two
+     edges converging on the horizon, rounded at the apex and the feet, with
+     centre dashes shrinking ~30% each step toward the vanishing point. */
+  const MARK_A = [
+    ['M', 3.6, 300], ['L', 147.91, 22.48], ['A', 36.17, 0, 1, 212.09, 22.48], ['L', 356.4, 300],
+    ['A', 25.32, 1, 1, 311.24, 322.91], ['L', 188.02, 73.98], ['A', 8.95, 0, 0, 171.98, 73.98],
+    ['L', 48.76, 322.91], ['A', 25.32, 1, 1, 3.6, 300]
+  ];
+  // Centre dashes: [x, y, w, h] in the mark's units, each a fully rounded bar.
+  const MARK_DASHES = [[164.5, 266, 31, 64], [168.84, 195.6, 22.32, 44.8], [171.96, 146.32, 16.08, 31.36], [174.21, 111.82, 11.58, 21.96]];
+  /** Points along an SVG circular arc (rx = ry, no rotation), endpoint form. */
+  function arcPoints(x1, y1, r, large, sweep, x2, y2, n) {
+    const dx = (x1 - x2) / 2, dy = (y1 - y2) / 2;
+    const d2 = dx * dx + dy * dy;
+    const rr = Math.max(r, Math.sqrt(d2));
+    const co = (large !== sweep ? 1 : -1) * Math.sqrt(Math.max(0, (rr * rr - d2) / d2));
+    const cxp = co * dy, cyp = -co * dx;
+    const cx = cxp + (x1 + x2) / 2, cy = cyp + (y1 + y2) / 2;
+    const a1 = Math.atan2((dy - cyp) / rr, (dx - cxp) / rr);
+    let da = Math.atan2((-dy - cyp) / rr, (-dx - cxp) / rr) - a1;
+    if (sweep && da < 0) da += Math.PI * 2;
+    if (!sweep && da > 0) da -= Math.PI * 2;
+    return Array.from({ length: n }, (_, i) => { const a = a1 + (da * (i + 1)) / n; return [cx + rr * Math.cos(a), cy + rr * Math.sin(a)]; });
+  }
+  /** The mark at (x, y) — its top-left — `height` mm tall, in `rgb` at `opacity`. */
+  function driveMark(g, x, y, height, rgb, opacity) {
     const { doc } = g;
+    const s = height / 330;
+    const P = (px, py) => [x + px * s, y + py * s];
+    const pts = [];
+    let cur = null;
+    MARK_A.forEach((cmd) => {
+      if (cmd[0] === 'M' || cmd[0] === 'L') { cur = [cmd[1], cmd[2]]; pts.push(P(cur[0], cur[1])); }
+      else {
+        const [, r, large, sweep, ex, ey] = cmd;
+        arcPoints(cur[0], cur[1], r, large, sweep, ex, ey, Math.max(8, Math.round(r))).forEach(([px, py]) => pts.push(P(px, py)));
+        cur = [ex, ey];
+      }
+    });
     doc.saveGraphicsState();
-    doc.setGState(new doc.GState({ opacity, 'stroke-opacity': opacity }));
-    g.stroke(C.white);
-    doc.setLineWidth(10);
-    doc.setLineCap('round');
-    doc.line(apexX, apexY, apexX - spread, baseY);
-    doc.line(apexX, apexY, apexX + spread, baseY);
-    doc.setLineCap('butt');
-    g.fill(C.white);
-    // Each dash ~30% smaller than the one below it, as on the logo.
-    [[0.30, 2.2, 5.5], [0.47, 3.1, 8], [0.66, 4.4, 11.5], [0.90, 6.2, 16.5]].forEach(([t, w, h]) => {
-      const cy = apexY + (baseY - apexY) * t;
-      doc.roundedRect(apexX - w / 2, cy - h / 2, w, h, w / 2, w / 2, 'F');
+    if (opacity < 1) doc.setGState(new doc.GState({ opacity }));
+    g.fill(rgb);
+    const deltas = pts.slice(1).map((p, i) => [p[0] - pts[i][0], p[1] - pts[i][1]]);
+    doc.lines(deltas, pts[0][0], pts[0][1], [1, 1], 'F', true);
+    MARK_DASHES.forEach(([dx, dy, w, h]) => {
+      const [px, py] = P(dx, dy);
+      doc.roundedRect(px, py, w * s, h * s, (w * s) / 2, (w * s) / 2, 'F');
     });
     doc.restoreGraphicsState();
   }
 
-  function coverPage(g, data, logoWhite) {
+  /** Cover: brand blue, the report's name large, the Astrea Drive road "A" behind it — no figures. */
+  function coverPage(g, data, logos) {
     const { doc } = g;
     const P = data.period;
-    const monthName = P.name;
-    const aud = AD.fleetReport.aud;
-    const BLUE_H = 150;
+    g.rect(0, 0, PAGE.w, PAGE.h, C.blue);
+    // The road "A", large and faint in the upper right, cropped by the page
+    // edge, so the title, contents and sign-off sit on clean blue.
+    driveMark(g, 102, 30, 152, C.white, 0.09);
 
-    // Brand-blue field, white logo, the road motif.
-    g.rect(0, 0, PAGE.w, BLUE_H, C.blue);
-    roadMotif(g, 158, 34, BLUE_H + 30, 74, 0.1);
-    if (logoWhite) {
-      try { doc.addImage(logoWhite, 'PNG', M.l, 20, 46, 12.5, undefined, 'FAST'); }
-      catch (e) { g.text('Astrea Drive', M.l, 30, { size: 18, bold: true, color: C.white }); }
-    } else g.text('Astrea Drive', M.l, 30, { size: 18, bold: true, color: C.white });
+    // Product brand at the top: the Astrea Drive lockup (white, DRIVE in green).
+    if (logos.driveWhite) {
+      try { doc.addImage(logos.driveWhite, 'PNG', M.l, 22, 50, 13.6, undefined, 'FAST'); }
+      catch (e) { g.text('Astrea Drive', M.l, 32, { size: 25.2, bold: true, color: C.white }); }
+    } else g.text('Astrea Drive', M.l, 32, { size: 25.2, bold: true, color: C.white });
 
-    caps(g, `${P.kind} fleet report`, M.l, 104, { size: 8, color: [214, 228, 250], charSpace: 0.6 });
-    g.text(P.label, M.l, 120, { size: 34, bold: true, color: C.white });
-    g.text(`${data.isPartial ? `${P.isYear ? 'Year' : 'Month'} to date, through ${T.fmtKey(data.reportEnd)}` : `Full ${P.word}`}   ·   Issued ${T.fmtKey(data.today)}`,
-      M.l, 130, { size: 9, color: [214, 228, 250] });
+    // The report's name — what this document is — as the dominant line.
+    const light = [205, 222, 250];
+    let y = 128;
+    g.text(P.kind, M.l, y, { size: 25.2, bold: true, color: light });
+    y += 14;
+    g.text('Fleet Report', M.l, y, { size: 36, bold: true, color: C.white });
+    y += 9;
+    g.rect(M.l, y, 20, 0.9, C.white);
+    y += 11;
+    g.text(P.isYear ? `${P.label}${data.isPartial ? ', year to date' : ''}` : `${P.label}${data.isPartial ? ', month to date' : ''}`,
+      M.l, y, { size: 12.4, bold: true, color: C.white });
+    y += 6.5;
+    const longDate = (k) => { const p = T.parseKey(k); return `${p.d} ${T.MONTHS[p.m - 1]} ${p.y}`; };
+    const from = longDate(data.periodStart), to = longDate(data.reportEnd);
+    g.text(`${from} to ${to}   ·   Issued ${T.fmtKey(data.today)}`, M.l, y, { size: 9, color: light });
 
-    // Three headline figures on white, divided by hairlines rather than boxed.
-    const yf = data.yearForecast;
-    const avail = data.statusCounts['Available'];
-    const figs = [
-      { label: `Spent in ${monthName}${data.isPartial ? ' so far' : ''}`, value: aud(data.mtdActual), note: 'Fuel, tolls, servicing and repairs' },
-      yf ? { label: `Forecast for ${yf.year}`, value: aud(yf.total), note: 'Spend so far plus the average month', color: C.blue }
-        : { label: 'Last twelve months', value: aud(data.annualTotal), note: `Average month ${aud(data.avgMonth)}` },
-      { label: 'Fleet available now', value: data.vehicles.length ? `${avail} of ${data.vehicles.length}` : 'N/A', note: data.vehicles.length ? `${Math.round(data.availabilityPct * 100)}% of the fleet` : '' }
-    ];
-    const colW = CONTENT_W / 3;
-    figs.forEach((f, i) => {
-      const x = M.l + i * colW + (i ? 6 : 0);
-      if (i) g.line(M.l + i * colW, 162, M.l + i * colW, 186, C.rule, 0.3);
-      caps(g, f.label, x, 166);
-      g.text(f.value, x, 177, { size: 19, bold: true, color: f.color || C.navy });
-      g.text(f.note, x, 183.5, { size: 7.6, color: C.muted, maxWidth: colW - 10 });
+    // What's inside — quiet, at the foot.
+    y = 232;
+    g.text('In this report', M.l, y, { size: 6.75, color: light });
+    y += 6;
+    const toc = ['Executive summary', 'Spend analysis', 'Fleet and compliance', `${P.name} in numbers`, 'Fleet usage & efficiency', 'Recommendations'];
+    toc.forEach((title, i) => {
+      const col = i < 3 ? 0 : 1, row = i % 3;
+      const tx = M.l + col * 74, ty = y + row * 6;
+      g.text(String(data.sectionPages[title] || '').padStart(2, '0'), tx, ty, { size: 9, bold: true, color: light });
+      g.text(title, tx + 9, ty, { size: 9, color: C.white });
     });
 
-    // The one call to action on the page: what needs doing, with the brand green.
-    const recs = data.recommendations || [];
-    const highs = recs.filter((r) => r.priority === 'High').length;
-    let y = 200;
-    g.line(M.l, y - 6, M.l + CONTENT_W, y - 6, C.rule, 0.3);
-    g.fill(C.green); doc.circle(M.l + 1.6, y - 1.3, 1.6, 'F');
-    g.text(recs.length
-      ? `${recs.length} action${recs.length === 1 ? '' : 's'} flagged this ${P.word}${highs ? `, ${highs} high priority` : ''} — see page ${String(data.sectionPages.Recommendations || 7).padStart(2, '0')}.`
-      : `No actions flagged this ${P.word}.`, M.l + 6, y, { size: 9.5, bold: true, color: C.navy });
-
-    // Contents.
-    y = 214;
-    caps(g, 'Contents', M.l, y);
-    y += 7;
-    const toc = [
-      ['Executive summary', `The ${P.word} at a glance`],
-      ['Spend analysis', P.isYear ? `Month by month through ${P.label}, and the year outlook` : 'Twelve months by cost, and the year outlook'],
-      ['Fleet and compliance', 'Availability, registration, servicing'],
-      [monthName + ' in numbers', P.isYear ? 'Year on year, top vehicles, spend mix' : 'Month on month, top vehicles, spend mix'],
-      ['Fleet usage & efficiency', 'Cost per km and per engine hour'],
-      ['Recommendations', 'What to do next']
-    ];
-    toc.forEach(([title, sub]) => {
-      g.text(String(data.sectionPages[title] || '').padStart(2, '0'), M.l, y, { size: 9, bold: true, color: C.blue });
-      g.text(title, M.l + 10, y, { size: 9.5, bold: true, color: C.navy });
-      g.text(sub, M.l + 64, y, { size: 8.6, color: C.muted });
-      y += 6.4;
-    });
-
-    // Notes, small, at the foot.
-    y = 266;
-    const notes = [
-      `Costs are ${P.label} through ${T.fmtKey(data.reportEnd)}: fuel cards (imported to ${data.fuelThrough ? T.fmtKey(data.fuelThrough) : 'none yet'}), Linkt tolls (to ${data.tollThrough ? T.fmtKey(data.tollThrough) : 'none yet'}), servicing and repairs.`,
-      'Fleet status and compliance are a live snapshot at issue. The forecast is each cost\'s average month over the months with complete data — a guide, not a budget.'
-    ];
-    notes.forEach((n) => { y = g.text(n, M.l, y, { size: 6.8, color: C.muted, maxWidth: CONTENT_W, lineHeight: 3.2 }) + 1.2; });
-
-    g.line(M.l, PAGE.h - 13, PAGE.w - M.r, PAGE.h - 13, C.rule, 0.25);
-    g.text('Astrea Group  ·  Fleet operations', M.l, PAGE.h - 8.5, { size: 7, color: C.muted });
-    g.text('Internal use', PAGE.w - M.r, PAGE.h - 8.5, { size: 7, color: C.muted, align: 'right' });
+    // Company sign-off: the Astrea primary logo, bottom left.
+    g.rect(M.l, PAGE.h - 26, CONTENT_W, 0.25, [120, 164, 235]);
+    if (logos.astreaWhite) {
+      try { doc.addImage(logos.astreaWhite, 'PNG', M.l, PAGE.h - 19, 26, 6.1, undefined, 'FAST'); }
+      catch (e) { g.text('Astrea', M.l, PAGE.h - 14, { size: 12.4, bold: true, color: C.white }); }
+    } else g.text('Astrea', M.l, PAGE.h - 14, { size: 12.4, bold: true, color: C.white });
+    g.text('Fleet operations  ·  Internal use', PAGE.w - M.r, PAGE.h - 14.5, { size: 6.75, color: light, align: 'right' });
   }
 
-  /** Running header + footer on every page after the cover. */
-  function chrome(g, data, title, pageNo, logo) {
-    if (logo) {
-      try { g.doc.addImage(logo, 'PNG', M.l, 6.6, 29, 8.1, undefined, 'FAST'); }
-      catch (e) { g.text('Astrea Drive', M.l, 12.5, { size: 10, bold: true, color: C.blue }); }
-    } else g.text('Astrea Drive', M.l, 12.5, { size: 10, bold: true, color: C.blue });
-    caps(g, title, PAGE.w - M.r, 10.6, { color: C.navy, align: 'right' });
-    g.text(data.period.label, PAGE.w - M.r, 14.6, { size: 7.4, color: C.muted, align: 'right' });
+  /** Running header + footer on every page after the cover: Astrea and Astrea Drive at the top. */
+  function chrome(g, data, title, pageNo, logos) {
+    logos = logos || {};
+    // Company logo left, product logo right.
+    if (logos.astreaBlue) {
+      try { g.doc.addImage(logos.astreaBlue, 'PNG', M.l, 8.6, 24, 5.64, undefined, 'FAST'); }
+      catch (e) { g.text('Astrea', M.l, 13, { size: 12.4, bold: true, color: C.blue }); }
+    } else g.text('Astrea', M.l, 13, { size: 12.4, bold: true, color: C.blue });
+    if (logos.driveBlue) {
+      try { g.doc.addImage(logos.driveBlue, 'PNG', PAGE.w - M.r - 27, 6.4, 27, 7.6, undefined, 'FAST'); }
+      catch (e) { g.text('Astrea Drive', PAGE.w - M.r, 13, { size: 9, bold: true, color: C.blue, align: 'right' }); }
+    } else g.text('Astrea Drive', PAGE.w - M.r, 13, { size: 9, bold: true, color: C.blue, align: 'right' });
     // Hairline with a short lead of brand blue.
     g.line(M.l, 18.6, PAGE.w - M.r, 18.6, C.rule, 0.25);
     g.rect(M.l, 18.2, 16, 0.8, C.blue);
 
+    // Footer: where you are in the report.
     g.line(M.l, PAGE.h - 13, PAGE.w - M.r, PAGE.h - 13, C.rule, 0.25);
-    g.text(`Astrea Drive  ·  ${data.period.kind} fleet report  ·  ${data.period.label}`, M.l, PAGE.h - 8.5, { size: 7, color: C.muted });
-    g.text(String(pageNo).padStart(2, '0'), PAGE.w - M.r, PAGE.h - 8.5, { size: 7.5, bold: true, color: C.navy, align: 'right' });
+    g.text(`${title}  ·  ${data.period.kind} fleet report  ·  ${data.period.label}`, M.l, PAGE.h - 8.5, { size: 6.75, color: C.muted });
+    g.text(String(pageNo).padStart(2, '0'), PAGE.w - M.r, PAGE.h - 8.5, { size: 9, bold: true, color: C.navy, align: 'right' });
   }
 
   /** Page title — the guide's medium heading in brand blue — with a paragraph line under it. */
@@ -475,29 +482,32 @@ AD.fleetReportPdf = (function () {
     });
     y += 18;
 
-    /* Fleet today — one square per vehicle, by status. */
-    y = subhead(g, M.l, y, 'Fleet today', `${data.vehicles.length} vehicles · live status at issue`);
-    const statuses = [
-      ['Available', data.statusCounts['Available'], C.blue],
-      ['In use', data.statusCounts['In use'], C.navy],
-      ['In workshop', data.statusCounts['In workshop'], C.amber],
-      ['Out of service', data.statusCounts['Out of service'], C.red],
-      ['Not set', data.unknownStatus, C.rule]
-    ].filter(([, n]) => n > 0);
-    const sq = 4.2, gap = 1.1, perRow = Math.floor((CONTENT_W + gap) / (sq + gap));
-    let k = 0;
-    statuses.forEach(([, n, col]) => {
-      for (let j = 0; j < n; j++, k++) g.rect(M.l + (k % perRow) * (sq + gap), y + Math.floor(k / perRow) * (sq + gap), sq, sq, col);
+    /* What's in these figures — each cost, its amount, and how far its data
+       reaches, so the total can be read for what it is. Tolls that couldn't
+       be loaded are said out loud, not quietly left out. */
+    y = subhead(g, M.l, y, 'What\'s in these figures', `${P.label}${data.isPartial ? ' to date' : ''} · ${aud(cm.total)} in total`);
+    const fk = (k) => T.fmtKey(k);
+    const cardsLine = data.fuelCards.length
+      ? data.fuelCards.map((c) => `${c.card.toUpperCase()} imported ${fk(c.from)} to ${fk(c.to)}`).join('  ·  ')
+      : 'No fuel-card statements imported';
+    const tollLine = !data.tollsLoaded
+      ? 'Could not be loaded when this report was made, so the total leaves tolls out. Generate the report again.'
+      : !data.tollThrough ? 'No Linkt statements imported'
+        : `Linkt statements to ${fk(data.tollThrough)}${data.tollThrough < data.reportEnd ? ' — tolls after that aren\'t in yet' : ''}`;
+    const inc = [
+      ['Fuel', cm.fuel, S.fuel, cardsLine, false],
+      ['Tolls', cm.toll, S.toll, tollLine, !data.tollsLoaded],
+      ['Servicing', cm.planned, S.planned, `${cm.svcCount || 0} service${cm.svcCount === 1 ? '' : 's'} recorded in Astrea Drive`, false],
+      ['Repairs', cm.unplanned, S.unplanned, `${cm.defCount || 0} defect${cm.defCount === 1 ? '' : 's'} resolved with a cost recorded`, false]
+    ];
+    // Amounts are in the bar above; this says where each one comes from.
+    inc.forEach(([label, , col, note, warn]) => {
+      g.rect(M.l, y - 2.6, 3, 3, col);
+      g.text(label, M.l + 5, y, { size: 9, bold: true, color: C.navy });
+      g.text(note, M.l + 28, y, { size: 9, color: warn ? C.red : C.body, bold: warn, maxWidth: CONTENT_W - 28 });
+      y += 6.6;
     });
-    y += Math.max(1, Math.ceil(k / perRow)) * (sq + gap) + 5;
-    let lx = M.l;
-    statuses.forEach(([label, n, col]) => {
-      g.rect(lx, y - 2.6, 3, 3, col);
-      const t = `${label} ${n}`;
-      g.text(t, lx + 4.6, y, { size: 8, color: C.body });
-      lx += 10 + g.doc.getTextWidth(safe(t));
-    });
-    y += 14;
+    y += 9;
 
     /* Compliance — registration and servicing as status bars, then defects. */
     y = subhead(g, M.l, y, 'Compliance', 'Due soon = within 14 days, 500 km or 25 engine hours');
@@ -1219,59 +1229,107 @@ AD.fleetReportPdf = (function () {
     } catch (e) { return []; }
   }
 
-  // Live fleet-activity snapshot (best-effort; null if Netstar can't be reached).
-  async function fetchLiveSnapshot() {
-    try {
-      const call = AD.sb.functions.invoke('netstar', { body: { action: 'live' } });
-      const timeout = new Promise((res) => setTimeout(() => res(null), 12000));
-      const r = await Promise.race([call, timeout]);
-      if (!r || r.error || !r.data || !Array.isArray(r.data.positions)) return null;
-      const parseT = (s) => AD.time.netstarTime(s);
-      const STALE = 24 * 3600000;
-      let reporting = 0, moving = 0, offline = 0;
-      r.data.positions.forEach((p) => {
-        const seen = parseT(p.lastData);
-        const fresh = p.hasFix && seen != null && (Date.now() - seen) < STALE;
-        if (fresh) { reporting++; if (String(p.ignition || '').toLowerCase() === 'on' && (p.speed || 0) > 0) moving++; }
-        else offline++;
-      });
-      return { total: r.data.positions.length, reporting, moving, offline, at: new Date() };
-    } catch (e) { return null; }
-  }
-
   /* ------------------------------------------------------------------ usage page */
 
+  /**
+   * What the GPS recorded over the report's period, from the daily telematics
+   * rows (vehicle_work_hours_daily: one row per vehicle per day, engine hours
+   * and kilometres). Only days the nightly sync holds are counted, and the
+   * first one is stated, so a short history reads as short — not as a quiet
+   * period.
+   */
+  function gatherGps(data) {
+    const from = data.periodStart, to = data.reportEnd;
+    const byId = new Map(AD.store.all('vehicles').map((v) => [v.id, v]));
+    const per = new Map();
+    let first = '', last = '';
+    (AD.store.all('vehicle_work_hours_daily') || []).forEach((r) => {
+      const d = String(r.day || '').slice(0, 10);
+      if (!d || d < from || d > to) return;
+      const km = Number(r.distanceKm) || 0, hrs = Number(r.hours) || 0;
+      const t = per.get(r.vehicleId) || { id: r.vehicleId, km: 0, hrs: 0, days: 0, worked: 0 };
+      t.km += km; t.hrs += hrs; t.days++;
+      if (km >= 1 || hrs >= 0.25) t.worked++;   // a day the vehicle actually did something
+      per.set(r.vehicleId, t);
+      if (!first || d < first) first = d;
+      if (d > last) last = d;
+    });
+    // Weekdays across the span the GPS covers, for each vehicle's use of them.
+    let weekdays = 0;
+    if (first) for (let d = first; d <= last; d = T.addDays(d, 1)) if (T.dayOfWeek(d) <= 4) weekdays++;
+    const list = [...per.values()].map((t) => ({ ...t, v: byId.get(t.id) || { id: t.id }, kmPerDay: t.worked ? t.km / t.worked : 0, use: weekdays ? Math.min(1, t.worked / weekdays) : 0 }))
+      .sort((a, b) => b.km - a.km);
+    const totals = list.reduce((a, t) => ({ km: a.km + t.km, hrs: a.hrs + t.hrs, worked: a.worked + t.worked }), { km: 0, hrs: 0, worked: 0 });
+    return { list, ...totals, first, last, weekdays, tracked: list.length };
+  }
+
   function usagePage(g, data) {
-    let y = 30;
-    y = heading(g, M.l, y, 'Fleet usage & efficiency', 'GPS-tracked vehicles · the same figures as the Cost sheet\'s Cost vs usage');
-
-    const snap = data.liveSnapshot;
+    const P = data.period;
+    const gps = data.gps || { list: [], km: 0, hrs: 0, worked: 0, tracked: 0 };
     const u = data.usage || { lines: [], collecting: [], ownedCount: 0, gpsVerified: 0, ready: 28, steady: 60 };
+    const n0 = (n) => Math.round(n).toLocaleString('en-AU');
+    let y = 30;
+    y = heading(g, M.l, y, 'Fleet usage & efficiency',
+      gps.first ? `What the GPS recorded in ${P.label}${data.isPartial ? ' to date' : ''}` : `No daily GPS data in ${P.label}`);
+    // Carry on to a new page rather than run off this one.
+    const room = (need, title) => {
+      if (y + need <= PAGE.h - 20) return;
+      g.doc.addPage();
+      g.setPage(g.getPage() + 1);
+      chrome(g, data, `${title} (continued)`, g.getPage(), data._logo);
+      y = 30;
+    };
 
-    /* Fleet activity snapshot (as at report time). */
-    if (snap) {
-      g.text('FLEET ACTIVITY', M.l, y, { size: 7.5, bold: true, color: C.muted });
-      g.text(`as at ${T.fmtTime ? T.fmtTime(snap.at.getTime()) : ''} ${snap.at.toLocaleDateString('en-AU')}`.trim(), M.l + CONTENT_W, y, { size: 7.5, color: C.muted, align: 'right' });
-      y += 4;
-      const tiles = [
-        { n: snap.reporting, label: 'Reporting', col: C.blue },
-        { n: snap.moving, label: 'Moving now', col: C.navy },
-        { n: snap.offline, label: 'Not reporting', col: C.muted }
-      ];
-      const tw = (CONTENT_W - 2 * 6) / 3;
-      tiles.forEach((t, i) => {
-        const tx = M.l + i * (tw + 6);
-        if (i) g.line(tx - 3, y + 2, tx - 3, y + 18, C.rule, 0.3);
-        g.text(String(t.n), tx + (i ? 3 : 0), y + 11, { size: 25, bold: true, color: t.col });
-        g.text(t.label, tx + (i ? 3 : 0), y + 17, { size: 8, color: C.body });
-      });
-      g.text(`of ${snap.total} tracked devices`, M.l + CONTENT_W, y + 25, { size: 7.4, color: C.muted, align: 'right' });
-      y += 30;
+    /* The period in GPS totals — no boxes, hairlines between. */
+    const figs = [
+      ['Kilometres driven', n0(gps.km), 'by GPS-tracked vehicles'],
+      ['Engine hours', n0(gps.hrs), 'engine on, moving or parked'],
+      ['Days worked', n0(gps.worked), 'vehicle-days with any use'],
+      ['GPS-tracked vehicles', String(gps.tracked), `odometers GPS-verified on ${u.gpsVerified} of ${u.ownedCount}`]
+    ];
+    const colW = CONTENT_W / 4;
+    g.line(M.l, y, M.l + CONTENT_W, y, C.rule, 0.3);
+    figs.forEach(([label, value, note], i) => {
+      const x = M.l + i * colW + (i ? 5 : 0);
+      if (i) g.line(M.l + i * colW, y + 4, M.l + i * colW, y + 27, C.rule, 0.3);
+      caps(g, label, x, y + 8);
+      g.text(value, x, y + 19.5, { size: 25.2, bold: true, color: C.navy });
+      g.text(note, x, y + 25, { size: 6.75, color: C.muted, maxWidth: colW - 8 });
+    });
+    y += 31;
+    g.line(M.l, y, M.l + CONTENT_W, y, C.rule, 0.3);
+    y += 6;
+    if (gps.first && gps.first > data.periodStart) {
+      y = g.text(`Daily GPS data starts ${T.fmtKey(gps.first)}, when the nightly sync began, so these totals cover ${T.daysBetween(gps.first, gps.last) + 1} days of ${P.label}, not all of it.`,
+        M.l, y, { size: 6.75, color: C.muted, maxWidth: CONTENT_W }) + 4;
     }
+    y += 6;
 
-    /* Odometer provenance line. */
-    g.text(`Odometers GPS-verified: ${u.gpsVerified} of ${u.ownedCount} vehicles`, M.l, y, { size: 9, color: C.body });
-    y += 10;
+    /* Most-used vehicles: distance, hours, and how many weekdays each worked. */
+    if (gps.list.length) {
+      y = subhead(g, M.l, y, 'Most-used vehicles', `By distance · ${gps.weekdays} weekday${gps.weekdays === 1 ? '' : 's'} covered`) + 1;
+      const cols = [
+        { t: 'Vehicle', w: 22, a: 'left' }, { t: 'Type', w: 34, a: 'left' }, { t: 'Days worked', w: 22, a: 'right' },
+        { t: 'Km', w: 22, a: 'right' }, { t: 'Engine hrs', w: 22, a: 'right' }, { t: 'Km per day worked', w: 30, a: 'right' },
+        { t: 'Weekdays used', w: 26, a: 'right' }
+      ];
+      tableHead(g, M.l, y, CONTENT_W, 7.5, cols);
+      y += 7.5;
+      gps.list.slice(0, 8).forEach((r) => {
+        const vals = [r.id, r.v.type || '—', String(r.worked), n0(r.km), n0(r.hrs), r.worked ? n0(r.kmPerDay) : '—', gps.weekdays ? `${Math.round(r.use * 100)}%` : '—'];
+        let x = M.l;
+        vals.forEach((s, ci) => {
+          const c = cols[ci];
+          g.text(safe(s), c.a === 'left' ? x + 2.5 : x + c.w - 2.5, y + 4.6, { size: 9, bold: ci === 0, color: ci === 0 ? C.navy : C.body, align: c.a, maxWidth: c.a === 'left' ? c.w - 3 : undefined });
+          x += c.w;
+        });
+        g.line(M.l, y + 6.6, M.l + CONTENT_W, y + 6.6, C.ruleSoft, 0.25);
+        y += 6.6;
+      });
+      if (gps.list.length > 8) { y = g.text(`and ${gps.list.length - 8} more GPS-tracked vehicles.`, M.l, y + 4, { size: 6.75, color: C.muted }) + 1; }
+      y += 10;
+    }
+    room(60, 'Fleet usage & efficiency');
 
     /* Running cost table. */
     y = subhead(g, M.l, y, 'Running cost per km & per engine hour');
@@ -1354,6 +1412,7 @@ AD.fleetReportPdf = (function () {
     }
 
     /* Workshop visits detected by the GPS geofences. */
+    room(40, "Fleet usage & efficiency");
     y += 4;
     y = subhead(g, M.l, y, 'Workshop visits (GPS)', `Detected by the workshop geofences in ${data.period.label}`) + 2;
     const visits = data.workshopVisits || [];
@@ -1395,10 +1454,15 @@ AD.fleetReportPdf = (function () {
     notify('Gathering fleet data…');
     const data = AD.fleetReport.gather(options.month, options);
     data.usage = gatherUsage();
-    const logoWhite = await loadImg('assets/logo-lockup.png');          // white Astrea + DRIVE, for the blue cover
-    const logoBlue = await loadImg('assets/logo-horizontal-white.png');   // blue logo on white, for page headers
-    notify('Fetching live fleet activity…');
-    data.liveSnapshot = await fetchLiveSnapshot();
+    data.gps = gatherGps(data);
+    // Logos: the Astrea primary logo (company) and the Astrea Drive logo (product), for the cover and the page headers.
+    const logos = {
+      astreaBlue: await loadImg('assets/astrea-logo-blue.png'),
+      astreaWhite: await loadImg('assets/astrea-logo-white.png'),
+      driveBlue: await loadImg('assets/logo-horizontal-white.png'),
+      driveWhite: await loadImg('assets/logo-lockup.png')
+    };
+    notify('Fetching workshop visits…');
     data.workshopVisits = await fetchWorkshopVisits(data);
     notify('Drawing report…');
 
@@ -1414,7 +1478,7 @@ AD.fleetReportPdf = (function () {
 
     g.setPage(1);
     data.sectionPages = {};
-    data._logo = logoBlue;
+    data._logo = logos;
 
     const pages = [
       ['Executive summary',    summaryPage],
@@ -1428,11 +1492,11 @@ AD.fleetReportPdf = (function () {
       doc.addPage();
       g.setPage(g.getPage() + 1);
       data.sectionPages[title] = g.getPage();
-      chrome(g, data, title, g.getPage(), logoBlue);
+      chrome(g, data, title, g.getPage(), logos);
       draw(g, data);
     });
     doc.setPage(1);
-    coverPage(g, data, logoWhite);
+    coverPage(g, data, logos);
 
     notify('Writing file…');
     const filename = `Astrea ${data.period.kind} Fleet Report — ${data.period.label}.pdf`;
