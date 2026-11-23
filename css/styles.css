@@ -1547,9 +1547,9 @@ input[type=text], input[type=number], input[type=date], input[type=datetime-loca
 .cs-proj-label { opacity: .5; }
 .cs-proj-mark .cs-dot { fill: transparent; stroke: var(--violet); stroke-width: 1.5; stroke-dasharray: 3 2; }
 .cs-proj-mark:hover .cs-dot { filter: drop-shadow(0 0 4px var(--violet)); }
-/* Breakdown: the solid violet dot where every cost line meets next month's forecast */
-.cs-proj-meet { --cs-line: var(--violet); }
-.cs-proj-meet .cs-dot { fill: var(--violet); stroke: var(--violet); stroke-dasharray: none; filter: drop-shadow(0 0 5px var(--violet)); }
+/* Breakdown: a small solid violet dot at each cost's own forecast for next month */
+.cs-proj-own { --cs-line: var(--violet); }
+.cs-proj-own .cs-dot { fill: var(--violet); stroke: var(--violet); stroke-dasharray: none; filter: drop-shadow(0 0 4px var(--violet)); }
 .cs-proj-mark .cs-hit { cursor: default; }
 
 /* Table view twin */
