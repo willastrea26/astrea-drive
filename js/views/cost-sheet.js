@@ -1471,8 +1471,6 @@ AD.views['cost-sheet'] = (function () {
     }
 
     const top = Math.max(...lines.map((l) => l.litres), 1);
-    const totalLitres = lines.reduce((n, l) => n + l.litres, 0);
-    const totalCost = lines.reduce((n, l) => n + l.cost, 0);
 
     const rows = lines.map((l, i) => {
       const art = (AD.art && AD.art.forVehicle(l.v, 44)) || '';
@@ -1495,12 +1493,51 @@ AD.views['cost-sheet'] = (function () {
       l0(l.litres) + ' L', L.fmtAUD(l.cost), String(l.fills),
       l.cpl != null ? '$' + l.cpl.toFixed(2) : '—', L.fmtAUD(l.other || 0), l.lastDate ? T.fmtKey(l.lastDate) : '—']);
     const totalOther = lines.reduce((n, l) => n + (l.other || 0), 0);
-    const totalFills = lines.reduce((n, l) => n + l.fills, 0);
+
+    // Run rate, like the tolls: each card's spend ÷ the days its imports cover
+    // (WEX and BP statements cover different dates), added together. Everything
+    // on the card bill counts (fuel, AdBlue, fees), as tolls count No Tag fees.
+    const cardsSeen = new Map();
+    fuelRows().forEach((r) => {
+      const c = cardsSeen.get(r.card) || { card: r.card, total: 0, from: r.date, to: r.date, dates: new Set() };
+      c.total += r.cost;
+      if (r.date < c.from) c.from = r.date;
+      if (r.date > c.to) c.to = r.date;
+      c.dates.add(r.date);
+      cardsSeen.set(r.card, c);
+    });
+    const cardList = [...cardsSeen.values()].sort((a, b) => b.total - a.total);
+    cardList.forEach((c) => { c.days = T.daysBetween(c.from, c.to) + 1; });
+    const perDay = cardList.reduce((t, c) => t + c.total / c.days, 0);
+    const allSpend = cardList.reduce((t, c) => t + c.total, 0);
+    // A fortnight with no transactions on a whole card is almost certainly a
+    // statement that hasn't been imported, which pulls the run rate down.
+    const gaps = [];
+    cardList.forEach((c) => {
+      const ds = [...c.dates].sort();
+      for (let i = 1; i < ds.length; i++) {
+        if (T.daysBetween(ds[i - 1], ds[i]) > 14) gaps.push(`${c.card.toUpperCase()} has nothing between ${T.fmtKey(ds[i - 1])} and ${T.fmtKey(ds[i])}`);
+      }
+    });
+    // Average pump price, diesel and petrol only, every card (person cards too).
+    const fills = (AD.store.all('fuel_entries') || []).filter(L.isFuelPurchase);
+    const fillLitres = fills.reduce((t, r) => t + (Number(r.litres) || 0), 0);
+    const fillCost = fills.reduce((t, r) => t + (Number(r.cost) || 0), 0);
+    const fk = (label, value, sub) => `<div class="cost-kpi"><span>${esc(label)}</span><strong>${value}</strong><small>${sub}</small></div>`;
+    const kpis = `<div class="cost-kpis cs-fuelkm-kpis">
+        ${fk('Per week', L.fmtAUD(perDay * 7), 'average over the imported card data')}
+        ${fk('Per month', L.fmtAUD(perDay * 365 / 12), `${L.fmtAUD(perDay)} a day`)}
+        ${fk('Yearly forecast', L.fmtAUD(perDay * 365), 'at the current run rate · incl. GST')}
+        ${fk('Average price', fillLitres > 0 ? `$${(fillCost / fillLitres).toFixed(2)}<small class="cs-kpi-unit">/L</small>` : '—', `${l0(fillLitres)} L over ${fills.length.toLocaleString('en-AU')} fills · diesel and petrol`)}
+      </div>`;
+    const coverage = cardList.map((c) => `${c.card.toUpperCase()} ${T.fmtKey(c.from)}–${T.fmtKey(c.to)}`).join(' · ');
 
     return `<section class="section">
-      ${sectionHead({ title: 'Fuel & tolls', actions, meta: `Fuel purchased · ${lines.length} vehicle${lines.length === 1 ? '' : 's'} · ${l0(totalLitres)} L · ${totalFills.toLocaleString('en-AU')} fills · ${L.fmtAUD(totalCost)} fuel · all imported fuel-card data` })}
+      ${sectionHead({ title: 'Fuel & tolls', actions, meta: `Fuel cards · ${coverage} · ${L.fmtAUD(allSpend)}` })}
       <figure class="viz-card">
-        <figcaption><span class="viz-sub">Diesel and petrol purchases only, most litres first: fills, litres and fuel cost leave out card fees, AdBlue and other items (${L.fmtAUD(totalOther)}, shown per vehicle), which still count in total spend. Hover any row for the detail. Covers all imported transactions, not just the period selected above.</span></figcaption>
+        <figcaption><span class="viz-sub">Fuel-card spend by vehicle. Included in total spend and Spend over time above (blue). Weekly, monthly and yearly figures are the daily average of the imported card data, each card over the dates it covers, including fees and AdBlue; amounts include GST. The vehicle list below is diesel and petrol only, most litres first (fees, AdBlue and other items: ${L.fmtAUD(totalOther)}, shown per vehicle).</span></figcaption>
+        ${kpis}
+        ${gaps.length ? `<p class="cs-more">Possible missing statement${gaps.length === 1 ? '' : 's'}: ${gaps.slice(0, 3).join('; ')}${gaps.length > 3 ? ` (and ${gaps.length - 3} more)` : ''}. The run rate reads low until ${gaps.length === 1 ? 'it’s' : 'they’re'} imported.</p>` : ''}
         <div class="cs-rows">${topRows(rows)}</div>
         ${unassignedFuelNote()}
         ${V.table(['Vehicle', 'Rego', 'Assigned driver', 'Litres', 'Fuel cost', 'Fills', 'Avg /L', 'Fees & other', 'Last fill'], tableRows)}
