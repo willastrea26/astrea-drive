@@ -851,8 +851,8 @@ AD.views['cost-sheet'] = (function () {
       </a>`;
     });
   }
-  const spendLegend = (lines) => `<p class="cs-legend">${SPEND_PARTS.filter(([k]) => lines.some((l) => l[k] > 0))
-    .map(([, label, cls]) => `<span><i class="cs-legend-swatch ${cls}"></i>${label}</span>`).join('')}</p>`;
+  const spendLegend = (lines) => V.legend(SPEND_PARTS.filter(([k]) => lines.some((l) => l[k] > 0))
+    .map(([, label, , color]) => ({ label, color })), { counts: false });
   const spendTable = (lines) => V.table(['Vehicle', 'Rego', 'Assigned driver', 'Fuel', 'Tolls', 'Servicing', 'Repairs', 'Total'],
     lines.map((l) => [l.v.id, l.v.rego || '', L.driverName(l.v.driverId) || '—', L.fmtAUD(l.fuel), L.fmtAUD(l.toll), L.fmtAUD(l.planned), L.fmtAUD(l.unplanned), L.fmtAUD(l.total)]));
   const looseNote = (loose) => Math.abs(loose) > 0.5
@@ -889,7 +889,10 @@ AD.views['cost-sheet'] = (function () {
     const gaps = [];
     if (reach.fuel && reach.fuel < me) gaps.push(`fuel card data only goes to ${T.fmtKey(reach.fuel)}`);
     if (reach.toll && reach.toll < me) gaps.push(`Linkt tolls only go to ${T.fmtKey(reach.toll)} (the latest statement imported)`);
-    const gapNote = gaps.length ? `<p class="cs-more cs-gap">Not the full month yet: ${gaps.join('; ')}.</p>` : '';
+    const gapNote = gaps.length ? `<p class="cs-more">Not the full month yet: ${gaps.join('; ')}.</p>` : '';
+    // One short note under the list, so this card stays level with Month by month.
+    const notes = [gaps.length ? `Not the full month yet: ${gaps.join('; ')}.` : '',
+      Math.abs(loose) > 0.5 ? `Plus ${L.fmtAUD(loose)} not tied to a vehicle (person fuel cards, unlinked toll tags, credits).` : ''].filter(Boolean).join(' ');
     const head = `<figcaption><h3>Most expensive ${isLast ? 'last month' : 'in ' + esc(label)}</h3><span class="viz-sub">${esc(label)} · fuel, tolls, servicing and repairs per vehicle, highest first</span></figcaption>`;
     if (!lines.length) {
       return `<figure class="viz-card">${head}<p class="empty">No costs recorded against any vehicle in ${esc(label)}.</p>${gapNote}${tollLoadingNote()}</figure>`;
@@ -897,9 +900,8 @@ AD.views['cost-sheet'] = (function () {
     return `<figure class="viz-card">
       ${head}
       ${spendLegend(lines)}
-      <div class="cs-rows">${topRows(spendRows(lines), 'vehicles', 8)}</div>
-      ${gapNote}
-      ${looseNote(loose)}
+      <div class="cs-rows">${topRows(spendRows(lines), 'vehicles', 7)}</div>
+      ${notes ? `<p class="cs-more">${notes}</p>` : ''}
       ${tollLoadingNote()}
       ${spendTable(lines)}
     </figure>`;

@@ -1459,7 +1459,11 @@ input[type=text], input[type=number], input[type=date], input[type=datetime-loca
 
 /* Month by month and What moved sit side by side, so a wide screen isn't two
    thin columns of bars stretched across 1600px of empty card. */
-.cs-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; margin-bottom: 40px; }
+.cs-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: stretch; margin-bottom: 40px; }
+/* The two cards stand the same height: "View as table" sits on the bottom edge
+   of both, and Month by month spreads its rows over any spare height. */
+.cs-pair > .viz-card > .viz-table { margin-top: auto; }
+.cs-pair .cs-months { flex: 1 0 auto; align-content: space-between; }
 @media (max-width: 1000px) { .cs-pair { grid-template-columns: minmax(0, 1fr); } }
 
 /* Shared bar rows for What moved and Running cost: name, bar, figure, and a
