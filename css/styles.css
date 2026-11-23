@@ -2644,9 +2644,10 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 .vehicle-cost-label { color: var(--ink-2); font-size: 11.5px; font-weight: 600; text-align: center; }
 .vehicle-cost-legend {
   list-style: none; margin: 18px 0 0; padding: 14px 0 0; border-top: 1px solid var(--rule);
-  display: grid; grid-template-columns: repeat(3, minmax(150px, 1fr)); gap: 9px 18px;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px 32px;
 }
-.vehicle-cost-legend li { min-width: 0; display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: 8px; align-items: center; font-size: 13px; }
+/* Swatch, name and amount sit together, so each total reads with its label. */
+.vehicle-cost-legend li { min-width: 0; display: inline-flex; gap: 8px; align-items: center; font-size: 13px; }
 .vehicle-cost-legend li > i { width: 10px; height: 10px; border-radius: 3px; }
 .vehicle-cost-legend li > span { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vehicle-cost-legend li > b { color: var(--ink); font-variant-numeric: tabular-nums; }
@@ -2729,7 +2730,7 @@ h1, h2, h3 { letter-spacing: -0.02em; }
   .pg-grid.pg-1 { grid-template-columns: 1fr; }
   .cost-kpis { grid-template-columns: minmax(0, 1fr); }
   .cost-tab-tools { align-items: flex-start; }
-  .vehicle-cost-legend { grid-template-columns: minmax(0, 1fr); }
+  .vehicle-cost-legend { gap: 8px 22px; }
 }
 
 /* =====================================================================
