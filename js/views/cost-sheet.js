@@ -127,24 +127,6 @@ AD.views['cost-sheet'] = (function () {
     });
   }
 
-  /** 'worse' | 'better' | null (flat, untoned, or no baseline to compare against) — drives both the delta text and a card's accent. */
-  function trendTone(now, avg, haveBaseline, toned) {
-    if (!haveBaseline || !avg || !toned) return null;
-    const pct = Math.round(((now - avg) / avg) * 100);
-    return pct > 0 ? 'worse' : pct < 0 ? 'better' : null;
-  }
-
-  /** Change line under a figure, against the scope's trailing average. `toned` marks a rise as worse — only money is judged. */
-  function delta(now, avg, haveBaseline, fmt, toned) {
-    const cfg = SCOPE_CFG[scope];
-    if (!haveBaseline) return `<small class="cs-delta">${now ? `No ${cfg.plural} before this one yet` : 'Nothing recorded'}</small>`;
-    if (!avg) return `<small class="cs-delta">${now ? `Nothing in the ${cfg.baselineN}-${cfg.label} average` : 'Nothing either way'}</small>`;
-    const pct = Math.round(((now - avg) / avg) * 100);
-    const arrow = pct > 0 ? '↑' : pct < 0 ? '↓' : '—';
-    const tone = trendTone(now, avg, haveBaseline, toned) || 'flat';
-    return `<small class="cs-delta cs-delta-${tone}">${arrow} ${Math.abs(pct)}% · ${fmt(avg)} avg</small>`;
-  }
-
   const TONE_VAR = { worse: 'var(--red)', better: 'var(--green)', spend: 'var(--red)', unplanned: 'var(--cs-amber)', fuel: 'var(--cs-blue)', planned: 'var(--mint)', toll: COLOR_TOLL };
   const kpi = (label, value, foot, tone) => `<div class="cs-kpi"${tone ? ` style="--cs-tone:${TONE_VAR[tone]}"` : ''}><span>${esc(label)}</span><strong>${value}</strong>${foot}</div>`;
   const fmtChange = (n) => Math.abs(n) < 0.005 ? '—' : (n > 0 ? '+' : '−') + L.fmtAUD(Math.abs(n));
@@ -294,7 +276,7 @@ AD.views['cost-sheet'] = (function () {
       })}
 
       <div class="cs-kpis" style="--cs-kpi-n:${5 + (restOfYearMonths.length ? 1 : 0)}" role="group" aria-label="This ${cfg.label} against the average ${cfg.label}">
-        ${kpi('Total spend', L.fmtAUD(spend), delta(spend, avgSpend, haveBaseline, L.fmtAUD, true), 'spend')}
+        ${kpi('Total spend', L.fmtAUD(spend), `<small class="cs-delta">${spend ? 'Fuel, tolls, servicing and repairs' : 'Nothing recorded'}</small>`, 'spend')}
         ${kpi('Fuel share', `${Math.round(pctOf(fuelNow))}%`, sliceFoot(fuelNow, avgFuel), 'fuel')}
         ${kpi('Toll share', haveTolls ? `${Math.round(pctOf(tollNow))}%` : '—', tollFoot || sliceFoot(tollNow, avgToll), 'toll')}
         ${kpi('Planned servicing share', `${Math.round(pctOf(planned))}%`, sliceFoot(planned, avgPlanned), 'planned')}
