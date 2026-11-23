@@ -101,11 +101,16 @@ AD.views['cost-sheet'] = (function () {
   // Imported fuel-card spend, kept separate from maintenance rows so it never
   // skews the planned/unplanned maintenance figures — it rides on top as its
   // own series in the spend chart and adds into cost-per-km.
+  // Which card a row came from: BP rows are the BP PDF imports (receipt-based
+  // ids); every other row came from a WEX card spreadsheet.
+  const fuelCard = (r) => (String(r.id || '').startsWith('fuel-bp-') || /^BP PDF/.test(r.source || '') ? 'bp' : 'wex');
   const fuelRows = () => (AD.store.all('fuel_entries') || [])
     .filter((r) => r.date && Number(r.cost) > 0)
-    .map((r) => ({ vehicleId: r.vehicleId, date: String(r.date).slice(0, 10), cost: Number(r.cost) }));
+    .map((r) => ({ vehicleId: r.vehicleId, date: String(r.date).slice(0, 10), cost: Number(r.cost), card: fuelCard(r) }));
   const fuelBetween = (from, to) => fuelRows().filter((r) => r.date >= from && r.date <= to).reduce((n, r) => n + r.cost, 0);
   const fuelForMonth = (key) => fuelRows().filter((r) => r.date.slice(0, 7) === key).reduce((n, r) => n + r.cost, 0);
+  /** Fuel spend split by card for the rows `keep` selects: { wex, bp }. */
+  const fuelByCard = (keep) => fuelRows().filter(keep).reduce((t, r) => { t[r.card] += r.cost; return t; }, { wex: 0, bp: 0 });
 
   // Imported Linkt toll charges (trips + No Tag fees, less account credits),
   // the fourth slice of spend. Loaded on demand (see tolls()), so the first
@@ -404,8 +409,10 @@ AD.views['cost-sheet'] = (function () {
       lastMonth = p.m;
       const rows = rowsBetween(from, T.addDays(from, 6));
       const maint = sum(rows), fuel = fuelBetween(from, T.addDays(from, 6)), toll = tollBetween(from, T.addDays(from, 6));
+      const to = T.addDays(from, 6), cards = fuelByCard((r) => r.date >= from && r.date <= to);
       return {
         total: maint, maint, fuel, toll, fuelTop: maint + fuel, grand: maint + fuel + toll, planned: sumKind(rows, PLANNED), unplanned: sumKind(rows, UNPLANNED),
+        fuelWex: cards.wex, fuelBp: cards.bp,
         label: showMonth ? `${p.d} ${T.MONTHS[p.m - 1].slice(0, 3)}` : String(p.d), full: `Week of ${T.fmtKey(from)}`
       };
     });
@@ -419,9 +426,11 @@ AD.views['cost-sheet'] = (function () {
       const key = dt.toISOString().slice(0, 7);
       const rows = rowsForMonth(key);
       const maint = sum(rows), fuel = fuelForMonth(key), toll = tollForMonth(key);
+      const cards = fuelByCard((r) => r.date.slice(0, 7) === key);
       const toDate = key === T.todayKey().slice(0, 7);
       return {
         total: maint, maint, fuel, toll, fuelTop: maint + fuel, grand: maint + fuel + toll, planned: sumKind(rows, PLANNED), unplanned: sumKind(rows, UNPLANNED),
+        fuelWex: cards.wex, fuelBp: cards.bp,
         label: T.MONTHS[dt.getUTCMonth()].slice(0, 3),
         short: `${T.MONTHS[dt.getUTCMonth()].slice(0, 3)} ${String(dt.getUTCFullYear()).slice(2)}`,
         full: `${T.MONTHS[dt.getUTCMonth()]} ${dt.getUTCFullYear()}${toDate ? ' (to date)' : ''}`
@@ -542,10 +551,14 @@ AD.views['cost-sheet'] = (function () {
 
     // One hover dot per line per period, at that line's own value. The grey
     // total dot carries the full breakdown for the period.
+    // Fuel hover also splits by card — only the cards that appear in the data.
+    const cardsSeen = new Set(fuelRows().map((r) => r.card));
+    const cardRows = (p) => [['wex', 'fuelWex', '· WEX card'], ['bp', 'fuelBp', '· BP card']]
+      .filter(([c]) => cardsSeen.has(c)).map(([, k, label]) => [label, L.fmtAUD(p[k] || 0), 'var(--muted)']);
     const breakdown = (p) => [
       ['Planned servicing', L.fmtAUD(p.planned), COLOR_PLANNED],
       ['Unplanned repairs', L.fmtAUD(p.unplanned), COLOR_UNPLANNED],
-      ...(anyFuel ? [['Fuel', L.fmtAUD(p.fuel), COLOR_FUEL]] : []),
+      ...(anyFuel ? [['Fuel', L.fmtAUD(p.fuel), COLOR_FUEL], ...cardRows(p)] : []),
       ...(anyToll ? [['Tolls', L.fmtAUD(p.toll || 0), COLOR_TOLL]] : []),
       ['Total', L.fmtAUD(p.grand), 'var(--ink)']
     ];
@@ -563,7 +576,10 @@ AD.views['cost-sheet'] = (function () {
     const one = (label, key, color) => (p) => [[label, L.fmtAUD(p[key] || 0), color], ['Month total', L.fmtAUD(p.grand), 'var(--ink)']];
     const plannedDots = seriesDots(histPlanned, COLOR_PLANNED, one('Planned servicing', 'planned', COLOR_PLANNED));
     const unplannedDots = seriesDots(histUnplanned, COLOR_UNPLANNED, one('Unplanned repairs', 'unplanned', COLOR_UNPLANNED));
-    const fuelDots = anyFuel ? seriesDots(histFuel, COLOR_FUEL, one('Fuel', 'fuel', COLOR_FUEL)) : '';
+    const fuelDots = anyFuel ? seriesDots(histFuel, COLOR_FUEL, (p) => {
+      const rows = one('Fuel', 'fuel', COLOR_FUEL)(p);
+      return [rows[0], ...cardRows(p), rows[1]];
+    }) : '';
     // Toll dots only on periods that have tolls (no imported statement = no dot).
     const tollDotsRaw = anyToll ? seriesDots(histToll, COLOR_TOLL, one('Tolls', 'toll', COLOR_TOLL), (p) => p.toll > 0) : '';
     const tollDots = animateTolls && tollDotsRaw ? `<g class="cs-arrive-dots">${tollDotsRaw}</g>` : tollDotsRaw;
