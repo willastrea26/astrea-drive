@@ -1446,6 +1446,9 @@ input[type=text], input[type=number], input[type=date], input[type=datetime-loca
 .cs-kpi > span { color: var(--ink-2); font-size: 13px; font-weight: 700; }
 .cs-kpi strong { color: var(--ink); font-size: 28px; line-height: 1.1; font-variant-numeric: tabular-nums; }
 .cs-delta { color: var(--muted); font-size: 12px; }
+/* Total spend: this year's forecast, violet like the forecast on the chart */
+.cs-year-forecast { color: var(--violet); cursor: default; }
+.cs-year-forecast b { font-weight: 700; }
 .cs-delta-worse { color: var(--red); }
 .cs-delta-better { color: var(--green); }
 /* Short month labels, and room for a currency figure the shared .hb-val can't hold. */

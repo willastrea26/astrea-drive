@@ -281,7 +281,7 @@ AD.views['cost-sheet'] = (function () {
       })}
 
       <div class="cs-kpis" style="--cs-kpi-n:${5 + (restOfYearMonths.length ? 1 : 0)}" role="group" aria-label="This ${cfg.label} against the average ${cfg.label}">
-        ${kpi('Total spend', L.fmtAUD(spend), `<small class="cs-delta">${spend ? 'Fuel, tolls, servicing and repairs' : 'Nothing recorded'}</small>`, 'spend')}
+        ${kpi('Total spend', L.fmtAUD(spend), `<small class="cs-delta">${spend ? 'Fuel, tolls, servicing and repairs' : 'Nothing recorded'}</small>${yearForecastNote(curYear)}`, 'spend')}
         ${kpi('Fuel share', `${Math.round(pctOf(fuelNow))}%`, sliceFoot(fuelNow, avgFuel), 'fuel')}
         ${kpi('Toll share', haveTolls ? `${Math.round(pctOf(tollNow))}%` : '—', tollFoot || sliceFoot(tollNow, avgToll), 'toll')}
         ${kpi('Planned servicing share', `${Math.round(pctOf(planned))}%`, sliceFoot(planned, avgPlanned), 'planned')}
@@ -479,6 +479,44 @@ AD.views['cost-sheet'] = (function () {
     const unplanned = avgBy(maintMonths, (k) => sumKind(rowsForMonth(k), UNPLANNED));
     return { fuel, toll, planned, unplanned, total: fuel + toll + planned + unplanned,
       fuelN: fuelMonths.length, tollN: tollMonths.length, maintN: maintMonths.length };
+  }
+
+  /**
+   * This year's forecast total: what's actually been spent, plus each cost's
+   * average month (as a daily rate) for every day its data doesn't reach yet:
+   * the rest of the year, and any stretch since the latest fuel import or
+   * Linkt statement. Only for the year we're in.
+   */
+  function yearForecastNote(year) {
+    const today = T.todayKey();
+    if (String(year) !== today.slice(0, 4)) return '';
+    const yStart = `${year}-01-01`, yEnd = `${year}-12-31`;
+    const b = forecastBasis(today);
+    const daily = (monthly) => (monthly * 12) / 365;
+    const daysLeft = (k) => (!k || k < yStart ? T.daysBetween(yStart, yEnd) + 1 : k >= yEnd ? 0 : T.daysBetween(k, yEnd));
+    // How far each source's data reaches.
+    let fuelReach = '';
+    const lastByCard = new Map();
+    fuelRows().forEach((r) => { if (!lastByCard.has(r.card) || r.date > lastByCard.get(r.card)) lastByCard.set(r.card, r.date); });
+    if (lastByCard.size) fuelReach = [...lastByCard.values()].sort()[0];   // the card that's furthest behind
+    let tollReach = '';
+    (AD.store.all('toll_entries') || []).forEach((r) => { const e = String(r.periodEnd || r.date || '').slice(0, 10); if (e > tollReach) tollReach = e; });
+    const upTo = (k) => (k && k < today ? k : today);
+    const actual = (fuelReach ? fuelBetween(yStart, upTo(fuelReach)) : 0) + (tollReach ? tollBetween(yStart, upTo(tollReach)) : 0) + sum(rowsBetween(yStart, today));
+    const estFuel = daily(b.fuel) * daysLeft(fuelReach && upTo(fuelReach));
+    const estToll = daily(b.toll) * daysLeft(tollReach && upTo(tollReach));
+    const estMaint = daily(b.planned + b.unplanned) * daysLeft(today);
+    const total = actual + estFuel + estToll + estMaint;
+    if (!(total > 0)) return '';
+    const tip = V.tipAttr(`Forecast for ${year}`, [
+      ['Spent so far', L.fmtAUD(actual), 'var(--ink)'],
+      ...(estFuel > 0.5 ? [[`Fuel, ${fuelReach ? `after ${T.fmtKey(upTo(fuelReach))}` : 'all year'}`, L.fmtAUD(estFuel), COLOR_FUEL]] : []),
+      ...(estToll > 0.5 ? [[`Tolls, ${tollReach ? `after ${T.fmtKey(upTo(tollReach))}` : 'all year'}`, L.fmtAUD(estToll), COLOR_TOLL]] : []),
+      ...(estMaint > 0.5 ? [['Servicing and repairs, rest of year', L.fmtAUD(estMaint), COLOR_PLANNED]] : []),
+      ['Forecast total', L.fmtAUD(total), 'var(--violet)'],
+      ['Estimates use', 'each cost’s average month', 'var(--muted)']
+    ]);
+    return `<small class="cs-delta cs-year-forecast" ${tip}>Forecast for ${year}: <b>${L.fmtAUD(total)}</b></small>`;
   }
 
   function projectedMonths(end) {
