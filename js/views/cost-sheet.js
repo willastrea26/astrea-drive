@@ -187,7 +187,7 @@ AD.views['cost-sheet'] = (function () {
     period = params.period === 'week' ? 'week' : 'month';
     usageMode = ['hr', 'fuel'].includes(params.use) ? params.use : 'km';   // Cost vs usage: per km, per engine hour, or fuel per km
     trendView = params.view === 'total' ? 'total' : 'split';
-    fuelView = params.fv === 'tolls' ? 'tolls' : 'fuel';
+    fuelView = params.fv === 'tolls' || params.fv === 'both' ? params.fv : 'fuel';
     fresh = true;
     draw();
   }
@@ -288,7 +288,7 @@ AD.views['cost-sheet'] = (function () {
 
       <div class="cs-pair">
         ${months(chartEnd())}
-        ${topSpendingVehicles()}
+        ${lastMonthSpend()}
       </div>
 
       ${fuelAndTolls()}
@@ -778,83 +778,156 @@ AD.views['cost-sheet'] = (function () {
    * nothing, so it stays out of the chart and only appears in the table view.
    */
   /**
-   * Top spending vehicles for the period on screen (week / month / year):
-   * everything charged to each vehicle — fuel card, Linkt tolls, planned
-   * servicing, unplanned repairs — highest first, each bar split by type so
-   * the reason a vehicle is expensive is visible. Spend that isn't tied to a
-   * vehicle (person cards, unlinked toll tags) is noted underneath, so the
-   * list adds up to the Total spend card. (What moved — each vehicle against
-   * its own average — needs a previous period to compare with; movers() is
-   * kept for when there's a year of history.)
+   * Each vehicle's spend between two dates — fuel card, Linkt tolls, planned
+   * servicing, unplanned repairs — highest first, plus what isn't tied to any
+   * vehicle (person fuel cards, unlinked or shared toll tags, account credits),
+   * so the lists can say how far short of Total spend they fall.
    */
-  function topSpendingVehicles() {
-    const cfg = SCOPE_CFG[scope];
-    const from = start, to = end;
+  function vehicleSpend(from, to) {
     const inP = (d) => d && d >= from && d <= to;
     const totals = new Map();
     const get = (id) => {
       if (!totals.has(id)) totals.set(id, { fuel: 0, toll: 0, planned: 0, unplanned: 0 });
       return totals.get(id);
     };
-    let looseFuel = 0, looseToll = 0;
+    let looseFuel = 0, tollAssigned = 0;
     fuelRows().forEach((r) => { if (!inP(r.date)) return; if (r.vehicleId) get(r.vehicleId).fuel += r.cost; else looseFuel += r.cost; });
-    rowsBetween(from, to).forEach((r) => { if (!r.vehicleId) return; get(r.vehicleId)[r.kind === PLANNED ? 'planned' : 'unplanned'] += r.cost; });
-    const byVeh = L.tollsByVehicle ? L.tollsByVehicle() : new Map();
-    let tollAssigned = 0;
-    byVeh.forEach((rows, id) => rows.forEach((r) => {
-      const d = String(r.date).slice(0, 10);
-      if (inP(d)) { const a = Number(r.amount) || 0; get(id).toll += a; tollAssigned += a; }
+    rowsBetween(from, to).forEach((r) => { if (r.vehicleId) get(r.vehicleId)[r.kind === PLANNED ? 'planned' : 'unplanned'] += r.cost; });
+    (L.tollsByVehicle ? L.tollsByVehicle() : new Map()).forEach((rows, id) => rows.forEach((r) => {
+      if (!inP(String(r.date).slice(0, 10))) return;
+      const a = Number(r.amount) || 0;
+      get(id).toll += a;
+      tollAssigned += a;
     }));
-    looseToll = tollBetween(from, to) - tollAssigned;   // unlinked tags, shared tags, account credits
+    const lines = [...totals.entries()]
+      .map(([id, t]) => ({ v: AD.store.get('vehicles', id) || { id }, ...t, total: t.fuel + t.toll + t.planned + t.unplanned }))
+      .filter((l) => l.total > 0.005)
+      .sort((a, b) => b.total - a.total);
+    return { lines, loose: looseFuel + tollBetween(from, to) - tollAssigned };
+  }
 
-    const lines = [...totals.entries()].map(([id, t]) => {
-      const v = AD.store.get('vehicles', id) || { id };
-      return { v, ...t, total: t.fuel + t.toll + t.planned + t.unplanned };
-    }).filter((l) => l.total > 0.005).sort((a, b) => b.total - a.total);
+  const SPEND_PARTS = [['fuel', 'Fuel', 'cs-seg-fuel', COLOR_FUEL], ['toll', 'Tolls', 'cs-seg-toll', COLOR_TOLL],
+    ['planned', 'Servicing', 'cs-seg-planned', COLOR_PLANNED], ['unplanned', 'Repairs', 'cs-seg-unplanned', COLOR_UNPLANNED]];
 
-    const head = `<figcaption><h3>Top spending vehicles</h3><span class="viz-sub">This ${cfg.label} · fuel, tolls, servicing and repairs per vehicle, highest first</span></figcaption>`;
-    if (!lines.length) {
-      return `<figure class="viz-card">${head}<p class="empty">No costs recorded against any vehicle this ${cfg.label}.</p></figure>`;
-    }
-    const top = lines[0].total || 1;
-    const parts = [['fuel', 'Fuel', 'cs-seg-fuel', COLOR_FUEL], ['toll', 'Tolls', 'cs-seg-toll', COLOR_TOLL],
-      ['planned', 'Servicing', 'cs-seg-planned', COLOR_PLANNED], ['unplanned', 'Repairs', 'cs-seg-unplanned', COLOR_UNPLANNED]];
-    const idCell = (v) => {
-      const art = (AD.art && AD.art.forVehicle(v, 44)) || '';
-      return `<span class="id">${art ? `<span class="cs-veh-art">${art}</span>` : ''}<span class="cs-id-text">${esc(v.id)}${v.rego ? `<small class="cs-rego">${esc(v.rego)}</small>` : ''}</span></span>`;
-    };
-    const rows = lines.map((l, i) => {
+  /** One row per vehicle: art, rego, a bar split by type, the total, and the driver and split underneath. `sub(line)` adds a small line under the total. */
+  function spendRows(lines, sub) {
+    const top = (lines[0] && lines[0].total) || 1;
+    return lines.map((l, i) => {
+      const parts = SPEND_PARTS.filter(([k]) => l[k] > 0);
       let left = 0;
-      const segs = parts.filter(([k]) => l[k] > 0).map(([k, , cls], j) => {
+      const segs = parts.map(([k, , cls], j) => {
         const w = (l[k] / top) * 100;
         const s = `<i class="${cls}" style="left:${left}%;width:${w}%;--i:${j}"></i>`;
         left += w;
         return s;
       }).join('');
-      const drv = l.v.driverId ? L.driverName(l.v.driverId) : '';
-      const split = parts.filter(([k]) => l[k] > 0).map(([k, label]) => `${label} ${L.fmtAUD(l[k])}`).join(' · ');
-      return `<a class="cs-row cs-row-art" href="${vehHref(l.v.id)}" style="--i:${i}" ${V.tipAttr(l.v.id, [
-          ...parts.filter(([k]) => l[k] > 0).map(([k, label, , color]) => [label, L.fmtAUD(l[k]), color]),
+      const drv = L.driverName(l.v.driverId);
+      const art = (AD.art && AD.art.forVehicle(l.v, 44)) || '';
+      const subTxt = sub ? sub(l) : '';
+      return `<a class="cs-row cs-row-art${sub ? ' cs-fuelkm-row' : ''}" href="${vehHref(l.v.id)}" style="--i:${i}" ${V.tipAttr(l.v.id, [
+          ...parts.map(([k, label, , color]) => [label, L.fmtAUD(l[k]), color]),
           ['Total', L.fmtAUD(l.total), 'var(--ink)']
         ])}>
-        ${idCell(l.v)}
+        <span class="id">${art ? `<span class="cs-veh-art">${art}</span>` : ''}<span class="cs-id-text">${esc(l.v.id)}${l.v.rego ? `<small class="cs-rego">${esc(l.v.rego)}</small>` : ''}</span></span>
         <span class="cs-hbar cs-stack">${segs}</span>
-        <span class="cs-row-val">${L.fmtAUD(l.total)}</span>
-        <span class="cs-row-meta">${drv ? `<span class="cs-driver">${esc(drv)}</span> · ` : ''}${split}</span>
+        <span class="cs-row-val">${L.fmtAUD(l.total)}${subTxt ? `<span class="cs-row-sub">${subTxt}</span>` : ''}</span>
+        <span class="cs-row-meta">${drv ? `<span class="cs-driver">${esc(drv)}</span> · ` : ''}${parts.map(([k, label]) => `${label} ${L.fmtAUD(l[k])}`).join(' · ')}</span>
       </a>`;
     });
-    const used = parts.filter(([k]) => lines.some((l) => l[k] > 0));
-    const legend = `<p class="cs-legend">${used.map(([, label, cls]) => `<span><i class="cs-legend-swatch ${cls}"></i>${label}</span>`).join('')}</p>`;
-    const loose = looseFuel + looseToll;
-    const tableRows = lines.map((l) => [l.v.id, l.v.rego || '', l.v.driverId ? L.driverName(l.v.driverId) || '—' : '—',
-      L.fmtAUD(l.fuel), L.fmtAUD(l.toll), L.fmtAUD(l.planned), L.fmtAUD(l.unplanned), L.fmtAUD(l.total)]);
+  }
+  const spendLegend = (lines) => `<p class="cs-legend">${SPEND_PARTS.filter(([k]) => lines.some((l) => l[k] > 0))
+    .map(([, label, cls]) => `<span><i class="cs-legend-swatch ${cls}"></i>${label}</span>`).join('')}</p>`;
+  const spendTable = (lines) => V.table(['Vehicle', 'Rego', 'Assigned driver', 'Fuel', 'Tolls', 'Servicing', 'Repairs', 'Total'],
+    lines.map((l) => [l.v.id, l.v.rego || '', L.driverName(l.v.driverId) || '—', L.fmtAUD(l.fuel), L.fmtAUD(l.toll), L.fmtAUD(l.planned), L.fmtAUD(l.unplanned), L.fmtAUD(l.total)]));
+  const looseNote = (loose) => Math.abs(loose) > 0.5
+    ? `<p class="cs-more">Plus ${L.fmtAUD(loose)} not tied to a vehicle (person fuel cards, unlinked toll tags, account credits), which is in Total spend.</p>` : '';
+  /** While tolls are still loading the lists are fuel and maintenance only — say so rather than show low totals as fact. */
+  function tollLoadingNote() {
+    const st = AD.store.tollsState ? AD.store.tollsState() : 'missing';
+    return st === 'idle' || st === 'loading' ? `<p class="cs-more" data-toll-progress>${tollProgressText()}</p>` : '';
+  }
+  /** The latest day each import reaches, so a month past it can say its fuel or tolls aren't complete yet. */
+  function dataReach() {
+    let fuel = '', toll = '';
+    (AD.store.all('fuel_entries') || []).forEach((r) => { const d = String(r.date || '').slice(0, 10); if (d > fuel) fuel = d; });
+    (AD.store.all('toll_entries') || []).forEach((r) => { const d = String(r.periodEnd || r.date || '').slice(0, 10); if (d > toll) toll = d; });
+    return { fuel, toll };
+  }
+
+  /**
+   * Most expensive last month, beside Month by month: each vehicle's spend for
+   * the last complete month on screen (October when looking at this year in
+   * November; a past period's own last month when looking back). A single
+   * recent month shows who is costing money now, where a year mostly shows
+   * who has been in the fleet longest.
+   */
+  function lastMonthSpend() {
+    const ref = chartEnd();
+    let ms = periodStart('month', ref);
+    if (ref !== periodEnd('month', ms)) ms = stepPeriod('month', ms, -1);
+    const me = periodEnd('month', ms);
+    const label = fmtPeriodLabel('month', ms);
+    const isLast = ms === stepPeriod('month', periodStart('month', T.todayKey()), -1);
+    const { lines, loose } = vehicleSpend(ms, me);
+    const reach = dataReach();
+    const gaps = [];
+    if (reach.fuel && reach.fuel < me) gaps.push(`fuel card data only goes to ${T.fmtKey(reach.fuel)}`);
+    if (reach.toll && reach.toll < me) gaps.push(`Linkt tolls only go to ${T.fmtKey(reach.toll)} (the latest statement imported)`);
+    const gapNote = gaps.length ? `<p class="cs-more cs-gap">Not the full month yet: ${gaps.join('; ')}.</p>` : '';
+    const head = `<figcaption><h3>Most expensive ${isLast ? 'last month' : 'in ' + esc(label)}</h3><span class="viz-sub">${esc(label)} · fuel, tolls, servicing and repairs per vehicle, highest first</span></figcaption>`;
+    if (!lines.length) {
+      return `<figure class="viz-card">${head}<p class="empty">No costs recorded against any vehicle in ${esc(label)}.</p>${gapNote}${tollLoadingNote()}</figure>`;
+    }
     return `<figure class="viz-card">
       ${head}
-      ${legend}
-      <div class="cs-rows">${topRows(rows, 'vehicles', 8)}</div>
-      ${Math.abs(loose) > 0.5 ? `<p class="cs-more">Plus ${L.fmtAUD(loose)} not tied to a vehicle (person fuel cards, unlinked toll tags, account credits), which is in Total spend.</p>` : ''}
-      ${V.table(['Vehicle', 'Rego', 'Assigned driver', 'Fuel', 'Tolls', 'Servicing', 'Repairs', 'Total'], tableRows)}
+      ${spendLegend(lines)}
+      <div class="cs-rows">${topRows(spendRows(lines), 'vehicles', 8)}</div>
+      ${gapNote}
+      ${looseNote(loose)}
+      ${tollLoadingNote()}
+      ${spendTable(lines)}
     </figure>`;
+  }
+
+  /**
+   * Fuel & tolls → Both: Top spending vehicles, full width. Every vehicle's
+   * spend for the period on screen (fuel card, tolls, servicing, repairs),
+   * highest first, with an average per vehicle — a fair figure for a growing
+   * fleet, where the total only ever goes up.
+   */
+  function topSpendingWide(actions = '') {
+    const label = fmtPeriodLabel(scope, start);
+    const { lines, loose } = vehicleSpend(start, end);
+    const head = (meta) => sectionHead({ title: 'Top spending vehicles', meta, actions });
+    if (!lines.length) {
+      return `<section class="section" id="cs-top-spend">${head(esc(label))}
+        <figure class="viz-card"><p class="empty">No costs recorded against any vehicle in ${esc(label)}.</p>${tollLoadingNote()}</figure>
+      </section>`;
+    }
+    const tied = lines.reduce((t, l) => t + l.total, 0);
+    const n = Math.min(5, lines.length);
+    const topN = lines.slice(0, n).reduce((t, l) => t + l.total, 0);
+    const first = lines[0];
+    const firstDrv = L.driverName(first.v.driverId);
+    const pct = (x) => { const p = (x / tied) * 100; return p > 0 && p < 1 ? '<1' : String(Math.round(p)); };
+    const k = (lbl, value, sub) => `<div class="cost-kpi"><span>${esc(lbl)}</span><strong>${value}</strong><small>${sub}</small></div>`;
+    const kpis = `<div class="cost-kpis cs-fuelkm-kpis">
+        ${k('Average per vehicle', L.fmtAUD(tied / lines.length), `across the ${lines.length} vehicle${lines.length === 1 ? '' : 's'} with spend`)}
+        ${k('Highest', esc(first.v.id), `${L.fmtAUD(first.total)}${firstDrv ? ' · ' + esc(firstDrv) : ''}`)}
+        ${k(`Top ${n} vehicle${n === 1 ? '' : 's'}`, `${pct(topN)}%`, `${L.fmtAUD(topN)} of ${L.fmtAUD(tied)} vehicle spend`)}
+        ${k('Not tied to a vehicle', L.fmtAUD(loose), 'person fuel cards, unlinked toll tags, credits')}
+      </div>`;
+    return `<section class="section" id="cs-top-spend">
+      ${head(`${esc(label)} · ${lines.length} vehicle${lines.length === 1 ? '' : 's'} · ${L.fmtAUD(tied)}`)}
+      <figure class="viz-card">
+        <figcaption><span class="viz-sub">Everything charged to each vehicle in ${esc(label)}: fuel card, Linkt tolls, planned servicing and unplanned repairs. Hover a bar for the split, or click a vehicle to open it.</span></figcaption>
+        ${kpis}
+        ${spendLegend(lines)}
+        <div class="cs-rows">${topRows(spendRows(lines, (l) => `${pct(l.total)}% of vehicle spend`))}</div>
+        ${tollLoadingNote()}
+        ${spendTable(lines)}
+      </figure>
+    </section>`;
   }
 
   function movers(now, base) {
@@ -1400,14 +1473,14 @@ AD.views['cost-sheet'] = (function () {
   }
 
   /**
-   * Fuel purchased, Fuel cost per km and Tolls share one section, switched by
-   * the buttons in its heading, instead of three long sections one after
-   * another. The choice is kept in the URL (?fv=perkm / ?fv=tolls).
+   * Fuel purchased, Tolls and Both (Top spending vehicles) share one section,
+   * switched by the buttons in its heading, instead of three long sections one
+   * after another. The choice is kept in the URL (?fv=tolls / ?fv=both).
    */
   function fuelAndTolls() {
     const opt = (key, label) => `<button type="button" data-fuelview="${key}" class="${fuelView === key ? 'on' : ''}">${label}</button>`;
-    const sw = `<div class="seg" role="group" aria-label="Show">${opt('fuel', 'Fuel')}${opt('tolls', 'Tolls')}</div>`;
-    return fuelView === 'tolls' ? tolls(sw) : fuelLitreage(sw);
+    const sw = `<div class="seg" role="group" aria-label="Show">${opt('fuel', 'Fuel')}${opt('tolls', 'Tolls')}${opt('both', 'Both')}</div>`;
+    return fuelView === 'tolls' ? tolls(sw) : fuelView === 'both' ? topSpendingWide(sw) : fuelLitreage(sw);
   }
 
   function fuelLitreage(actions = '') {
