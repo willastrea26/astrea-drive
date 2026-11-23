@@ -21,9 +21,9 @@ AD.views['cost-sheet'] = (function () {
   const READY_USAGE_DAYS = 28;  // Cost vs usage: days of GPS AND fuel data side by side before a vehicle is ranked (about four tank fills)
   const STEADY_USAGE_DAYS = 60; // beyond this the figure barely moves
   let root = null, start = '', end = '', scope = 'year', period = 'month', usageMode = 'km', trendView = 'split', fuelView = 'fuel';   // trendView: Spend over time as 'split' (each cost) or 'total'
-  const PROJ_STORE_KEY = 'ad-cost-proj-overrides';
-  let projOverrides = (() => { try { const v = JSON.parse(localStorage.getItem(PROJ_STORE_KEY)) || {}; /* migrate old {planned,unplanned} format */ for (const k of Object.keys(v)) { if (typeof v[k] === 'object') v[k] = (v[k].planned || 0) + (v[k].unplanned || 0); } return v; } catch { return {}; } })();
-  function saveOverrides() { try { localStorage.setItem(PROJ_STORE_KEY, JSON.stringify(projOverrides)); } catch {} }
+  // The forecast used to be hand-editable; it's now always the average of the
+  // actual numbers, so clear any edits a browser still has saved.
+  try { localStorage.removeItem('ad-cost-proj-overrides'); } catch {}
   // Replays the draw-in whenever the figures on screen actually change — opening
   // the page, stepping a week, switching period — but not on a background refresh,
   // which would make the page twitch while someone is reading it.
@@ -300,9 +300,7 @@ AD.views['cost-sheet'] = (function () {
 
       ${costVsUsage()}
 
-      <p class="section-foot muted small">Spend = recorded services (planned) and resolved defects (unplanned), on the day they were recorded or resolved, plus imported fuel-card and Linkt toll charges. The cards at the top compare the ${cfg.label} on screen with the average of the ${cfg.baselineN} ${cfg.baselineN === 1 ? cfg.label : cfg.plural} before.</p>
-
-      ${projection(chartEnd())}`;
+      <p class="section-foot muted small">Spend = recorded services (planned) and resolved defects (unplanned), on the day they were recorded or resolved, plus imported fuel-card and Linkt toll charges. The cards at the top compare the ${cfg.label} on screen with the average of the ${cfg.baselineN} ${cfg.baselineN === 1 ? cfg.label : cfg.plural} before. The forecast (dashed violet, Total view) is the average month of each cost, over the months we have complete data for it.</p>`;
 
     detailsRestore(el, openDetails);
 
@@ -317,7 +315,6 @@ AD.views['cost-sheet'] = (function () {
     el.querySelectorAll('[data-fuelview]').forEach((b) => (b.onclick = () => { if (b.dataset.fuelview === fuelView) return; fuelView = b.dataset.fuelview; fresh = true; setParams(); draw(); }));
     el.querySelectorAll('[data-use]').forEach((b) => (b.onclick = () => { if (b.dataset.use === usageMode) return; usageMode = b.dataset.use; setParams(); draw(); }));
     bindTollAssign(el);
-    bindProjectionInputs();
   }
 
   function go(key) {
@@ -439,27 +436,64 @@ AD.views['cost-sheet'] = (function () {
   }
 
   /** Projected future months — one flat forecast value per month. */
-  function projectedMonths(end) {
+  /**
+   * The forecast month: the average of the actual numbers, per cost type, over
+   * the complete months (up to 12 back) we have FULL data for that type, then
+   * added together. A month no statement fully covers yet (October's tolls
+   * stop at the latest Linkt statement; January's fuel starts with the first
+   * import) is missing data, not a cheap month, so it's left out of that
+   * type's average. The month still running is never averaged in.
+   */
+  function forecastBasis(end) {
     const { y, m } = T.parseKey(end);
-    // Average the last three COMPLETE months: the month still running is only
-    // partly in, and would pull the forecast down.
     const skip = end.slice(0, 7) === T.todayKey().slice(0, 7) ? 1 : 0;
-    const recent = Array.from({ length: 3 }, (_, i) => {
+    const months = Array.from({ length: 12 }, (_, i) => {
       const dt = new Date(Date.UTC(y, m - 1 - i - skip, 1));
       const key = dt.toISOString().slice(0, 7);
-      return sum(rowsForMonth(key)) + fuelForMonth(key) + tollForMonth(key); // forecast total cost incl fuel and tolls
+      return { key, from: key + '-01', to: periodEnd('month', key + '-01') };
+    }).reverse();
+    // Fuel: complete only where every card's imports span the whole month.
+    const cards = new Map();
+    fuelRows().forEach((r) => {
+      const c = cards.get(r.card) || { first: r.date, last: r.date };
+      if (r.date < c.first) c.first = r.date;
+      if (r.date > c.last) c.last = r.date;
+      cards.set(r.card, c);
     });
-    const avgTotal = avgOf(recent);
+    const fuelMonths = cards.size ? months.filter((mo) => [...cards.values()].every((c) => c.first <= mo.from && c.last >= mo.to)) : [];
+    // Tolls: complete where the imported statement periods span the whole month.
+    let tFirst = '', tLast = '';
+    (AD.store.all('toll_entries') || []).forEach((r) => {
+      const s = String(r.periodStart || r.date || '').slice(0, 10), e = String(r.periodEnd || r.date || '').slice(0, 10);
+      if (s && (!tFirst || s < tFirst)) tFirst = s;
+      if (e > tLast) tLast = e;
+    });
+    const tollMonths = tFirst ? months.filter((mo) => tFirst <= mo.from && tLast >= mo.to) : [];
+    // Servicing and repairs are recorded in the app: every month from the first one with a record.
+    const firstMaint = allRows().map((r) => r.date.slice(0, 7)).sort()[0] || '';
+    const maintMonths = firstMaint ? months.filter((mo) => mo.key >= firstMaint) : [];
+    const avgBy = (list, fn) => (list.length ? avgOf(list.map((mo) => fn(mo.key))) : 0);
+    const fuel = avgBy(fuelMonths, fuelForMonth);
+    const toll = avgBy(tollMonths, tollForMonth);
+    const planned = avgBy(maintMonths, (k) => sumKind(rowsForMonth(k), PLANNED));
+    const unplanned = avgBy(maintMonths, (k) => sumKind(rowsForMonth(k), UNPLANNED));
+    return { fuel, toll, planned, unplanned, total: fuel + toll + planned + unplanned,
+      fuelN: fuelMonths.length, tollN: tollMonths.length, maintN: maintMonths.length };
+  }
+
+  function projectedMonths(end) {
+    const { y, m } = T.parseKey(end);
+    const b = forecastBasis(end);
     return Array.from({ length: PROJ_MONTHS }, (_, i) => {
       const dt = new Date(Date.UTC(y, m + i, 1));
       const key = T.MONTHS[dt.getUTCMonth()] + ' ' + dt.getUTCFullYear();
-      const total = projOverrides[key] != null ? projOverrides[key] : avgTotal;
       return {
-        total, maint: total, fuel: 0, toll: 0, fuelTop: total, grand: total, planned: total, unplanned: 0,
+        total: b.total, maint: b.planned + b.unplanned, fuel: b.fuel, toll: b.toll, fuelTop: b.total, grand: b.total,
+        planned: b.planned, unplanned: b.unplanned, basis: b,
         label: T.MONTHS[dt.getUTCMonth()].slice(0, 3),
         short: T.MONTHS[dt.getUTCMonth()].slice(0, 3) + ' ' + String(dt.getUTCFullYear()).slice(2),
         full: key + ' (forecast)',
-        key, defaultTotal: avgTotal,
+        key,
         projected: true
       };
     });
@@ -592,12 +626,23 @@ AD.views['cost-sheet'] = (function () {
     const totalDotsRaw = showTotal ? seriesDots(histCoords, 'var(--red)', breakdown) : '';
     const totalDots = animateTolls && totalDotsRaw ? `<g class="cs-arrive-dots">${totalDotsRaw}</g>` : totalDotsRaw;
     const arr = animateTolls ? ' cs-arrive' : '';   // tolls just arrived: draw their line in rather than popping it in
+    // Forecast hover: the total, and the average month each part comes from.
+    const months = (n) => `avg of ${n} month${n === 1 ? '' : 's'}`;
+    const forecastTip = (p) => {
+      const b = p.basis || {};
+      return [
+        ['Forecast total', L.fmtAUD(p.total), 'var(--violet)'],
+        ...(b.fuelN ? [[`Fuel (${months(b.fuelN)})`, L.fmtAUD(b.fuel), COLOR_FUEL]] : []),
+        ...(b.tollN ? [[`Tolls (${months(b.tollN)})`, L.fmtAUD(b.toll), COLOR_TOLL]] : []),
+        ...(b.maintN ? [[`Servicing (${months(b.maintN)})`, L.fmtAUD(b.planned), COLOR_PLANNED], [`Repairs (${months(b.maintN)})`, L.fmtAUD(b.unplanned), COLOR_UNPLANNED]] : [])
+      ];
+    };
     const projMarks = projCoords.map((c, j) => {
       const p = points[splitIdx + 1 + j];
       const cx = c.x.toFixed(1), cy = c.y.toFixed(1);
       return `<g class="cs-mark cs-proj-mark" style="--i:${splitIdx + 1 + j}">
         <circle cx="${cx}" cy="${cy}" r="4" class="cs-dot"></circle>
-        <circle cx="${cx}" cy="${cy}" r="16" class="cs-hit" ${V.tipAttr(p.full, [['Forecast total', L.fmtAUD(p.total), 'var(--violet)']])}></circle>
+        <circle cx="${cx}" cy="${cy}" r="16" class="cs-hit" ${V.tipAttr(p.full, forecastTip(p))}></circle>
       </g>`;
     }).join('');
     const marks = (showTotal ? totalDots : plannedDots + unplannedDots + fuelDots + tollDots) + projMarks;
@@ -651,7 +696,7 @@ AD.views['cost-sheet'] = (function () {
       { label: 'Planned servicing', color: COLOR_PLANNED },
       { label: 'Unplanned repairs', color: COLOR_UNPLANNED }
     ];
-    if (hasProj) legendItems.push({ label: 'Forecast (total)', color: 'var(--violet)' });
+    if (hasProj) legendItems.push({ label: 'Forecast (average month, not actual spend)', color: 'var(--violet)' });
 
     return `<figure class="viz-card">
       <figcaption><h3>Spend over time</h3><span class="viz-sub">${isMonthly ? TREND_MONTHS + ' months' : TREND_WEEKS + ' weeks'} to ${T.fmtKey(end)}${hasProj ? ' + ' + PROJ_MONTHS + '-month forecast' : ''}</span></figcaption>
@@ -738,56 +783,6 @@ AD.views['cost-sheet'] = (function () {
         points.map((p) => [p.full, L.fmtAUD(p.planned), L.fmtAUD(p.unplanned)]
           .concat(anyFuel ? [L.fmtAUD(p.fuel)] : [], anyToll ? [L.fmtAUD(p.toll || 0)] : [], [L.fmtAUD(p.grand)])))}
     </figure>`;
-  }
-
-  function projection(end) {
-    if (period !== 'month') return '';
-    const proj = projectedMonths(end);
-    if (!proj.length) return '';
-    const hasOverrides = Object.keys(projOverrides).length > 0;
-    let running = 0;
-    const rows = proj.map((p, i) => {
-      running += p.total;
-      const edited = projOverrides[p.key] != null;
-      return `<tr${edited ? ' class="cs-proj-edited"' : ''}>
-        <td>${esc(p.key)}</td>
-        <td><input type="number" class="cs-proj-input" data-idx="${i}" value="${Math.round(p.total)}" step="100" min="0"></td>
-        <td>${L.fmtAUD(running)}</td>
-      </tr>`;
-    }).join('');
-    return `<section class="cs-proj-section" id="cs-proj-section">
-      <figure class="viz-card cs-proj-card">
-        <figcaption>
-          <h3>Forecast</h3>
-          <span class="viz-sub">${PROJ_MONTHS}-month forecast · edit to adjust the chart${hasOverrides ? ' · <button type="button" class="link-btn cs-proj-reset" id="cs-proj-reset">reset to average</button>' : ''}</span>
-        </figcaption>
-        <table class="cs-proj-table">
-          <thead><tr><th>Month</th><th>Forecast spend</th><th>Running total</th></tr></thead>
-          <tbody>${rows}</tbody>
-          <tfoot><tr><td>${PROJ_MONTHS}-month total</td><td></td><td class="cs-proj-total">${L.fmtAUD(running)}</td></tr></tfoot>
-        </table>
-      </figure>
-    </section>`;
-  }
-
-  function bindProjectionInputs() {
-    const section = root.querySelector('#cs-proj-section');
-    if (!section) return;
-    const proj = projectedMonths(chartEnd());
-    section.querySelectorAll('.cs-proj-input').forEach((inp) => {
-      inp.addEventListener('change', () => {
-        const idx = +inp.dataset.idx;
-        const val = Math.max(0, parseFloat(inp.value) || 0);
-        const p = proj[idx];
-        if (!p) return;
-        if (Math.abs(val - p.defaultTotal) < 0.5) { delete projOverrides[p.key]; }
-        else { projOverrides[p.key] = val; }
-        saveOverrides();
-        draw();
-      });
-    });
-    const resetBtn = section.querySelector('#cs-proj-reset');
-    if (resetBtn) resetBtn.onclick = () => { projOverrides = {}; saveOverrides(); draw(); };
   }
 
   /**
