@@ -2876,6 +2876,9 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 .rep-lede b { color: var(--ink); font-weight: 600; }
 .rep-month { display: grid; gap: 7px; font-size: 13px; font-weight: 600; color: var(--ink); margin-bottom: 10px; }
 .rep-month select { width: 100%; }
+.rep-month[hidden] { display: none; }
+/* Monthly / Yearly switch at the top of the Generate report dialog */
+.rep-kind { margin: 0 0 14px; }
 .rep-context { font-size: 12px; }
 
 .rep-picker { display: grid; gap: 10px; }

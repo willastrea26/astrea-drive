@@ -70,18 +70,41 @@ AD.fleetReport = (function () {
   /* ------------------------------------------------------------------ data
    * One pass over the stores so every sheet works from the same snapshot.
    */
-  function gather(monthKey) {
+  /**
+   * options.period: 'month' (default; monthKey = 'YYYY-MM') or 'year'
+   * (options.year). A yearly report covers January to December of that year
+   * (to date, for the year we're in) and compares it with the year before; a
+   * monthly report covers the month and compares it with the month before.
+   */
+  function gather(monthKey, options = {}) {
     const today = T.todayKey();
     const current = T.parts(Date.now());
-    const selected = monthKey || today.slice(0, 7);
-    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(selected) || selected > today.slice(0, 7)) {
-      throw new Error('Choose a valid reporting month that is not in the future.');
+    const isYear = options.period === 'year';
+    let year, month, periodStart, periodEndFull;
+    if (isYear) {
+      year = Number(options.year) || current.year;
+      if (year > current.year) throw new Error('Choose a year that is not in the future.');
+      month = year === current.year ? Number(today.slice(5, 7)) : 12;
+      periodStart = `${year}-01-01`;
+      periodEndFull = `${year}-12-31`;
+    } else {
+      const selected = monthKey || today.slice(0, 7);
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(selected) || selected > today.slice(0, 7)) {
+        throw new Error('Choose a valid reporting month that is not in the future.');
+      }
+      [year, month] = selected.split('-').map(Number);
+      periodStart = `${selected}-01`;
+      periodEndFull = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
     }
-    const [year, month] = selected.split('-').map(Number);
-    const monthEnd = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
-    const reportEnd = monthEnd < today ? monthEnd : today;
+    const reportEnd = periodEndFull < today ? periodEndFull : today;
     const p = { ...current, year, month, day: Number(reportEnd.slice(8)) };
-    const isPartial = reportEnd < monthEnd;
+    const isPartial = reportEnd < periodEndFull;
+    const inPeriod = (d) => !!d && d >= periodStart && d <= reportEnd;
+    // Words the pages use for the period, so one set of pages serves both reports.
+    const monthWord = T.MONTHS[month - 1];
+    const period = isYear
+      ? { isYear, label: String(year), name: String(year), word: 'year', prevLabel: String(year - 1), kind: 'Yearly' }
+      : { isYear, label: `${monthWord} ${year}`, name: monthWord, word: 'month', prevLabel: T.MONTHS[(month + 10) % 12], kind: 'Monthly' };
     const vehicles = AD.store.all('vehicles').map((v) => ({ ...v, nextServiceDate: v.nextServiceDate || '', regoExpiry: v.regoExpiry || '' }));
     const services = AD.store.all('services').filter((s) => s.date && s.date <= reportEnd);
     const defects  = AD.store.all('defects');
@@ -106,40 +129,48 @@ AD.fleetReport = (function () {
     // The Cost sheet's own forecast and usage figures, so report and app agree.
     const model = AD.views && AD.views['cost-sheet'] && AD.views['cost-sheet'].model;
 
-    // Twelve calendar months ending with the current one.
-    const months = Array.from({ length: 12 }, (_, i) => {
-      const d = new Date(Date.UTC(p.year, p.month - 1 - (11 - i), 1));
-      const key = d.toISOString().slice(0, 7);
-      return { key, label: T.MONTHS[d.getUTCMonth()] + ' ' + d.getUTCFullYear(), year: d.getUTCFullYear(), m: d.getUTCMonth() };
-    });
+    // Spend between two dates, by type — the building block for every figure.
+    const sumRange = (from, to) => {
+      const within = (d) => !!d && d >= from && d <= to;
+      const svc = services.filter((s) => within(s.date));
+      const def = resolved.filter((d) => within(d.resolvedDate));
+      const fl  = fuel.filter((f) => within(f.date));
+      const r = {
+        planned:   svc.reduce((t, s) => t + cost(s.cost), 0),
+        unplanned: def.reduce((t, d) => t + cost(d.cost), 0),
+        fuel:      fl.reduce((t, f) => t + f.cost, 0),
+        toll:      tolls.filter((x) => within(x.date)).reduce((t, x) => t + x.cost, 0),
+        litres:    fl.filter((f) => L.isFuelPurchase(f)).reduce((t, f) => t + f.litres, 0),   // fuel litres, not AdBlue
+        fuelCount: fl.length, svcCount: svc.length, defCount: def.length
+      };
+      r.total = r.planned + r.unplanned + r.fuel + r.toll;
+      return r;
+    };
+    const monthEndOf = (key) => new Date(Date.UTC(Number(key.slice(0, 4)), Number(key.slice(5, 7)), 0)).toISOString().slice(0, 10);
 
-    months.forEach((mo) => {
-      const svc = services.filter((s) => (s.date || '').slice(0, 7) === mo.key);
-      const def = resolved.filter((d) => d.resolvedDate.slice(0, 7) === mo.key);
-      const fl  = fuel.filter((f) => f.date.slice(0, 7) === mo.key);
-      mo.planned   = svc.reduce((t, s) => t + cost(s.cost), 0);
-      mo.unplanned = def.reduce((t, d) => t + cost(d.cost), 0);
-      mo.fuel      = fl.reduce((t, f) => t + f.cost, 0);
-      mo.toll      = tolls.filter((r) => r.date.slice(0, 7) === mo.key).reduce((t, r) => t + r.cost, 0);
-      mo.litres    = fl.filter((f) => L.isFuelPurchase(f)).reduce((t, f) => t + f.litres, 0);   // fuel litres, not AdBlue
-      mo.fuelCount = fl.length;
-      mo.total     = mo.planned + mo.unplanned + mo.fuel + mo.toll;
-      mo.svcCount  = svc.length;
-      mo.defCount  = def.length;
+    // The chart months: the year's January to December, or the twelve months
+    // ending with the reporting month. Months after today are marked future.
+    const months = Array.from({ length: 12 }, (_, i) => {
+      const d = isYear ? new Date(Date.UTC(year, i, 1)) : new Date(Date.UTC(p.year, p.month - 1 - (11 - i), 1));
+      const key = d.toISOString().slice(0, 7);
+      const mo = { key, label: T.MONTHS[d.getUTCMonth()] + ' ' + d.getUTCFullYear(), year: d.getUTCFullYear(), m: d.getUTCMonth(), future: key > today.slice(0, 7) };
+      return Object.assign(mo, sumRange(`${key}-01`, monthEndOf(key)));
     });
+    // Index of the last month with data — the "current" column on the chart.
+    const curIdx = isYear ? p.month - 1 : 11;
 
     const annualTotal = months.reduce((t, m) => t + m.total, 0);
-    const curMonth = months[11];
-    // No Linkt statement reaches into this month yet: its tolls are missing, not $0.
-    const tollsNotIn = !tollThrough || tollThrough < curMonth.key + '-01';
+    // The period itself: the month, or the year to date.
+    const curMonth = isYear ? Object.assign(sumRange(periodStart, reportEnd), { key: null, label: String(year), year, m: 11 }) : months[11];
+    // No Linkt statement reaches into the period yet: its tolls are missing, not $0.
+    const tollsNotIn = !tollThrough || tollThrough < periodStart;
     const daysInMonth = new Date(Date.UTC(p.year, p.month, 0)).getUTCDate();
     const dayOfMonth = p.day;
     const mtdActual = curMonth.total;
 
-    // YTD: calendar-year to date. Prior months in this year + current month MTD.
-    const ytdMonths = months.filter((m) => m.year === p.year);
-    const ytdActual = ytdMonths.reduce((t, m) => t + m.total, 0);
-    const monthsElapsedFull = ytdMonths.length - 1;  // excluding current partial
+    // YTD: calendar-year to date.
+    const ytdActual = sumRange(`${year}-01-01`, reportEnd).total;
+    const monthsElapsedFull = isYear ? (isPartial ? p.month - 1 : 12) : p.month - 1;  // full months before the current one
 
     // Forecast, exactly as the Cost sheet shows it: the average month of each
     // cost over the months we have complete data for it (no comparison against
@@ -177,8 +208,10 @@ AD.fleetReport = (function () {
     const availabilityPct = vehicles.length ? statusCounts['Available'] / vehicles.length : 0;
     const unknownStatus = vehicles.length - Object.values(statusCounts).reduce((a, b) => a + b, 0);
 
-    /* ---- month-on-month, for the statistics pages ---- */
-    const prevMonth = months[10];
+    /* ---- against the previous period (month, or year), for the statistics pages ---- */
+    const prevMonth = isYear
+      ? Object.assign(sumRange(`${year - 1}-01-01`, `${year - 1}-12-31`), { key: null, label: String(year - 1) })
+      : months[10];
     const momPct = prevMonth && prevMonth.total > 0
       ? (curMonth.total - prevMonth.total) / prevMonth.total : null;
     const unplannedShare = curMonth.total > 0 ? curMonth.unplanned / curMonth.total : 0;
@@ -192,10 +225,9 @@ AD.fleetReport = (function () {
     const tollShare12 = annualTotal > 0 ? months.reduce((t, m) => t + m.toll, 0) / annualTotal : 0;
     const plannedShare12 = annualTotal > 0 ? months.reduce((t, m) => t + m.planned, 0) / annualTotal : 0;
 
-    // Defects raised and resolved inside the current month.
-    const curKey = curMonth.key;
-    const defRaisedMonth = defects.filter((d) => (d.reportedDate || '').slice(0, 7) === curKey && d.reportedDate <= reportEnd);
-    const defResolvedMonth = resolved.filter((d) => d.resolvedDate.slice(0, 7) === curKey);
+    // Defects raised and resolved inside the period.
+    const defRaisedMonth = defects.filter((d) => inPeriod(d.reportedDate));
+    const defResolvedMonth = resolved.filter((d) => inPeriod(d.resolvedDate));
     // Mean days to resolve, for those resolved this month that record both dates.
     const resolveDays = defResolvedMonth
       .map((d) => (d.reportedDate && d.resolvedDate) ? T.daysBetween(d.reportedDate, d.resolvedDate) : null)
@@ -212,14 +244,13 @@ AD.fleetReport = (function () {
       t[kind] += n;
       perVehicleMonth.set(id, t);
     };
-    services.filter((s) => (s.date || '').slice(0, 7) === curKey)
+    services.filter((s) => inPeriod(s.date))
       .forEach((s) => tallyMonth(s.vehicleId, 'planned', cost(s.cost)));
     defResolvedMonth.forEach((d) => tallyMonth(d.vehicleId, 'unplanned', cost(d.cost)));
-    fuel.filter((f) => f.date.slice(0, 7) === curKey).forEach((f) => tallyMonth(f.vehicleId, 'fuel', f.cost));
+    fuel.filter((f) => inPeriod(f.date)).forEach((f) => tallyMonth(f.vehicleId, 'fuel', f.cost));
     const tollsByVeh = L.tollsByVehicle ? L.tollsByVehicle() : new Map();
     tollsByVeh.forEach((rows, id) => rows.forEach((r) => {
-      const d = String(r.date || '').slice(0, 10);
-      if (d.slice(0, 7) === curKey && d <= reportEnd) tallyMonth(id, 'toll', Number(r.amount) || 0);
+      if (inPeriod(String(r.date || '').slice(0, 10))) tallyMonth(id, 'toll', Number(r.amount) || 0);
     }));
     const topSpenders = [...perVehicleMonth.entries()]
       .map(([id, parts]) => ({ id, parts, cost: parts.fuel + parts.toll + parts.planned + parts.unplanned, v: vehicles.find((v) => v.id === id) || null }))
@@ -280,9 +311,9 @@ AD.fleetReport = (function () {
     } catch (e) { idle = []; }
 
     const data = {
-      today, now: p, reportEnd, isPartial,
+      today, now: p, reportEnd, isPartial, period, periodStart, isYear,
       vehicles,
-      months, curMonth, prevMonth,
+      months, curMonth, prevMonth, curIdx,
       annualTotal, avgMonth, basis, yearForecast,
       mtdActual, daysInMonth, dayOfMonth,
       ytdActual, monthsElapsedFull,
@@ -349,12 +380,12 @@ AD.fleetReport = (function () {
     const maint12 = d.months.reduce((t, m) => t + m.planned + m.unplanned, 0);
     const maintShare12 = maint12 > 0 ? d.months.reduce((t, m) => t + m.unplanned, 0) / maint12 : 0;
     if (maintShare >= 0.4 && maint > 0) add(80, 'High', 'Bring the planned/unplanned balance back',
-      `Unplanned repairs were ${pct(maintShare)} of this month's maintenance spend (${aud(d.curMonth.unplanned)} of ${aud(maint)}), against a 12-month norm of ${pct(maintShare12)}.`,
+      `Unplanned repairs were ${pct(maintShare)} of this ${d.period.word}'s maintenance spend (${aud(d.curMonth.unplanned)} of ${aud(maint)})${d.isYear ? '' : `, against a 12-month norm of ${pct(maintShare12)}`}.`,
       'Review the repair invoices and repeat defects behind this share. Check whether the costs are one-off repairs or a recurring maintenance issue.');
 
     if (d.topShare >= 0.3 && d.topSpenders.length) add(72, 'Medium', 'Spend is concentrated in one vehicle',
-      `${d.topSpenders[0].id} accounted for ${pct(d.topShare)} of the month's cost (${aud(d.topSpenders[0].cost)}).`,
-      'Where one asset carries this much of the month, it is worth comparing its running cost against replacement or hire for the same duty.');
+      `${d.topSpenders[0].id} accounted for ${pct(d.topShare)} of the ${d.period.word}'s cost (${aud(d.topSpenders[0].cost)}).`,
+      `Where one asset carries this much of the ${d.period.word}'s spend, it is worth comparing its running cost against replacement or hire for the same duty.`);
 
     // Fuel arrives by statement import; a stale import makes recent months look cheap.
     const fuelLagDays = d.fuelThrough ? T.daysBetween(d.fuelThrough, d.reportEnd) : null;
@@ -407,7 +438,7 @@ AD.fleetReport = (function () {
       'Check whether this reflects genuine demand or stale status records — vehicles left marked In use after a job overstate utilisation.');
 
     if (d.avgResolveDays !== null && d.avgResolveDays > 14) add(44, 'Low', 'Defects are taking a while to close',
-      `Defects resolved this month took ${Math.round(d.avgResolveDays)} days on average.`,
+      `Defects resolved this ${d.period.word} took ${Math.round(d.avgResolveDays)} days on average.`,
       'Longer resolution means vehicles spend more of the month degraded. Look at where the time goes — parts, workshop capacity, or approval.');
 
     // Closing entries so the section always carries something.
@@ -544,13 +575,13 @@ AD.fleetReport = (function () {
     // Title block, further down the band.
     ws.mergeCells('B9:J10');
     const title = ws.getCell('B9');
-    title.value = 'Monthly Fleet Report';
+    title.value = `${data.period.kind} Fleet Report`;
     title.font = { name: FONT_HEAD, size: 32, bold: true, color: { argb: COLOR.blue } };   // headings in brand blue (typography guide)
     title.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
 
     ws.mergeCells('B11:J11');
     const sub = ws.getCell('B11');
-    sub.value = `${T.MONTHS[data.now.month - 1]} ${data.now.year}`;
+    sub.value = data.period.label + (data.isPartial ? (data.isYear ? ' (year to date)' : ' (month to date)') : '');
     sub.font = { name: FONT_HEAD, size: 16, color: { argb: COLOR.muted } };
     sub.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
 
@@ -573,7 +604,7 @@ AD.fleetReport = (function () {
     ws.mergeCells('B19:J21');
     const notes = ws.getCell('B19');
     notes.value =
-      `•  Covers spend (fuel, Linkt tolls, servicing and repairs), compliance, defects and the vehicle register for ${T.MONTHS[data.now.month - 1]} ${data.now.year}.\n` +
+      `•  Covers spend (fuel, Linkt tolls, servicing and repairs), compliance, defects and the vehicle register for ${data.period.label}.\n` +
       `•  Imported to: fuel cards ${data.fuelThrough ? T.fmtKey(data.fuelThrough) : 'none yet'}, Linkt tolls ${data.tollThrough ? T.fmtKey(data.tollThrough) : 'none yet'}. Forecast = each cost's average month over the months with complete data, not a budget.\n` +
       `•  Recommendations are flagged from spend, compliance, defect and data-coverage checks.`;
     notes.font = { name: FONT_BODY, size: 11, color: { argb: COLOR.ink } };
@@ -586,10 +617,10 @@ AD.fleetReport = (function () {
 
     const contents = [
       ['1', 'Executive summary',     'Key metrics, fleet composition and trends'],
-      ['2', 'Monthly spend',          'Twelve-month table and year outlook'],
+      ['2', 'Monthly spend',          data.isYear ? 'Month by month through the year, and the year outlook' : 'Twelve-month table and year outlook'],
       ['3', 'Compliance and risk',    'Rego, servicing and open defects'],
       ['4', 'Vehicle register',       'Full fleet with status and odometer'],
-      ['5', 'Recommendations',        'Actions flagged by this month\'s figures']
+      ['5', 'Recommendations',        'Actions flagged by the figures']
     ];
     contents.forEach((row, i) => {
       const r = 26 + i;
@@ -626,7 +657,7 @@ AD.fleetReport = (function () {
     ws.getRow(1).height = 36;
     ws.mergeCells('B1:F1');
     const h = ws.getCell('B1');
-    h.value = `Executive summary · ${T.MONTHS[data.now.month - 1]} ${data.now.year}`;
+    h.value = `Executive summary · ${data.period.label}`;
     h.font = { name: FONT_HEAD, size: 18, bold: true, color: { argb: COLOR.navy } };
     h.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
 
@@ -636,7 +667,7 @@ AD.fleetReport = (function () {
 
     // Spend block — actual spend and the Cost sheet's forecast. No target or
     // variance: a growing fleet always runs above its own past average.
-    const curMonthName = T.MONTHS[data.now.month - 1];
+    const curMonthName = data.period.name;
     const cm = data.curMonth;
     const yf = data.yearForecast;
     const split = [['Fuel', cm.fuel], ['Tolls', cm.toll], ['Servicing', cm.planned], ['Repairs', cm.unplanned]]
@@ -646,8 +677,8 @@ AD.fleetReport = (function () {
 
     const rows = [
       // label, value, note
-      [`${curMonthName} spend${data.isPartial ? ' (month to date)' : ''}`, data.mtdActual, split],
-      [`Year to date (${data.now.year})`, data.ytdActual, `${data.monthsElapsedFull} full month${data.monthsElapsedFull === 1 ? '' : 's'} plus ${curMonthName}`],
+      [`${curMonthName} spend${data.isPartial ? (data.isYear ? ' (year to date)' : ' (month to date)') : ''}`, data.mtdActual, split],
+      data.isYear ? [`${data.period.prevLabel} spend`, data.prevMonth.total, 'The year before, for comparison'] : [`Year to date (${data.now.year})`, data.ytdActual, `${data.monthsElapsedFull} full month${data.monthsElapsedFull === 1 ? '' : 's'} plus ${curMonthName}`],
       [yf ? `Forecast for ${yf.year}` : 'Twelve months', yf ? yf.total : data.annualTotal,
         yf ? 'Spent so far plus each cost\'s average month for the days not in yet' : 'Total for the twelve months shown'],
       ['Still to come this year', yf ? yf.total - yf.actual : null, yf ? `As at ${T.fmtKey(data.today)}` : 'Only for the current year'],
@@ -738,9 +769,9 @@ AD.fleetReport = (function () {
     });
     const compLast = compRow + data.byType.length;
 
-    // ---- Top spenders this month ----
+    // ---- Top spending vehicles in the period ----
     let spRow = compLast + 3;
-    sectionBar(ws, spRow, 'B', 'F', 'Top spending vehicles · ' + T.MONTHS[data.now.month - 1]);
+    sectionBar(ws, spRow, 'B', 'F', 'Top spending vehicles · ' + data.period.label);
     spRow += 2;
     ['Vehicle', 'Fuel', 'Tolls', 'Servicing + repairs', 'Total'].forEach((t, i) => {
       const cell = ws.getCell(spRow, 2 + i);
@@ -763,12 +794,12 @@ AD.fleetReport = (function () {
     });
     const spLast = spRow + data.topSpenders.length;
 
-    // ---- Month-on-month comparison ----
+    // ---- Against the previous period (month, or year) ----
     let moRow = spLast + 3;
-    sectionBar(ws, moRow, 'B', 'F', 'Month-on-month comparison');
+    sectionBar(ws, moRow, 'B', 'F', data.isYear ? 'Year-on-year comparison' : 'Month-on-month comparison');
     moRow += 2;
-    const prevName = data.prevMonth ? data.prevMonth.label.split(' ')[0] : '-';
-    [' ', T.MONTHS[data.now.month - 1], prevName, 'Avg month', 'Trend'].forEach((t, i) => {
+    const prevName = data.period.prevLabel;
+    [' ', data.period.name, prevName, 'Avg month', 'Trend'].forEach((t, i) => {
       const cell = ws.getCell(moRow, 2 + i);
       cell.value = t;
       applyStyle(cell, i === 0 ? styles.th : styles.thRight);
@@ -823,7 +854,7 @@ AD.fleetReport = (function () {
     ws.getRow(1).height = 36;
     ws.mergeCells('B1:J1');
     const h = ws.getCell('B1');
-    h.value = 'Monthly spend · last 12 months';
+    h.value = data.isYear ? `Monthly spend · ${data.now.year}` : 'Monthly spend · last 12 months';
     h.font = { name: FONT_HEAD, size: 18, bold: true, color: { argb: COLOR.navy } };
     h.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
 
@@ -848,9 +879,9 @@ AD.fleetReport = (function () {
     data.months.forEach((mo, i) => {
       const r = hdrRow + 1 + i;
       ws.getRow(r).height = 20;
-      const isCurrent = i === data.months.length - 1;
+      const isCurrent = i === data.curIdx;
 
-      ws.getCell(r, 2).value = mo.label + (isCurrent && data.isPartial ? ' (MTD)' : '');
+      ws.getCell(r, 2).value = mo.label + (i === data.curIdx && data.isPartial ? ' (to date)' : mo.future ? ' (to come)' : '');
       applyStyle(ws.getCell(r, 2), styles.cell);
       ws.getCell(r, 3).value = mo.planned;    applyStyle(ws.getCell(r, 3), styles.cellNum);
       ws.getCell(r, 4).value = mo.unplanned;  applyStyle(ws.getCell(r, 4), styles.cellNum);
@@ -874,7 +905,7 @@ AD.fleetReport = (function () {
     ws.getRow(totRow).height = 24;
     const plannedTotal   = data.months.reduce((t, m) => t + m.planned, 0);
     const unplannedTotal = data.months.reduce((t, m) => t + m.unplanned, 0);
-    ws.getCell(totRow, 2).value = 'Twelve-month total';
+    ws.getCell(totRow, 2).value = data.isYear ? `${data.now.year}${data.isPartial ? ' to date' : ' total'}` : 'Twelve-month total';
     ws.getCell(totRow, 3).value = plannedTotal;
     ws.getCell(totRow, 4).value = unplannedTotal;
     const fuelTotal = data.months.reduce((t, m) => t + m.fuel, 0);
@@ -902,7 +933,7 @@ AD.fleetReport = (function () {
       ['Still to come this year', yf.total - yf.actual, `Fuel after ${yf.fuelReach ? T.fmtKey(yf.fuelReach) : 'the latest import'}, tolls after ${yf.tollReach ? T.fmtKey(yf.tollReach) : 'the latest statement'}, servicing and repairs to 31 December`],
       ['Average month', data.avgMonth, 'Each cost over the months with complete data']
     ] : [
-      ['Twelve-month total', data.annualTotal, ''],
+      [data.isYear ? `${data.now.year} total` : 'Twelve-month total', data.annualTotal, ''],
       ['Average month', data.avgMonth, 'Each cost over the months with complete data']
     ];
     const pHdr = projRow + 2;
@@ -1130,14 +1161,14 @@ AD.fleetReport = (function () {
     ws.getRow(1).height = 36;
     ws.mergeCells('B1:E1');
     const h = ws.getCell('B1');
-    h.value = 'Recommendations · ' + T.MONTHS[data.now.month - 1] + ' ' + data.now.year;
+    h.value = 'Recommendations · ' + data.period.label;
     h.font = { name: FONT_HEAD, size: 18, bold: true, color: { argb: COLOR.navy } };
     h.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
     for (let c = 2; c <= 5; c++) ws.getCell(2, c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR.mint } };
     ws.getRow(2).height = 3;
 
     ws.mergeCells('B4:E4');
-    ws.getCell('B4').value = 'Actions flagged by this month\'s figures, ordered by priority.';
+    ws.getCell('B4').value = 'Actions flagged by the figures, ordered by priority.';
     ws.getCell('B4').font = { name: FONT_BODY, size: 10, italic: true, color: { argb: COLOR.muted } };
     ws.getCell('B4').alignment = { wrapText: true, vertical: 'top', horizontal: 'left', indent: 1 };
 
@@ -1225,7 +1256,7 @@ AD.fleetReport = (function () {
     const ExcelJS = await loadExcelJS();
     await ensureTolls(notify);
     notify('Gathering fleet data…');
-    const data = gather(options.month);
+    const data = gather(options.month, options);
     const logoBuf = await loadLogo();
     notify('Building workbook…');
     const wb = new ExcelJS.Workbook();
@@ -1233,7 +1264,7 @@ AD.fleetReport = (function () {
     wb.company = 'Astrea Group Pty Ltd';
     wb.created = new Date();
     wb.title = 'Fleet Performance Report';
-    wb.subject = `${T.MONTHS[data.now.month - 1]} ${data.now.year}`;
+    wb.subject = data.period.label;
 
     await buildCover(wb, data, logoBuf);
     buildSummary(wb, data);
@@ -1246,8 +1277,7 @@ AD.fleetReport = (function () {
     const buf = await wb.xlsx.writeBuffer();
     const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const url = URL.createObjectURL(blob);
-    const monthName = T.MONTHS[data.now.month - 1];
-    const filename = `Astrea Fleet Report — ${monthName} ${data.now.year}.xlsx`;
+    const filename = `Astrea ${data.period.kind} Fleet Report — ${data.period.label}.xlsx`;
     const a = document.createElement('a');
     a.href = url;
     a.download = filename;

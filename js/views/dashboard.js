@@ -515,7 +515,7 @@ AD.views.dashboard = (function () {
           </div>
           <div class="hero-wx" id="hero-wx">${wxStrip(AD.weather.cached())}</div>
           <div class="hero-actions">
-            <button type="button" class="btn btn-secondary" id="hero-report-btn" title="Download a monthly PDF report or Excel workbook">${I.download} Monthly report</button>
+            <button type="button" class="btn btn-secondary" id="hero-report-btn" title="Download a monthly or yearly report, as a PDF or Excel workbook">${I.download} Generate report</button>
             <a class="btn btn-secondary" href="#/defects?new=1">Report defect</a>
             <a class="btn btn-primary" href="#/calendar?new=1">${I.plus} New booking</a>
           </div>
@@ -529,8 +529,9 @@ AD.views.dashboard = (function () {
     if (reportBtn) reportBtn.addEventListener('click', onReportClick);
   }
 
-  /** Format picker, then hand off to whichever builder was chosen. */
+  /** Report type (monthly / yearly), the period, then the format. */
   let reportBusy = false;
+  let reportKind = 'month';   // remembered while the page is open
   function onReportClick(e) {
     if (reportBusy) { AD.ui.toast('Your report is still being prepared.'); return; }
     const now = T.parts(Date.now());
@@ -539,18 +540,30 @@ AD.views.dashboard = (function () {
       const key = d.toISOString().slice(0, 7);
       return `<option value="${key}">${T.MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}${i === 0 ? ' (month to date)' : ''}</option>`;
     }).join('');
+    // Years back to the first one with any recorded cost (at least last year).
+    const firstYear = ['fuel_entries', 'toll_entries', 'services'].reduce((y, t) => {
+      (AD.store.all(t) || []).forEach((r) => { const yy = Number(String(r.date || '').slice(0, 4)); if (yy > 2000 && yy < y) y = yy; });
+      return y;
+    }, now.year - 1);
+    const yearOptions = Array.from({ length: now.year - firstYear + 1 }, (_, i) => now.year - i)
+      .map((y) => `<option value="${y}">${y}${y === now.year ? ' (year to date)' : ''}</option>`).join('');
     AD.ui.modal({
-      title: 'Download monthly report',
+      title: 'Generate report',
       body: `
         <p class="rep-lede">An Astrea-branded review of spend, fleet health and practical next steps.</p>
-        <label class="rep-month" for="rep-month">Reporting month<select id="rep-month">${monthOptions}</select></label>
-        <p class="rep-lede rep-context">Costs cover the selected month. Fleet status and compliance are a snapshot as of today.</p>
+        <div class="seg rep-kind" role="group" aria-label="Report type">
+          <button type="button" data-kind="month" class="${reportKind === 'month' ? 'on' : ''}">Monthly</button>
+          <button type="button" data-kind="year" class="${reportKind === 'year' ? 'on' : ''}">Yearly</button>
+        </div>
+        <label class="rep-month" for="rep-month" data-for="month"${reportKind === 'month' ? '' : ' hidden'}>Reporting month<select id="rep-month">${monthOptions}</select></label>
+        <label class="rep-month" for="rep-year" data-for="year"${reportKind === 'year' ? '' : ' hidden'}>Reporting year<select id="rep-year">${yearOptions}</select></label>
+        <p class="rep-lede rep-context" id="rep-context"></p>
         <div class="rep-picker">
           <button type="button" class="rep-opt" data-fmt="pdf">
             <span class="rep-opt-ico rep-opt-pdf">${I.file}</span>
             <span class="rep-opt-copy">
               <b>PDF report</b>
-              <span>A4 pages with charts, monthly statistics and data-based recommendations. Ready to share or print.</span>
+              <span>A4 pages with charts, statistics and data-based recommendations. Ready to share or print.</span>
             </span>
             <span class="rep-opt-go">${I.chevR}</span>
           </button>
@@ -565,6 +578,17 @@ AD.views.dashboard = (function () {
         </div>
         <p class="rep-note" id="rep-status" role="status" aria-live="polite"></p>`,
       onMount(el, close) {
+        const context = el.querySelector('#rep-context');
+        const setKind = (kind) => {
+          reportKind = kind;
+          el.querySelectorAll('[data-kind]').forEach((b) => b.classList.toggle('on', b.dataset.kind === kind));
+          el.querySelectorAll('.rep-month[data-for]').forEach((l) => { l.hidden = l.dataset.for !== kind; });
+          context.textContent = kind === 'year'
+            ? 'Costs cover January to December of the selected year (to date, for this year), compared with the year before. Fleet status and compliance are a snapshot as of today.'
+            : 'Costs cover the selected month, compared with the month before. Fleet status and compliance are a snapshot as of today.';
+        };
+        el.querySelectorAll('[data-kind]').forEach((b) => b.addEventListener('click', () => setKind(b.dataset.kind)));
+        setKind(reportKind);
         el.querySelectorAll('.rep-opt').forEach((opt) => {
           opt.addEventListener('click', () => runReport(opt.dataset.fmt, el, close));
         });
@@ -578,14 +602,19 @@ AD.views.dashboard = (function () {
     const picker = modalEl.querySelector('.rep-picker');
     const status = modalEl.querySelector('#rep-status');
     const month = modalEl.querySelector('#rep-month');
+    const yearSel = modalEl.querySelector('#rep-year');
+    const kinds = modalEl.querySelectorAll('[data-kind]');
     month.disabled = true;
+    yearSel.disabled = true;
+    kinds.forEach((b) => { b.disabled = true; });
     picker.setAttribute('aria-busy', 'true');
     picker.querySelectorAll('.rep-opt').forEach((b) => { b.disabled = true; });
     picker.querySelector(`[data-fmt="${fmt}"]`).classList.add('is-running');
     const say = (t) => { if (status) status.textContent = t; };
     try {
       const builder = fmt === 'pdf' ? AD.fleetReportPdf : AD.fleetReport;
-      const filename = await builder.generate(say, { month: month.value });
+      const options = reportKind === 'year' ? { period: 'year', year: Number(yearSel.value) } : { month: month.value };
+      const filename = await builder.generate(say, options);
       close();
       AD.ui.toast(`Downloaded ${filename}`);
     } catch (err) {
@@ -597,6 +626,8 @@ AD.views.dashboard = (function () {
     } finally {
       reportBusy = false;
       month.disabled = false;
+      yearSel.disabled = false;
+      kinds.forEach((b) => { b.disabled = false; });
       picker.setAttribute('aria-busy', 'false');
     }
   }
