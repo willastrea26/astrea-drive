@@ -3405,3 +3405,4 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 .cs-arrive.cs-band-toll, .cs-arrive.cs-area-total { animation: fade 1s cubic-bezier(.22,.61,.36,1) .25s backwards; }
 .cs-arrive-dots .cs-mark { animation: fade .5s ease .9s backwards; }
 .cs-mbar i.cs-arrive-seg { transform-origin: left; animation: grow-x .8s cubic-bezier(.2,.75,.3,1) backwards; }
+.cs-row-meta .cs-driver { color: var(--ink-2); font-weight: 600; }

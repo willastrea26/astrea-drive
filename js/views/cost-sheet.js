@@ -1249,7 +1249,7 @@ AD.views['cost-sheet'] = (function () {
         ${idCell(g.v)}
         <span class="cs-hbar"><i class="cs-toll" style="width:${(g.total / top) * 100}%"></i></span>
         <span class="cs-row-val">${L.fmtAUD(g.total)}<span class="cs-row-sub">${L.fmtAUD((g.total / coverDays) * 7)}/wk</span></span>
-        <span class="cs-row-meta">${g.fees ? `<span class="cs-chip cs-chip-amber">${g.fees} No Tag fee${g.fees === 1 ? '' : 's'}</span>` : ''}${g.trips.toLocaleString('en-AU')} trips${topRoad(g) ? ` · mostly ${esc(topRoad(g))}` : ''}</span>
+        <span class="cs-row-meta">${L.driverName(g.v.driverId) ? `<span class="cs-driver">${esc(L.driverName(g.v.driverId))}</span> · ` : ''}${g.fees ? `<span class="cs-chip cs-chip-amber">${g.fees} No Tag fee${g.fees === 1 ? '' : 's'}</span>` : ''}${g.trips.toLocaleString('en-AU')} trips${topRoad(g) ? ` · mostly ${esc(topRoad(g))}` : ''}</span>
       </a>`);
 
     // Lines that don't belong to a fleet vehicle yet. Tags can be linked here.
@@ -1276,8 +1276,8 @@ AD.views['cost-sheet'] = (function () {
         <span class="hb-val">${L.fmtAUD(a)}</span>
       </div>`).join('');
 
-    const tableRows = vehicles.map((g) => [g.v.id, g.v.rego || '', g.trips.toLocaleString('en-AU'), String(g.fees), aud2(g.total), aud2((g.total / coverDays) * 7)])
-      .concat(looseList.map((g) => [g.tag ? `Tag ${g.tag}` : `Plate ${g.plate}`, '', String(g.count - g.fees), String(g.fees), aud2(g.total), aud2((g.total / coverDays) * 7)]));
+    const tableRows = vehicles.map((g) => [g.v.id, g.v.rego || '', L.driverName(g.v.driverId) || '—', g.trips.toLocaleString('en-AU'), String(g.fees), aud2(g.total), aud2((g.total / coverDays) * 7)])
+      .concat(looseList.map((g) => [g.tag ? `Tag ${g.tag}` : `Plate ${g.plate}`, '', '—', String(g.count - g.fees), String(g.fees), aud2(g.total), aud2((g.total / coverDays) * 7)]));
 
     const body = `
       <figcaption><span class="viz-sub">Linkt toll trips and fees by vehicle. Included in total spend and Spend over time above (pink). Weekly, monthly and yearly figures are the daily average of the imported statements; amounts include GST.</span></figcaption>
@@ -1288,7 +1288,7 @@ AD.views['cost-sheet'] = (function () {
         <p class="cs-more">Linking a tag saves it on that vehicle in the Fleet register, and all of the tag’s past trips move across.</p>` : ''}
       ${roadList.length ? `<div class="cs-subhead">By toll road</div><div class="hb cs-toll-roads">${roadRows}</div>` : ''}
       ${credits ? `<p class="cs-more">Account credits (e.g. the M8/M5 East truck rebate): ${aud2(credits)}, included in the totals above but not in any one vehicle.</p>` : ''}
-      ${V.table(['Vehicle', 'Rego', 'Trips', 'No Tag fees', 'Tolls', 'Per week'], tableRows)}`;
+      ${V.table(['Vehicle', 'Rego', 'Assigned driver', 'Trips', 'No Tag fees', 'Tolls', 'Per week'], tableRows)}`;
 
     return wrap(`Linkt · ${stmts.size} statement${stmts.size === 1 ? '' : 's'} · ${fmtShort(from)}–${fmtShort(to)} (${coverDays} days) · ${aud2(total)}`, body);
   }
@@ -1380,7 +1380,7 @@ AD.views['cost-sheet'] = (function () {
       <span class="id">${art ? `<span class="cs-veh-art">${art}</span>` : ''}<span class="cs-id-text">${esc(l.v.id)}${l.v.rego ? `<small class="cs-rego">${esc(l.v.rego)}</small>` : ''}</span></span>
       <span class="cs-hbar"><i class="cs-fuel" style="width:${(l.litres / top) * 100}%"></i></span>
       <span class="cs-row-val">${l0(l.litres)}<small> L</small></span>
-      <span class="cs-row-meta">${L.fmtAUD(l.cost)} fuel · ${l.fills} fill${l.fills === 1 ? '' : 's'}${l.cpl != null ? ` · $${l.cpl.toFixed(2)}/L avg` : ''}${l.other > 0.005 ? ` · +${L.fmtAUD(l.other)} fees, AdBlue &amp; other` : ''}</span>
+      <span class="cs-row-meta">${L.driverName(l.v.driverId) ? `<span class="cs-driver">${esc(L.driverName(l.v.driverId))}</span> · ` : ''}${L.fmtAUD(l.cost)} fuel · ${l.fills} fill${l.fills === 1 ? '' : 's'}${l.cpl != null ? ` · $${l.cpl.toFixed(2)}/L avg` : ''}${l.other > 0.005 ? ` · +${L.fmtAUD(l.other)} fees, AdBlue &amp; other` : ''}</span>
     </a>`;
     });
 
