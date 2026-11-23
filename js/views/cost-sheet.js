@@ -20,7 +20,7 @@ AD.views['cost-sheet'] = (function () {
   const PROJ_MONTHS = 6;  // months to project forward from current
   const MIN_USAGE_DAYS = 14;    // days of GPS readings before a vehicle is shown — the stacked bar shows a one-off repair for what it is
   const THIN_USAGE_DAYS = 60;   // below this, the rate is shown but flagged "Thin data"
-  let root = null, start = '', end = '', scope = 'year', period = 'month', usageMode = 'km', trendView = 'split';   // trendView: Spend over time as 'split' (each cost) or 'total'
+  let root = null, start = '', end = '', scope = 'year', period = 'month', usageMode = 'km', trendView = 'split', fuelView = 'fuel';   // trendView: Spend over time as 'split' (each cost) or 'total'
   const PROJ_STORE_KEY = 'ad-cost-proj-overrides';
   let projOverrides = (() => { try { const v = JSON.parse(localStorage.getItem(PROJ_STORE_KEY)) || {}; /* migrate old {planned,unplanned} format */ for (const k of Object.keys(v)) { if (typeof v[k] === 'object') v[k] = (v[k].planned || 0) + (v[k].unplanned || 0); } return v; } catch { return {}; } })();
   function saveOverrides() { try { localStorage.setItem(PROJ_STORE_KEY, JSON.stringify(projOverrides)); } catch {} }
@@ -153,6 +153,10 @@ AD.views['cost-sheet'] = (function () {
     return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
   };
   const vehHref = (id) => `#/vehicle/${encodeURIComponent(id)}`;
+  // Long per-vehicle lists show the top 10; the rest sit behind "Show all".
+  const LIST_SHOW = 10;
+  const topRows = (rowsArr, noun = 'vehicles') => rowsArr.slice(0, LIST_SHOW).join('')
+    + (rowsArr.length > LIST_SHOW ? `<details class="cs-show-all"><summary>Show all ${rowsArr.length} ${noun}</summary><div class="cs-rows">${rowsArr.slice(LIST_SHOW).join('')}</div></details>` : '');
   const changeTone = (n) => n > 0.005 ? 'cs-delta-worse' : n < -0.005 ? 'cs-delta-better' : '';
   // For a vehicle with GPS data but no fuel in that window: when its latest
   // imported fill was, so "no fuel" never reads as "no fuel ever".
@@ -169,12 +173,16 @@ AD.views['cost-sheet'] = (function () {
     period = params.period === 'week' ? 'week' : 'month';
     usageMode = params.use === 'hr' ? 'hr' : 'km';
     trendView = params.view === 'total' ? 'total' : 'split';
+    fuelView = ['fuel', 'perkm', 'tolls'].includes(params.fv) ? params.fv : 'fuel';
     fresh = true;
     draw();
   }
 
   function draw() {
     const el = root;
+    // Tolls feed the KPIs and Spend over time even while the Fuel & tolls
+    // section shows fuel, so make sure they're loading whatever's on screen.
+    if (AD.store.tollsState && AD.store.tollsState() === 'idle') AD.store.loadTolls().then(() => root && draw());
     const cfg = SCOPE_CFG[scope];
     end = periodEnd(scope, start);
     const thisStart = periodStart(scope, T.todayKey());
@@ -264,15 +272,11 @@ AD.views['cost-sheet'] = (function () {
         ${movers(now, base)}
       </div>
 
-      ${fuelLitreage()}
-
-      ${fuelPerKm()}
-
-      ${tolls()}
+      ${fuelAndTolls()}
 
       ${costVsUsage()}
 
-      <p class="section-foot muted small">Spend is recorded services plus resolved defects, counted on the day the service was recorded or the defect was resolved; imported fuel-card spend and Linkt tolls are shown as their own bands on Spend over time and counted in total spend; folded into Cost vs usage, and broken out on its own in Fuel cost per km. Planned is scheduled servicing; unplanned is a defect repair. The KPIs above cover servicing, repairs and fuel for the ${cfg.label} on screen, against the average of the ${cfg.baselineN} ${cfg.baselineN === 1 ? cfg.label : cfg.plural} before. Running cost divides a vehicle's spend by the distance or hours covered between its first and last service in the window, so it needs at least two services to show a rate.</p>
+      <p class="section-foot muted small">Spend = recorded services (planned) and resolved defects (unplanned), on the day they were recorded or resolved, plus imported fuel-card and Linkt toll charges. The cards at the top compare the ${cfg.label} on screen with the average of the ${cfg.baselineN} ${cfg.baselineN === 1 ? cfg.label : cfg.plural} before.</p>
 
       ${projection(chartEnd())}`;
 
@@ -286,6 +290,7 @@ AD.views['cost-sheet'] = (function () {
     el.querySelectorAll('[data-scope]').forEach((b) => (b.onclick = () => setScope(b.dataset.scope)));
     el.querySelectorAll('[data-period]').forEach((b) => (b.onclick = () => setPeriod(b.dataset.period)));
     el.querySelectorAll('[data-trendview]').forEach((b) => (b.onclick = () => { if (b.dataset.trendview === trendView) return; trendView = b.dataset.trendview; fresh = true; setParams(); draw(); }));
+    el.querySelectorAll('[data-fuelview]').forEach((b) => (b.onclick = () => { if (b.dataset.fuelview === fuelView) return; fuelView = b.dataset.fuelview; fresh = true; setParams(); draw(); }));
     el.querySelectorAll('[data-use]').forEach((b) => (b.onclick = () => { if (b.dataset.use === usageMode) return; usageMode = b.dataset.use; setParams(); draw(); }));
     bindTollAssign(el);
     bindProjectionInputs();
@@ -316,7 +321,7 @@ AD.views['cost-sheet'] = (function () {
   }
 
   function setParams() {
-    AD.setParams({ week: start === periodStart(scope, T.todayKey()) ? '' : start, period: period === 'month' ? '' : period, scope: scope === 'year' ? '' : scope, use: usageMode === 'km' ? '' : usageMode, view: trendView === 'split' ? '' : trendView });
+    AD.setParams({ week: start === periodStart(scope, T.todayKey()) ? '' : start, period: period === 'month' ? '' : period, scope: scope === 'year' ? '' : scope, use: usageMode === 'km' ? '' : usageMode, view: trendView === 'split' ? '' : trendView, fv: fuelView === 'fuel' ? '' : fuelView });
   }
 
   /** One row per calendar month over the trailing year, each bar split planned against unplanned. */
@@ -959,7 +964,7 @@ AD.views['cost-sheet'] = (function () {
    * derivation — the fuel, the distance, the days, and the division itself — so
    * the number can be trusted at a glance.
    */
-  function fuelPerKm() {
+  function fuelPerKm(actions = '') {
     const MIN_DAYS = 5, THIN_DAYS = 14;   // days of GPS readings needed before a rate is shown / is trustworthy
     const fmtFuelRate = (n) => '$' + (n >= 10 ? Math.round(n).toLocaleString('en-AU') : n.toFixed(2));
     const fmtL100 = (n) => n.toFixed(1) + ' L/100km';
@@ -973,7 +978,7 @@ AD.views['cost-sheet'] = (function () {
 
     if (!lines.length) {
       return `<section class="section">
-        ${sectionHead({ title: 'Fuel cost per km', meta: 'Real fuel ÷ real distance driven' })}
+        ${sectionHead({ title: 'Fuel & tolls', meta: 'Fuel cost per km · real fuel ÷ real distance driven', actions })}
         <figure class="viz-card"><p class="empty">No GPS-tracked vehicle has at least ${MIN_DAYS} days of daily distance data yet. As the nightly sync builds up daily kilometres for the vac trucks and tippers, their fuel cost per kilometre appears here.</p></figure>
       </section>`;
     }
@@ -1066,7 +1071,7 @@ AD.views['cost-sheet'] = (function () {
     const dayLabel = dMin === dMax ? `${dMin} days` : `${dMin}–${dMax} days`;
 
     return `<section class="section">
-      ${sectionHead({ title: 'Fuel cost per km', meta: `${lines.length} GPS-tracked vehicle${lines.length === 1 ? '' : 's'} · real fuel ÷ real distance, matched day-for-day (${dayLabel} of data)` })}
+      ${sectionHead({ title: 'Fuel & tolls', actions, meta: `Fuel cost per km · ${lines.length} GPS-tracked vehicle${lines.length === 1 ? '' : 's'} · real fuel ÷ real distance, matched day-for-day (${dayLabel} of data)` })}
       <figure class="viz-card">
         <figcaption><span class="viz-sub">Fuel-card spend ÷ the distance the GPS recorded over the same days. Hover a vehicle for the full working.</span></figcaption>
         ${kpis}
@@ -1101,9 +1106,9 @@ AD.views['cost-sheet'] = (function () {
    * attributed to a vehicle from the CURRENT register (plate, or the vehicle's
    * Linkt tag number), so linking a tag here re-attributes its past trips.
    */
-  function tolls() {
+  function tolls(actions = '') {
     const wrap = (meta, body) => `<section class="section" id="cs-tolls">
-      ${sectionHead({ title: 'Tolls', meta })}
+      ${sectionHead({ title: 'Fuel & tolls', meta, actions })}
       <figure class="viz-card">${body}</figure>
     </section>`;
     const state = AD.store.tollsState ? AD.store.tollsState() : 'missing';
@@ -1190,8 +1195,7 @@ AD.views['cost-sheet'] = (function () {
       return `<span class="id">${art ? `<span class="cs-veh-art">${art}</span>` : ''}<span class="cs-id-text">${esc(v.id)}${v.rego ? `<small class="cs-rego">${esc(v.rego)}</small>` : ''}</span></span>`;
     };
     const topRoad = (g) => { const e = [...g.roads.entries()].sort((a, b) => b[1] - a[1])[0]; return e ? e[0] : ''; };
-    const SHOW = 12;
-    const vehRows = vehicles.slice(0, SHOW).map((g, i) => `<a class="cs-row cs-row-art cs-fuelkm-row" href="${vehHref(g.v.id)}" style="--i:${i}" ${V.tipAttr(g.v.id, [
+    const vehRows = vehicles.map((g, i) => `<a class="cs-row cs-row-art cs-fuelkm-row" href="${vehHref(g.v.id)}" style="--i:${i}" ${V.tipAttr(g.v.id, [
         ['Tolls', aud2(g.total), COLOR_TOLL],
         ['Trips', g.trips.toLocaleString('en-AU'), 'var(--muted)'],
         ...(g.fees ? [['No Tag fees', `${g.fees} · ${aud2(g.feeAmt)}`, 'var(--amber)']] : []),
@@ -1202,7 +1206,7 @@ AD.views['cost-sheet'] = (function () {
         <span class="cs-hbar"><i class="cs-toll" style="width:${(g.total / top) * 100}%"></i></span>
         <span class="cs-row-val">${L.fmtAUD(g.total)}<span class="cs-row-sub">${L.fmtAUD((g.total / coverDays) * 7)}/wk</span></span>
         <span class="cs-row-meta">${g.fees ? `<span class="cs-chip cs-chip-amber">${g.fees} No Tag fee${g.fees === 1 ? '' : 's'}</span>` : ''}${g.trips.toLocaleString('en-AU')} trips${topRoad(g) ? ` · mostly ${esc(topRoad(g))}` : ''}</span>
-      </a>`).join('');
+      </a>`);
 
     // Lines that don't belong to a fleet vehicle yet. Tags can be linked here.
     const vehOptions = AD.store.all('vehicles').filter((v) => !v.hired).sort((a, b) => a.id.localeCompare(b.id))
@@ -1234,8 +1238,7 @@ AD.views['cost-sheet'] = (function () {
     const body = `
       <figcaption><span class="viz-sub">Linkt toll trips and fees by vehicle. Included in total spend and Spend over time above (pink). Weekly, monthly and yearly figures are the daily average of the imported statements; amounts include GST.</span></figcaption>
       ${kpis}
-      <div class="cs-rows">${vehRows}</div>
-      ${vehicles.length > SHOW ? `<p class="cs-more">${vehicles.length - SHOW} more vehicle${vehicles.length - SHOW === 1 ? '' : 's'} in the table.</p>` : ''}
+      <div class="cs-rows">${topRows(vehRows)}</div>
       ${looseList.length ? `<div class="cs-subhead">Not linked to a fleet vehicle <span class="muted">(${looseList.length} · ${L.fmtAUD(looseList.reduce((t, g) => t + g.total, 0))})</span></div>
         <div class="cs-rows">${looseRows}</div>
         <p class="cs-more">Linking a tag saves it on that vehicle in the Fleet register, and all of the tag’s past trips move across.</p>` : ''}
@@ -1290,7 +1293,18 @@ AD.views['cost-sheet'] = (function () {
       </div>`;
   }
 
-  function fuelLitreage() {
+  /**
+   * Fuel purchased, Fuel cost per km and Tolls share one section, switched by
+   * the buttons in its heading, instead of three long sections one after
+   * another. The choice is kept in the URL (?fv=perkm / ?fv=tolls).
+   */
+  function fuelAndTolls() {
+    const opt = (key, label) => `<button type="button" data-fuelview="${key}" class="${fuelView === key ? 'on' : ''}">${label}</button>`;
+    const sw = `<div class="seg" role="group" aria-label="Show">${opt('fuel', 'Fuel purchased')}${opt('perkm', 'Fuel cost per km')}${opt('tolls', 'Tolls')}</div>`;
+    return fuelView === 'tolls' ? tolls(sw) : fuelView === 'perkm' ? fuelPerKm(sw) : fuelLitreage(sw);
+  }
+
+  function fuelLitreage(actions = '') {
     const l0 = (n) => Math.round(n).toLocaleString('en-AU');
     const lines = AD.store.all('vehicles').filter((v) => !v.hired).map((v) => {
       const f = L.fuelFor(v); // no window → all-time
@@ -1300,7 +1314,7 @@ AD.views['cost-sheet'] = (function () {
 
     if (!lines.length) {
       return `<section class="section">
-        ${sectionHead({ title: 'Fuel purchased by vehicle', meta: 'Litres · all imported fuel-card data' })}
+        ${sectionHead({ title: 'Fuel & tolls', meta: 'Fuel purchased · all imported fuel-card data', actions })}
         <figure class="viz-card"><p class="empty">No fuel-card data imported yet. Use “Import cost data” at the top of the page to load a WEX or BP export.</p></figure>
       </section>`;
     }
@@ -1324,7 +1338,7 @@ AD.views['cost-sheet'] = (function () {
       <span class="cs-row-val">${l0(l.litres)}<small> L</small></span>
       <span class="cs-row-meta">${L.fmtAUD(l.cost)} fuel · ${l.fills} fill${l.fills === 1 ? '' : 's'}${l.cpl != null ? ` · $${l.cpl.toFixed(2)}/L avg` : ''}${l.other > 0.005 ? ` · +${L.fmtAUD(l.other)} fees, AdBlue &amp; other` : ''}</span>
     </a>`;
-    }).join('');
+    });
 
     const tableRows = lines.map((l) => [l.v.id, l.v.rego || '—', L.driverName(l.v.driverId) || '—',
       l0(l.litres) + ' L', L.fmtAUD(l.cost), String(l.fills),
@@ -1333,10 +1347,10 @@ AD.views['cost-sheet'] = (function () {
     const totalFills = lines.reduce((n, l) => n + l.fills, 0);
 
     return `<section class="section">
-      ${sectionHead({ title: 'Fuel purchased by vehicle', meta: `${lines.length} vehicle${lines.length === 1 ? '' : 's'} · ${l0(totalLitres)} L · ${totalFills.toLocaleString('en-AU')} fills · ${L.fmtAUD(totalCost)} fuel · all imported fuel-card data` })}
+      ${sectionHead({ title: 'Fuel & tolls', actions, meta: `Fuel purchased · ${lines.length} vehicle${lines.length === 1 ? '' : 's'} · ${l0(totalLitres)} L · ${totalFills.toLocaleString('en-AU')} fills · ${L.fmtAUD(totalCost)} fuel · all imported fuel-card data` })}
       <figure class="viz-card">
         <figcaption><span class="viz-sub">Diesel and petrol purchases only, most litres first: fills, litres and fuel cost leave out card fees, AdBlue and other items (${L.fmtAUD(totalOther)}, shown per vehicle), which still count in total spend. Hover any row for the detail. Covers all imported transactions, not just the period selected above.</span></figcaption>
-        <div class="cs-rows">${rows}</div>
+        <div class="cs-rows">${topRows(rows)}</div>
         ${unassignedFuelNote()}
         ${V.table(['Vehicle', 'Rego', 'Assigned driver', 'Litres', 'Fuel cost', 'Fills', 'Avg /L', 'Fees & other', 'Last fill'], tableRows)}
       </figure>

@@ -3391,3 +3391,10 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 .cs-line-total-red { fill: none; stroke: var(--red); stroke-width: 2.4; stroke-linejoin: round; stroke-linecap: round; filter: url(#cs-glow-red); }
 .anim-in .cs-area-total { animation: fade .8s cubic-bezier(.22,.61,.36,1) .45s backwards; }
 .anim-in .cs-line-total-red { stroke-dasharray: 1; animation: draw-line 1.2s cubic-bezier(.22,.61,.36,1) backwards; }
+
+/* Cost sheet — "Show all N" under the top-10 per-vehicle lists */
+.cs-show-all > summary { cursor: pointer; margin: 6px 8px 2px; font-size: 13px; color: var(--blue); list-style: none; }
+.cs-show-all > summary::-webkit-details-marker { display: none; }
+.cs-show-all > summary::before { content: '▸ '; }
+.cs-show-all[open] > summary::before { content: '▾ '; }
+.cs-show-all > .cs-rows { margin-top: 2px; }
