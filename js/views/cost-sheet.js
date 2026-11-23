@@ -488,8 +488,23 @@ AD.views['cost-sheet'] = (function () {
    * Linkt statement. Only for the year we're in.
    */
   function yearForecastNote(year) {
+    const f = yearForecast(year);
+    if (!f) return '';
+    const tip = V.tipAttr(`Forecast for ${year}`, [
+      ['Spent so far', L.fmtAUD(f.actual), 'var(--ink)'],
+      ...(f.estFuel > 0.5 ? [[`Fuel, ${f.fuelReach ? `after ${T.fmtKey(f.fuelReach)}` : 'all year'}`, L.fmtAUD(f.estFuel), COLOR_FUEL]] : []),
+      ...(f.estToll > 0.5 ? [[`Tolls, ${f.tollReach ? `after ${T.fmtKey(f.tollReach)}` : 'all year'}`, L.fmtAUD(f.estToll), COLOR_TOLL]] : []),
+      ...(f.estMaint > 0.5 ? [['Servicing and repairs, rest of year', L.fmtAUD(f.estMaint), COLOR_PLANNED]] : []),
+      ['Forecast total', L.fmtAUD(f.total), 'var(--violet)'],
+      ['Estimates use', 'each cost’s average month', 'var(--muted)']
+    ]);
+    return `<small class="cs-delta cs-year-forecast" ${tip}>Forecast for ${year}: <b>${L.fmtAUD(f.total)}</b></small>`;
+  }
+
+  /** The figures behind yearForecastNote (also used by the monthly report). null outside the current year. */
+  function yearForecast(year) {
     const today = T.todayKey();
-    if (String(year) !== today.slice(0, 4)) return '';
+    if (String(year) !== today.slice(0, 4)) return null;
     const yStart = `${year}-01-01`, yEnd = `${year}-12-31`;
     const b = forecastBasis(today);
     const daily = (monthly) => (monthly * 12) / 365;
@@ -507,16 +522,9 @@ AD.views['cost-sheet'] = (function () {
     const estToll = daily(b.toll) * daysLeft(tollReach && upTo(tollReach));
     const estMaint = daily(b.planned + b.unplanned) * daysLeft(today);
     const total = actual + estFuel + estToll + estMaint;
-    if (!(total > 0)) return '';
-    const tip = V.tipAttr(`Forecast for ${year}`, [
-      ['Spent so far', L.fmtAUD(actual), 'var(--ink)'],
-      ...(estFuel > 0.5 ? [[`Fuel, ${fuelReach ? `after ${T.fmtKey(upTo(fuelReach))}` : 'all year'}`, L.fmtAUD(estFuel), COLOR_FUEL]] : []),
-      ...(estToll > 0.5 ? [[`Tolls, ${tollReach ? `after ${T.fmtKey(upTo(tollReach))}` : 'all year'}`, L.fmtAUD(estToll), COLOR_TOLL]] : []),
-      ...(estMaint > 0.5 ? [['Servicing and repairs, rest of year', L.fmtAUD(estMaint), COLOR_PLANNED]] : []),
-      ['Forecast total', L.fmtAUD(total), 'var(--violet)'],
-      ['Estimates use', 'each cost’s average month', 'var(--muted)']
-    ]);
-    return `<small class="cs-delta cs-year-forecast" ${tip}>Forecast for ${year}: <b>${L.fmtAUD(total)}</b></small>`;
+    if (!(total > 0)) return null;
+    return { year, actual, estFuel, estToll, estMaint, total,
+      fuelReach: fuelReach ? upTo(fuelReach) : '', tollReach: tollReach ? upTo(tollReach) : '', basis: b };
   }
 
   function projectedMonths(end) {
@@ -1568,28 +1576,13 @@ AD.views['cost-sheet'] = (function () {
     // Run rate, like the tolls: each card's spend ÷ the days its imports cover
     // (WEX and BP statements cover different dates), added together. Everything
     // on the card bill counts (fuel, AdBlue, fees), as tolls count No Tag fees.
-    const cardsSeen = new Map();
-    fuelRows().forEach((r) => {
-      const c = cardsSeen.get(r.card) || { card: r.card, total: 0, from: r.date, to: r.date, dates: new Set() };
-      c.total += r.cost;
-      if (r.date < c.from) c.from = r.date;
-      if (r.date > c.to) c.to = r.date;
-      c.dates.add(r.date);
-      cardsSeen.set(r.card, c);
-    });
-    const cardList = [...cardsSeen.values()].sort((a, b) => b.total - a.total);
-    cardList.forEach((c) => { c.days = T.daysBetween(c.from, c.to) + 1; });
+    const cardList = fuelCardCoverage();
     const perDay = cardList.reduce((t, c) => t + c.total / c.days, 0);
     const allSpend = cardList.reduce((t, c) => t + c.total, 0);
     // A fortnight with no transactions on a whole card is almost certainly a
     // statement that hasn't been imported, which pulls the run rate down.
     const gaps = [];
-    cardList.forEach((c) => {
-      const ds = [...c.dates].sort();
-      for (let i = 1; i < ds.length; i++) {
-        if (T.daysBetween(ds[i - 1], ds[i]) > 14) gaps.push(`${c.card.toUpperCase()} has nothing between ${T.fmtKey(ds[i - 1])} and ${T.fmtKey(ds[i])}`);
-      }
-    });
+    cardList.forEach((c) => c.gaps.forEach((gp) => gaps.push(`${c.card.toUpperCase()} has nothing between ${T.fmtKey(gp.from)} and ${T.fmtKey(gp.to)}`)));
     // Average pump price, diesel and petrol only, every card (person cards too).
     const fills = (AD.store.all('fuel_entries') || []).filter(L.isFuelPurchase);
     const fillLitres = fills.reduce((t, r) => t + (Number(r.litres) || 0), 0);
@@ -1616,5 +1609,31 @@ AD.views['cost-sheet'] = (function () {
     </section>`;
   }
 
-  return { title: 'Cost sheet', render, refresh: () => root && draw() };
+  /**
+   * Each fuel card's imports: spend, the dates they cover, and any fortnight
+   * with no transactions at all on the card (almost certainly a statement
+   * that hasn't been imported). Shared by the Fuel view and the monthly report.
+   */
+  function fuelCardCoverage() {
+    const map = new Map();
+    fuelRows().forEach((r) => {
+      const c = map.get(r.card) || { card: r.card, total: 0, from: r.date, to: r.date, dates: new Set() };
+      c.total += r.cost;
+      if (r.date < c.from) c.from = r.date;
+      if (r.date > c.to) c.to = r.date;
+      c.dates.add(r.date);
+      map.set(r.card, c);
+    });
+    return [...map.values()].sort((a, b) => b.total - a.total).map((c) => {
+      const ds = [...c.dates].sort(), gaps = [];
+      for (let i = 1; i < ds.length; i++) if (T.daysBetween(ds[i - 1], ds[i]) > 14) gaps.push({ from: ds[i - 1], to: ds[i] });
+      return { card: c.card, total: c.total, from: c.from, to: c.to, days: T.daysBetween(c.from, c.to) + 1, gaps };
+    });
+  }
+
+  return {
+    title: 'Cost sheet', render, refresh: () => root && draw(),
+    // The same figures the Cost sheet shows, for the monthly report, so the two always agree.
+    model: { forecastBasis, yearForecast, usageMeasures, fuelCardCoverage, READY_USAGE_DAYS, STEADY_USAGE_DAYS }
+  };
 })();
