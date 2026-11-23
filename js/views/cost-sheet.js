@@ -466,11 +466,11 @@ AD.views['cost-sheet'] = (function () {
   }
 
   /** Weekly or monthly spend leading up to the week on screen — the trend a single week-to-week comparison can't show.
-   *  In monthly mode the chart extends with a dashed projection line. */
+   *  The Total view, monthly, extends with the forecast; Breakdown shows actual spend only (the forecast is a total, not per cost type). */
   function trend(end) {
     const isMonthly = period === 'month';
     const actuals = isMonthly ? monthlyPoints(end) : weeklyPoints(end);
-    const proj = isMonthly ? projectedMonths(end) : [];
+    const proj = isMonthly && trendView === 'total' ? projectedMonths(end) : [];
     const points = actuals.concat(proj);
     const splitIdx = actuals.length - 1;
     const hasProj = proj.length > 0;
@@ -481,7 +481,9 @@ AD.views['cost-sheet'] = (function () {
     // tolls line is the toll cost, the blue line the fuel cost, and so on. A
     // thin grey line carries the month's total, and the forecast continues it.
     // Axis: 4–6 round steps, every gridline labelled.
-    const maxV = Math.max(...points.map((p) => p.grand), 1) * 1.06;
+    // Total view scales to the total; Breakdown to its tallest single line.
+    const peak = (p) => (trendView === 'total' ? p.grand : Math.max(p.fuel || 0, p.toll || 0, p.planned || 0, p.unplanned || 0));
+    const maxV = Math.max(...points.map(peak), 1) * 1.06;
     const rawStep = maxV / 5;
     const mag = Math.pow(10, Math.floor(Math.log10(rawStep)));
     const step = [1, 2, 2.5, 5, 10].map((k) => k * mag).find((s) => s >= rawStep);
