@@ -165,6 +165,38 @@ AD.views['cost-sheet'] = (function () {
     return f && f.lastFill ? ` · latest fill on record ${T.fmtKey(f.lastFill)}` : ` · no fuel-card fills on record for this vehicle`;
   };
 
+  /*
+   * Tolls load after the rest of the page (they're the biggest table). While
+   * they load, the Toll share card and the Tolls section show live progress;
+   * when they arrive the page redraws once with their lines drawing in
+   * (animateTolls), instead of popping in. One shared wait so only ONE redraw
+   * runs on arrival — a second would cut the animation short.
+   */
+  let animateTolls = false, tollWait = null, drawnTollState = null;
+  function waitForTolls() {
+    if (tollWait) return;
+    tollWait = AD.store.loadTolls().then(() => {
+      tollWait = null;
+      // The store's change notice usually redraws the page already; only draw
+      // here if nothing has drawn the new state yet.
+      if (root && drawnTollState !== AD.store.tollsState()) draw();
+    });
+  }
+  function tollProgressText() {
+    const p = AD.store.tollsProgress ? AD.store.tollsProgress() : { loaded: 0, total: 0 };
+    if (!p.total) return 'Loading toll data… this can take up to a minute';
+    const pct = Math.min(99, Math.round((p.loaded / p.total) * 100));
+    return `Loading toll data… ${pct}% (${p.loaded.toLocaleString('en-AU')} of ${p.total.toLocaleString('en-AU')} lines)`;
+  }
+  // Update the progress text in place as pages arrive, without redrawing the page.
+  if (AD.store.onTollProgress) {
+    AD.store.onTollProgress(() => {
+      if (!root) return;
+      const txt = tollProgressText();
+      root.querySelectorAll('[data-toll-progress]').forEach((n) => { n.textContent = txt; });
+    });
+  }
+
   function render(el, params) {
     root = el;
     scope = params.scope === 'week' || params.scope === 'month' ? params.scope : 'year';
@@ -180,9 +212,14 @@ AD.views['cost-sheet'] = (function () {
 
   function draw() {
     const el = root;
+    // Animate the toll lines only on the first draw after they finish loading.
+    const tollStateNow = AD.store.tollsState ? AD.store.tollsState() : 'missing';
+    animateTolls = (drawnTollState === 'idle' || drawnTollState === 'loading') && tollStateNow === 'ready'
+      && (AD.store.all('toll_entries') || []).length > 0;
+    drawnTollState = tollStateNow;
     // Tolls feed the KPIs and Spend over time even while the Fuel & tolls
     // section shows fuel, so make sure they're loading whatever's on screen.
-    if (AD.store.tollsState && AD.store.tollsState() === 'idle') AD.store.loadTolls().then(() => root && draw());
+    if (AD.store.tollsState && AD.store.tollsState() === 'idle') waitForTolls();
     const cfg = SCOPE_CFG[scope];
     end = periodEnd(scope, start);
     const thisStart = periodStart(scope, T.todayKey());
@@ -218,7 +255,7 @@ AD.views['cost-sheet'] = (function () {
     const tollFoot = haveTolls ? null
       : tollState === 'missing' ? '<small class="cs-delta">Not set up yet: run create-toll-entries.sql</small>'
       : tollState === 'ready' ? '<small class="cs-delta">No Linkt statement imported yet</small>'
-      : '<small class="cs-delta">Loading toll data…</small>';
+      : `<small class="cs-delta" data-toll-progress>${tollProgressText()}</small>`;
     const pctOf = (n) => (spend ? (n / spend) * 100 : 0);
     const sliceFoot = (amt, avgAmt) => !spend ? '<small class="cs-delta">Nothing recorded</small>'
       : `<small class="cs-delta">${L.fmtAUD(amt)} of ${L.fmtAUD(spend)}${haveBaseline && avgSpend ? ` · ${Math.round((avgAmt / avgSpend) * 100)}% avg` : ''}</small>`;
@@ -344,7 +381,7 @@ AD.views['cost-sheet'] = (function () {
           ${p.planned ? `<i style="width:${pct(p.planned)}%;background:${COLOR_PLANNED}"></i>` : ''}
           ${p.unplanned ? `<i style="width:${pct(p.unplanned)}%;background:${COLOR_UNPLANNED}"></i>` : ''}
           ${p.fuel ? `<i style="width:${pct(p.fuel)}%;background:${COLOR_FUEL}"></i>` : ''}
-          ${p.toll > 0 ? `<i style="width:${pct(p.toll)}%;background:${COLOR_TOLL}"></i>` : ''}
+          ${p.toll > 0 ? `<i${animateTolls ? ' class="cs-arrive-seg"' : ''} style="width:${pct(p.toll)}%;background:${COLOR_TOLL}"></i>` : ''}
         </span>
         <span class="hb-val">${p.grand ? L.fmtAUD(p.grand) : '—'}</span>
       </div>`).join('');
@@ -546,12 +583,15 @@ AD.views['cost-sheet'] = (function () {
     const unplannedDots = seriesDots(histUnplanned, COLOR_UNPLANNED, one('Unplanned repairs', 'unplanned', COLOR_UNPLANNED));
     const fuelDots = anyFuel ? seriesDots(histFuel, COLOR_FUEL, one('Fuel', 'fuel', COLOR_FUEL)) : '';
     // Toll dots only on periods that have tolls (no imported statement = no dot).
-    const tollDots = anyToll ? seriesDots(histToll, COLOR_TOLL, one('Tolls', 'toll', COLOR_TOLL), (p) => p.toll > 0) : '';
+    const tollDotsRaw = anyToll ? seriesDots(histToll, COLOR_TOLL, one('Tolls', 'toll', COLOR_TOLL), (p) => p.toll > 0) : '';
+    const tollDots = animateTolls && tollDotsRaw ? `<g class="cs-arrive-dots">${tollDotsRaw}</g>` : tollDotsRaw;
     // Two views (switch above the chart): 'split' draws each cost as its own
     // line; 'total' draws one red total-spend line. Either way the hover shows
     // what the period is made of.
     const showTotal = trendView === 'total';
-    const totalDots = showTotal ? seriesDots(histCoords, 'var(--red)', breakdown) : '';
+    const totalDotsRaw = showTotal ? seriesDots(histCoords, 'var(--red)', breakdown) : '';
+    const totalDots = animateTolls && totalDotsRaw ? `<g class="cs-arrive-dots">${totalDotsRaw}</g>` : totalDotsRaw;
+    const arr = animateTolls ? ' cs-arrive' : '';   // tolls just arrived: draw their line in rather than popping it in
     const projMarks = projCoords.map((c, j) => {
       const p = points[splitIdx + 1 + j];
       const cx = c.x.toFixed(1), cy = c.y.toFixed(1);
@@ -586,13 +626,13 @@ AD.views['cost-sheet'] = (function () {
     // Back to front: fills, then each series line (or, in the Total view, the
     // single red total line and its fill).
     const layers = showTotal ? `
-          <path d="${areaOf(histCoords)}" class="cs-area-total"></path>
-          <path d="${histTotalD}" class="cs-line-total-red" pathLength="1"></path>` : `
+          <path d="${areaOf(histCoords)}" class="cs-area-total${arr}"></path>
+          <path d="${histTotalD}" class="cs-line-total-red${arr}" pathLength="1"></path>` : `
           ${anyFuel ? `<path d="${areaOf(histFuel)}" class="cs-band-fuel"></path>` : ''}
           ${anyToll ? `<clipPath id="cs-toll-clip">${tollClip}</clipPath>
-          <path d="${areaOf(histToll)}" class="cs-band-toll" clip-path="url(#cs-toll-clip)"></path>` : ''}
+          <path d="${areaOf(histToll)}" class="cs-band-toll${arr}" clip-path="url(#cs-toll-clip)"></path>` : ''}
           ${anyFuel ? `<path d="${histFuelD}" class="cs-line-grand" pathLength="1"></path>` : ''}
-          ${anyToll ? `<path d="${histTollD}" class="cs-line-toll" pathLength="1" clip-path="url(#cs-toll-clip)"></path>` : ''}
+          ${anyToll ? `<path d="${histTollD}" class="cs-line-toll${arr}" pathLength="1" clip-path="url(#cs-toll-clip)"></path>` : ''}
           <path d="${histUnplannedD}" class="cs-line-path" pathLength="1"></path>
           <path d="${histPlannedD}" class="cs-line-planned" pathLength="1"></path>`;
     const svgBody = `${grid}
@@ -1117,8 +1157,8 @@ AD.views['cost-sheet'] = (function () {
     </section>`;
     const state = AD.store.tollsState ? AD.store.tollsState() : 'missing';
     if (state === 'idle' || state === 'loading') {
-      if (state === 'idle') AD.store.loadTolls().then(() => root && draw());
-      return wrap('Linkt toll charges', '<p class="empty">Loading toll data…</p>');
+      if (state === 'idle') waitForTolls();
+      return wrap('Linkt toll charges', `<p class="empty" data-toll-progress>${tollProgressText()}</p>`);
     }
     if (state === 'missing') {
       return wrap('Linkt toll charges', '<p class="empty">Toll tracking isn’t set up yet. Run <b>create-toll-entries.sql</b> in Supabase, then import a Linkt detailed statement with <b>Import cost data</b>.</p>');

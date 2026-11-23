@@ -161,36 +161,72 @@ AD.store = (function () {
    * Toll lines (Linkt). Loaded on demand by the Cost sheet rather than with
    * everything else: a quarter is ~8,000 rows, more than one request returns
    * (Supabase caps responses at 1,000 rows), and no other screen needs them.
-   * Fetched in pages of 1,000, only the columns the app uses.
+   * Only the columns the app uses. A year of statements is ~32,000 rows, so
+   * the pages are fetched SIX AT A TIME rather than one after another (which
+   * took about a minute), with progress reported as they arrive.
    */
-  const TOLL_COLS = 'id,vehicleId,date,plate,tag,class,road,kind,amount,statement,periodStart,periodEnd';
+  const TOLL_COLS = 'id,vehicleId,date,plate,tag,road,kind,amount,statement,periodStart,periodEnd';
+  const TOLL_PAGE = 1000, TOLL_PARALLEL = 6;
   let tollsState = 'idle';   // idle | loading | ready | missing
   let tollsReloadQueued = false;
+  let tollsProgress = { loaded: 0, total: 0 };
+  const tollProgressFns = new Set();
+  const tollProgressEmit = () => tollProgressFns.forEach((fn) => { try { fn(tollsProgress); } catch (e) { /* display only */ } });
+
   async function loadTolls(force) {
     // A forced reload (after an import) that arrives mid-load runs again once
     // the current load finishes, so freshly imported lines always show.
     if (tollsState === 'loading') { if (force) tollsReloadQueued = true; return tollsState; }
     if (!force && (tollsState === 'ready' || tollsState === 'missing')) return tollsState;
     tollsState = 'loading';
-    const out = [];
+    const fail = () => { unavailable.add('toll_entries'); tollsState = 'missing'; db.toll_entries = []; };
     try {
-      for (let from = 0; from < 1000000;) {
-        const { data, error } = await sb().from('toll_entries').select(TOLL_COLS).order('id').range(from, from + 999);
-        if (error) { unavailable.add('toll_entries'); tollsState = 'missing'; db.toll_entries = []; emit('toll_entries'); return tollsState; }
-        if (!data || !data.length) break;
-        out.push(...data);
-        from += data.length;
+      // How many rows, so the pages can be fetched side by side.
+      const head = await sb().from('toll_entries').select('id', { count: 'exact', head: true });
+      if (head.error) { fail(); emit('toll_entries'); return tollsState; }
+      const total = head.count || 0;
+      tollsProgress = { loaded: 0, total };
+      tollProgressEmit();
+      const pages = Math.ceil(total / TOLL_PAGE);
+      const got = new Array(pages);
+      let next = 0, short = false;
+      const worker = async () => {
+        while (next < pages) {
+          const p = next++;
+          const { data, error } = await sb().from('toll_entries').select(TOLL_COLS).order('id').range(p * TOLL_PAGE, p * TOLL_PAGE + TOLL_PAGE - 1);
+          if (error) throw error;
+          got[p] = data || [];
+          if (p < pages - 1 && got[p].length < TOLL_PAGE) short = true;   // server pages smaller than 1,000
+          tollsProgress = { loaded: Math.min(total, tollsProgress.loaded + got[p].length), total };
+          tollProgressEmit();
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(TOLL_PARALLEL, pages) }, worker));
+      let out = [].concat(...got.map((g) => g || []));
+      // If the server caps pages below 1,000, some rows were skipped: fall
+      // back to stepping through by however many come back.
+      if (short || out.length < total) {
+        out = [];
+        for (let from = 0; from < 1000000;) {
+          const { data, error } = await sb().from('toll_entries').select(TOLL_COLS).order('id').range(from, from + TOLL_PAGE - 1);
+          if (error) throw error;
+          if (!data || !data.length) break;
+          out.push(...data);
+          from += data.length;
+        }
       }
       unavailable.delete('toll_entries');
       db.toll_entries = out;
       tollsState = 'ready';
     } catch (e) {
-      unavailable.add('toll_entries'); tollsState = 'missing'; db.toll_entries = [];
+      fail();
     }
     if (tollsReloadQueued) { tollsReloadQueued = false; return loadTolls(true); }
     emit('toll_entries');
     return tollsState;
   }
+  /** Follow toll loading progress ({ loaded, total }); returns an unsubscribe function. */
+  function onTollProgress(fn) { tollProgressFns.add(fn); return () => tollProgressFns.delete(fn); }
 
   /** Bulk-import Linkt toll lines. Upserts on the deterministic row id, so re-importing a statement can't double-count. */
   async function importTolls(rows, onProgress) {
@@ -395,5 +431,5 @@ AD.store = (function () {
     return remove('employee_documents', doc.id);
   }
 
-  return { load, all, get, available: (table) => !unavailable.has(table), insert, update, remove, log, on, uid, importFuel, loadTolls, importTolls, tollsState: () => tollsState, uploadDocument, signDocumentUrl, removeDocument, renameDocumentCategory, reorderDocuments, uploadVehiclePhoto, removeVehiclePhoto, uploadEmployeeDocument, removeEmployeeDocument };
+  return { load, all, get, available: (table) => !unavailable.has(table), insert, update, remove, log, on, uid, importFuel, loadTolls, importTolls, tollsState: () => tollsState, tollsProgress: () => tollsProgress, onTollProgress, uploadDocument, signDocumentUrl, removeDocument, renameDocumentCategory, reorderDocuments, uploadVehiclePhoto, removeVehiclePhoto, uploadEmployeeDocument, removeEmployeeDocument };
 })();
