@@ -258,10 +258,10 @@ AD.views['cost-sheet'] = (function () {
 
       <div class="cs-kpis" style="--cs-kpi-n:${5 + (restOfYearMonths.length ? 1 : 0)}" role="group" aria-label="This ${cfg.label} against the average ${cfg.label}">
         ${kpi('Total spend', L.fmtAUD(spend), delta(spend, avgSpend, haveBaseline, L.fmtAUD, true), 'spend')}
-        ${kpi('Unplanned share', `${Math.round(share)}%`, shareFoot, 'unplanned')}
         ${kpi('Fuel share', `${Math.round(pctOf(fuelNow))}%`, sliceFoot(fuelNow, avgFuel), 'fuel')}
-        ${kpi('Planned servicing share', `${Math.round(pctOf(planned))}%`, sliceFoot(planned, avgPlanned), 'planned')}
         ${kpi('Toll share', haveTolls ? `${Math.round(pctOf(tollNow))}%` : '—', tollFoot || sliceFoot(tollNow, avgToll), 'toll')}
+        ${kpi('Planned servicing share', `${Math.round(pctOf(planned))}%`, sliceFoot(planned, avgPlanned), 'planned')}
+        ${kpi('Unplanned share', `${Math.round(share)}%`, shareFoot, 'unplanned')}
         ${restOfYearMonths.length ? kpi('Projected to year-end', L.fmtAUD(projRestTotal), `<small class="cs-delta">${restOfYearMonths.length} month${restOfYearMonths.length === 1 ? '' : 's'} remaining · ${L.fmtAUD(projMonthAvg)}/mo avg</small>`) : ''}
       </div>
 
@@ -348,9 +348,12 @@ AD.views['cost-sheet'] = (function () {
         </span>
         <span class="hb-val">${p.grand ? L.fmtAUD(p.grand) : '—'}</span>
       </div>`).join('');
-    const legend = [{ label: 'Planned servicing', color: COLOR_PLANNED }, { label: 'Unplanned repairs', color: COLOR_UNPLANNED }];
-    if (anyFuel) legend.push({ label: 'Fuel', color: COLOR_FUEL });
-    if (anyToll) legend.push({ label: 'Tolls', color: COLOR_TOLL });
+    const legend = [
+      ...(anyFuel ? [{ label: 'Fuel', color: COLOR_FUEL }] : []),
+      ...(anyToll ? [{ label: 'Tolls', color: COLOR_TOLL }] : []),
+      { label: 'Planned servicing', color: COLOR_PLANNED },
+      { label: 'Unplanned repairs', color: COLOR_UNPLANNED }
+    ];
     const head = ['Month', 'Planned', 'Unplanned'].concat(anyFuel ? ['Fuel'] : [], anyToll ? ['Tolls'] : [], ['Total']);
     const tableRows = pts.map((p) => [p.full, L.fmtAUD(p.planned), L.fmtAUD(p.unplanned)]
       .concat(anyFuel ? [L.fmtAUD(p.fuel)] : [], anyToll ? [L.fmtAUD(p.toll)] : [], [L.fmtAUD(p.grand)]));
@@ -601,12 +604,13 @@ AD.views['cost-sheet'] = (function () {
           ${nowMarker}` : ''}
           ${yTicks}${xTicks}${marks}`;
 
+    // Same order as the cards above: fuel, tolls, planned servicing, unplanned repairs.
     const legendItems = showTotal ? [{ label: 'Total spend', color: 'var(--red)' }] : [
+      ...(anyFuel ? [{ label: 'Fuel (imported)', color: COLOR_FUEL }] : []),
+      ...(anyToll ? [{ label: 'Tolls (Linkt)', color: COLOR_TOLL }] : []),
       { label: 'Planned servicing', color: COLOR_PLANNED },
       { label: 'Unplanned repairs', color: COLOR_UNPLANNED }
     ];
-    if (!showTotal && anyFuel) legendItems.push({ label: 'Fuel (imported)', color: COLOR_FUEL });
-    if (!showTotal && anyToll) legendItems.push({ label: 'Tolls (Linkt)', color: COLOR_TOLL });
     if (hasProj) legendItems.push({ label: 'Forecast (total)', color: 'var(--violet)' });
 
     return `<figure class="viz-card">
