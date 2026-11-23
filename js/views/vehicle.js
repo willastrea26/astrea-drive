@@ -1318,7 +1318,7 @@ AD.views.vehicle = (function () {
     Servicing: '#34b58e',
     Repairs: '#d03b3b',
     Tyres: '#d9902a',
-    Tolls: '#5598e7',
+    Tolls: '#f472b6',   // pink, as on the Cost sheet
     Finance: '#7a5af8',
     Other: '#98a2b3'
   };
@@ -1340,6 +1340,10 @@ AD.views.vehicle = (function () {
   }
 
   function costsTab(v) {
+    // Linkt tolls load on demand (they're a big table); the page redraws
+    // itself when they arrive.
+    const tollState = AD.store.tollsState ? AD.store.tollsState() : 'missing';
+    if (tollState === 'idle') AD.store.loadTolls();
     const months = lastTwelveMonths();
     const from = months[0].key + '-01';
     const to = T.todayKey();
@@ -1375,9 +1379,11 @@ AD.views.vehicle = (function () {
         </div>
       </div>
 
-      <div class="cost-kpis" role="group" aria-label="Vehicle cost summary">
+      <div class="cost-kpis cost-kpis-6" role="group" aria-label="Vehicle cost summary">
         ${kpi('Total cost', total, `${rows.length} transaction${rows.length === 1 ? '' : 's'}`)}
         ${kpi('Fuel', fuel, 'Imported automatically')}
+        ${kpi('Tolls', totals.Tolls || 0, tollState === 'idle' || tollState === 'loading' ? 'Loading Linkt tolls…'
+          : tollState === 'missing' ? 'Linkt tolls not set up yet' : 'From Linkt statements')}
         ${kpi('Maintenance', maintenance, 'Service, repairs and tyres')}
         ${kpi('Ownership', ownership, 'Rego, insurance and finance')}
         ${unitCostKpi}

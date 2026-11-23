@@ -3406,3 +3406,7 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 .cs-arrive-dots .cs-mark { animation: fade .5s ease .9s backwards; }
 .cs-mbar i.cs-arrive-seg { transform-origin: left; animation: grow-x .8s cubic-bezier(.2,.75,.3,1) backwards; }
 .cs-row-meta .cs-driver { color: var(--ink-2); font-weight: 600; }
+/* Vehicle Costs tab: six summary cards (Tolls added) */
+.cost-kpis.cost-kpis-6 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+@media (max-width: 1100px) { .cost-kpis.cost-kpis-6 { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 600px) { .cost-kpis.cost-kpis-6 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

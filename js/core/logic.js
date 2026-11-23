@@ -338,6 +338,41 @@ AD.logic = (function () {
    * repairs and manually entered ownership costs all land in the same list.
    * Optional YYYY-MM-DD bounds are inclusive.
    */
+  /**
+   * Linkt toll lines grouped by vehicle, matched from the CURRENT register
+   * (plate, or the vehicle's Linkt tag) exactly as the Cost sheet does. A tag
+   * recorded on two vehicles belongs to neither. Account credits aren't any
+   * one vehicle's. Cached until the toll lines or the vehicle list change, so
+   * a vehicle page doesn't re-match ~30,000 lines on every draw.
+   */
+  let tollCache = { src: null, veh: null, map: new Map() };
+  function tollsByVehicle() {
+    const src = S().all('toll_entries') || [];
+    const veh = S().all('vehicles') || [];
+    if (tollCache.src === src && tollCache.veh === veh) return tollCache.map;
+    const map = new Map();
+    if (src.length && AD.linkt) {
+      const match = AD.linkt.matcher(veh);
+      const owner = new Map();   // tag / plate -> vehicle id | 'shared' | null
+      src.forEach((r) => {
+        if (r.kind === 'adjustment') return;
+        const key = r.tag ? 't' + r.tag : r.plate ? 'p' + r.plate : '';
+        let vid = null;
+        if (key) {
+          if (!owner.has(key)) { const m = match(r); owner.set(key, m.vehicle ? m.vehicle.id : m.ambiguous.length ? 'shared' : null); }
+          vid = owner.get(key);
+        }
+        if (vid === 'shared') return;
+        if (!vid) vid = r.vehicleId || null;
+        if (!vid) return;
+        if (!map.has(vid)) map.set(vid, []);
+        map.get(vid).push(r);
+      });
+    }
+    tollCache = { src, veh, map };
+    return map;
+  }
+
   function vehicleCostsFor(v, fromKey, toKey) {
     const rows = [];
     const inRange = (date) => {
@@ -370,6 +405,28 @@ AD.logic = (function () {
       id: r.id, vehicleId: v.id, date: r.resolvedDate, category: 'Repairs', amount: r.cost,
       supplier: '', description: r.description || 'Defect repair', reference: '', source: 'Defect'
     }));
+
+    // Linkt tolls, one line per month (a busy vehicle has hundreds of trips a
+    // month, which would bury every other cost in the history list).
+    const tollMonths = new Map();
+    (tollsByVehicle().get(v.id) || []).forEach((r) => {
+      const d = r.date ? String(r.date).slice(0, 10) : '';
+      if (!d || !inRange(d)) return;
+      const k = d.slice(0, 7);
+      const g = tollMonths.get(k) || { date: d, amount: 0, trips: 0, fees: 0 };
+      g.amount += Number(r.amount) || 0;
+      if (r.kind === 'fee') g.fees++; else g.trips++;
+      if (d > g.date) g.date = d;
+      tollMonths.set(k, g);
+    });
+    tollMonths.forEach((g, k) => {
+      const [y, m] = k.split('-').map(Number);
+      add({
+        id: `tolls-${v.id}-${k}`, vehicleId: v.id, date: g.date, category: 'Tolls', amount: Math.round(g.amount * 100) / 100,
+        supplier: 'Linkt', source: 'Linkt import', reference: '',
+        description: `${g.trips} toll trip${g.trips === 1 ? '' : 's'}${g.fees ? ` · ${g.fees} No Tag fee${g.fees === 1 ? '' : 's'}` : ''} in ${T.MONTHS[m - 1]} ${y}`
+      });
+    });
 
     (S().all('vehicle_costs') || []).filter((r) => r.vehicleId === v.id).forEach((r) => add({
       id: r.id, vehicleId: v.id, date: r.date, category: r.category || 'Other',
@@ -650,7 +707,7 @@ AD.logic = (function () {
   }
 
   return {
-    serviceState, serviceTriggers, usageRate, workHours, workHoursDaily, tripStats, fuelFor, isFuelPurchase, fuelEconomy, gpsTotals, vehicleCostsFor, HOURS_TYPES,
+    serviceState, serviceTriggers, usageRate, workHours, workHoursDaily, tripStats, fuelFor, isFuelPurchase, fuelEconomy, gpsTotals, vehicleCostsFor, tollsByVehicle, HOURS_TYPES,
     regoState, attentionTone, openDefects, fmtKm, fmtHours, fmtAUD, driverName, userName,
     vacTrucks, schedulableVehicles, bookingsFor, activeAt, overlaps, conflictIds, driverConflictIds, nextBooking, locate, hasCoords,
     bookingCategory, bookingTitle, SOON_DAYS, SOON_KM, SOON_HOURS, URGENT_HOURS,
