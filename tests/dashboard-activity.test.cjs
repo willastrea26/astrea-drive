@@ -43,22 +43,4 @@ test('fleet activity totals use true year-to-date GPS and fuel data', () => {
   assert.equal(result.firstDay, '2026-01-02');
   assert.equal(result.lastDay, '2026-11-17');
   assert.equal(result.tripWindowDays, 30);
-  assert.equal(result.topSpeedDays, 30);   // no 10-day figures synced yet
-});
-
-test('top speed uses the last 10 days once the sync has filled them in', () => {
-  const L = logic({
-    vehicle_trip_stats: [
-      { vehicleId: 'AVT01', trips: 10, maxSpeed: 92, maxSpeed10d: 92, windowDays: 30 },
-      { vehicleId: 'AVT02', trips: 14, maxSpeed: 146, maxSpeed10d: 104, windowDays: 30 },
-      { vehicleId: 'ALV03', trips: 3, maxSpeed: 99, maxSpeed10d: null, windowDays: 30 }
-    ]
-  });
-
-  const result = L.gpsTotals();
-  assert.equal(result.topSpeed, 104);
-  assert.equal(result.topSpeedVeh, 'AVT02');
-  assert.equal(result.topSpeedDays, 10);
-  assert.equal(result.trips, 27);          // trips stay on the 30-day window
-  assert.equal(result.tripWindowDays, 30);
 });

@@ -468,7 +468,7 @@ AD.views.dashboard = (function () {
           ${metric('Fuel · YTD', gps.litres ? `${whole(gps.litres)} L` : '—')}
           ${metric('Engine time · YTD', gps.hours ? `${one(gps.hours)} hrs` : '—')}
           ${metric(`Trips · ${gps.tripWindowDays}d`, gps.trips ? whole(gps.trips) : '—')}
-          ${metric(`Top speed · ${gps.topSpeedDays}d`, gps.topSpeed != null ? `${whole(gps.topSpeed)} km/h` : '—', gps.topSpeedVeh)}
+          ${metric(`Top speed · ${gps.tripWindowDays}d`, gps.topSpeed != null ? `${whole(gps.topSpeed)} km/h` : '—', gps.topSpeedVeh)}
         </span>
         <span class="activity-coverage">
           <span><b>${gps.tracked}</b> GPS tracked <i>${fleetSize} in fleet</i></span>

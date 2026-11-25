@@ -315,33 +315,19 @@ AD.logic = (function () {
     }, 0);
 
     // Rolling window — one row per vehicle, each already an aggregate.
-    // Top speed prefers the last 10 days ("maxSpeed10d"), so one bad GPS fix
-    // doesn't hold the tile for a month; until the sync has filled that in,
-    // it falls back to the full window's maximum under the full window's label.
     let trips = 0, topSpeed = 0, topSpeedVeh = '', tripWindowDays = 0;
-    let recentSpeed = 0, recentSpeedVeh = '', hasRecent = false;
     (S().all('vehicle_trip_stats') || []).forEach((r) => {
       trips += Number(r.trips) || 0;
       const ms = Number(r.maxSpeed);
       if (Number.isFinite(ms) && ms > topSpeed) { topSpeed = ms; topSpeedVeh = r.vehicleId; }
-      if (r.maxSpeed10d != null && r.maxSpeed10d !== '' && Number.isFinite(Number(r.maxSpeed10d))) {
-        hasRecent = true;
-        const rs = Number(r.maxSpeed10d);
-        if (rs > recentSpeed) { recentSpeed = rs; recentSpeedVeh = r.vehicleId; }
-      }
       const w = Number(r.windowDays) || 30;
       if (w > tripWindowDays) tripWindowDays = w;
     });
-    tripWindowDays = tripWindowDays || 30;
-    const speed = hasRecent ? recentSpeed : topSpeed;
 
     return {
       km, hours, litres,
-      trips,
-      topSpeed: speed > 0 ? speed : null,
-      topSpeedVeh: hasRecent ? recentSpeedVeh : topSpeedVeh,
-      topSpeedDays: hasRecent ? 10 : tripWindowDays,
-      tripWindowDays,
+      trips, topSpeed: topSpeed > 0 ? topSpeed : null, topSpeedVeh,
+      tripWindowDays: tripWindowDays || 30,
       tracked: tracked.size, firstDay, lastDay, yearStart
     };
   }

@@ -578,15 +578,6 @@ async function syncOdometers(depth: "recent" | "full" = "recent", quick = false,
     const { rows: summaries, raw } = await fetchTripSummaries(imeis, from, to);
     tripStatsDebug.returned = summaries.length;
     tripStatsDebug.firstResponse = raw;
-    // A second, shorter summary just for the dashboard's top speed: one bad
-    // GPS fix can hold a 30-day maximum for a month, so that tile uses the
-    // last 10 days. Same report and field (max_speed), so it stays verified.
-    // If this call fails the 10-day value is left empty and the dashboard
-    // falls back to the 30-day figure under its own label.
-    const RECENT_SPEED_DAYS = 10;
-    const recent = await fetchTripSummaries(imeis, netstarDate(now - RECENT_SPEED_DAYS * 86400000), to);
-    tripStatsDebug.recentSpeed = { days: RECENT_SPEED_DAYS, returned: recent.rows.length, firstResponse: recent.raw };
-    const recentMax = new Map(recent.rows.map((d) => [String((d as Record<string, unknown>).imei_no ?? ""), num(d.max_speed)]));
     const byImei = new Map(devices.map((v) => [String(v.imei), v]));
     const tripRows: Array<Record<string, unknown>> = [];
     for (const d of summaries) {
@@ -603,7 +594,6 @@ async function syncOdometers(depth: "recent" | "full" = "recent", quick = false,
         trips: num(d.no_of_trip),
         avgSpeed: num(d.avg_speed),
         maxSpeed: num(d.max_speed),
-        maxSpeed10d: recentMax.get(String((d as Record<string, unknown>).imei_no ?? "")) ?? null,
         overspeed: num(d.overspeed),
         days: WINDOW_DAYS,
       });
