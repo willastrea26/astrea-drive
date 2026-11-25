@@ -560,6 +560,7 @@ AD.views.tracker = (function () {
     if (!root) return;
     if (st.mode === 'live') { updateLive(); return; }
     const $ = (s) => root.querySelector(s);
+    $('.trk-panel').classList.remove('show-card');
     const key = T.dateKey(st.t);
     const ds = T.startOfDay(key), de = T.startOfDay(T.addDays(key, 1));
     const now = Date.now();
@@ -731,17 +732,31 @@ AD.views.tracker = (function () {
 
   function drawLiveList(shown) {
     const list = root.querySelector('#t-list');
-    if (!liveData && liveLoading) { list.innerHTML = '<p class="empty" style="padding:16px">Loading live positions…</p>'; return; }
-    if (liveError && !liveData) { list.innerHTML = `<p class="empty" style="padding:16px">${esc(liveError)}<br><button type="button" class="btn btn-secondary btn-sm" id="t-retry" style="margin-top:10px">Try again</button></p>`; const r = list.querySelector('#t-retry'); if (r) r.onclick = () => fetchLive(true); return; }
+    const panel = root.querySelector('.trk-panel');
+    if (!liveData && liveLoading) { panel.classList.remove('show-card'); list.innerHTML = '<p class="empty" style="padding:16px">Loading live positions…</p>'; return; }
+    if (liveError && !liveData) { panel.classList.remove('show-card'); list.innerHTML = `<p class="empty" style="padding:16px">${esc(liveError)}<br><button type="button" class="btn btn-secondary btn-sm" id="t-retry" style="margin-top:10px">Try again</button></p>`; const r = list.querySelector('#t-retry'); if (r) r.onclick = () => fetchLive(true); return; }
+
+    // A selected vehicle takes over the panel with its details card, whatever
+    // the filters say; "All vehicles" goes back to the list.
+    const picked = st.sel ? liveLocations().find((l) => l.truckId === st.sel) : null;
+    panel.classList.toggle('show-card', !!picked);
+    if (picked) {
+      const keep = list.dataset.card === st.sel ? list.scrollTop : 0; // a 60 s refresh mustn't jump the card to the top
+      list.innerHTML = `<div class="lv-card">${liveCard(picked)}</div>`;
+      list.dataset.card = st.sel;
+      list.scrollTop = keep;
+      wireCard(list, picked);
+      return;
+    }
+    list.dataset.card = '';
 
     list.innerHTML = shown.map((l) => {
-      const sel = l.truckId === st.sel;
       const p = l.live;
       const name = markerLabel(l);
       const where = p.hasFix ? esc(p.location || `${p.lat.toFixed(4)}, ${p.lng.toFixed(4)}`) : '<span class="fp-unknown">No GPS fix</span>';
       const when = `Seen ${esc(agoText(l.seenAt))}${p.speed ? ` · ${Math.round(p.speed)} km/h` : ''}`;
-      return `<div class="fp-item${sel ? ' sel' : ''}" role="listitem" data-t="${l.truckId}">
-        <button type="button" class="fp-row" data-pick="${l.truckId}" aria-expanded="${sel}" aria-controls="fp-d-${l.truckId}" title="${esc(p.location || name)}">
+      return `<div class="fp-item" role="listitem" data-t="${l.truckId}">
+        <button type="button" class="fp-row" data-pick="${l.truckId}" title="${esc(p.location || name)}">
           <span class="fp-thumb">${vehArt(l.truck, 64, `${name} vehicle`)}</span>
           <span class="fp-main">
             <span class="fp-top"><b>${esc(name)}</b>${liveBadge(l.cat)}</span>
@@ -750,36 +765,170 @@ AD.views.tracker = (function () {
             <span class="fp-time">${when}</span>
           </span>
         </button>
-        ${sel ? `<div class="fp-detail" id="fp-d-${l.truckId}">${liveDetail(l)}</div>` : ''}
       </div>`;
     }).join('') || '<p class="empty" style="padding:16px">No vehicles match these filters.</p>';
 
     list.querySelectorAll('[data-pick]').forEach((btn) => { btn.onclick = (e) => select(btn.dataset.pick, 'list', e.detail === 0); });
-    list.querySelectorAll('[data-veh]').forEach((btn) => (btn.onclick = () => AD.go('vehicle/' + btn.dataset.veh, { tab: 'overview' })));
   }
 
-  function liveDetail(l) {
+  // ------------------------------------------------------- live details card
+  // Last-24-hour trips per vehicle, fetched when its card opens. Netstar's
+  // trip report is the same one the vehicle's Trips tab reads.
+  const TRIP_TTL = 5 * 60000;
+  const trips24 = new Map();   // vehicle id -> { at, loading, error, sum }
+
+  async function loadTrips(v) {
+    const c = trips24.get(v.id);
+    if (c && (c.loading || Date.now() - c.at < TRIP_TTL)) return;
+    trips24.set(v.id, { at: Date.now(), loading: true });
+    let next;
+    try {
+      const { data, error } = await AD.sb.functions.invoke('netstar', {
+        body: { action: 'trips', rego: v.rego, netstarRego: AD.netstarAliases.aliasForVehicle(v), days: 1 }
+      });
+      if (error) throw error;
+      const days = (data && data.days) || [];
+      if (data && data.error && !days.length) throw new Error(data.error);
+      const trips = days.flatMap((d) => d.trips || []);
+      const add = (k) => trips.reduce((s, t) => s + (Number(t[k]) || 0), 0);
+      next = { at: Date.now(), sum: { trips: trips.length, km: add('km'), driveMin: add('travelMin'), idleMin: add('idleMin'),
+        maxSpeed: Math.max(0, ...trips.map((t) => Number(t.maxSpeed) || 0)) } };
+    } catch (e) {
+      // Try again a minute later rather than holding the error for the full TTL.
+      next = { at: Date.now() - TRIP_TTL + 60000, error: (e && e.message) || 'trip report unavailable' };
+    }
+    trips24.set(v.id, next);
+    if (root && st.mode === 'live' && st.sel === v.id) update();
+  }
+
+  const hm = (min) => {
+    const m = Math.round(min || 0);
+    return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')} min`;
+  };
+  function kmBetween(a, b) {
+    const R = 6371, rad = Math.PI / 180;
+    const dLa = (b.lat - a.lat) * rad, dLo = (b.lng - a.lng) * rad;
+    const x = Math.sin(dLa / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLo / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(x));
+  }
+
+  function liveCard(l) {
     const p = l.live, v = l.truck;
-    const head = v
-      ? `<div class="fpd-veh">${esc(v.make)} ${esc(v.model.split(' —')[0])} · ${esc(v.rego)} · ${vehicleBadge(v.status)}</div>`
-      : `<div class="fpd-veh">${esc(p.deviceName || 'Telematics device')} · ${esc(p.rego || p.imei)}</div>`;
+    const name = markerLabel(l);
+    if (v) loadTrips(v);
     const coords = p.hasFix ? `${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}` : '';
-    const mapLink = p.hasFix ? `<a class="btn btn-link" href="https://www.google.com/maps?q=${p.lat},${p.lng}" target="_blank" rel="noopener">Open in Google Maps</a>` : '';
-    return `${head}
-      ${!l.matched ? '<p class="note">This device isn’t linked to a vehicle in the fleet register (its Netstar rego doesn’t match a plate).</p>' : ''}
-      <dl>
-        <dt>Status</dt><dd>${liveBadge(l.cat)}</dd>
-        <dt>Location</dt><dd>${p.hasFix ? esc(p.location || coords) : '<span class="muted">No GPS fix</span>'}${coords ? `<span class="t2">${coords}</span>` : ''}</dd>
-        <dt>Last report</dt><dd>${esc(agoText(l.seenAt))}${p.lastData ? `<span class="t2">${esc(p.lastData)}</span>` : ''}</dd>
-        <dt>Ignition</dt><dd>${esc(p.ignition || '—')}${p.speed ? ` · ${Math.round(p.speed)} km/h` : ''}</dd>
-        ${p.odometerYesterday != null ? `<dt>Odometer</dt><dd>${esc(Math.round(p.odometerYesterday).toLocaleString('en-AU'))} km<span class="t2">as at yesterday</span></dd>` : ''}
-        ${p.driver ? `<dt>Driver</dt><dd>${esc(p.driver)}</dd>` : ''}
-        <dt>Device</dt><dd>${esc(p.deviceName || '—')}${p.deviceModel ? `<span class="t2">${esc(p.deviceModel)}</span>` : ''}</dd>
-      </dl>
-      <div class="btns">
-        ${v ? `<button type="button" class="btn btn-secondary btn-sm" data-veh="${v.id}">View vehicle</button>` : ''}
-        ${mapLink}
+    const moving = l.cat === 'moving' && p.speed ? `${Math.round(p.speed)} km/h · ` : '';
+
+    const head = `<div class="lv-head">
+        <button type="button" class="lv-back" data-lv="back">${I.chevL} All vehicles</button>
+        <div class="lv-photo">${v && v.photo ? `<img src="${esc(v.photo)}" alt="${esc(v.id)}">` : vehArt(v, 190, `${name} vehicle`)}</div>
+        <div class="lv-title"><b>${esc(name)}</b>${v ? `<span>${esc(v.rego)}</span>` : (p.rego ? `<span>${esc(p.rego)}</span>` : '')}</div>
+        <div class="lv-sub">${v ? `${esc(v.make)} ${esc(v.model.split(' —')[0])} · ${esc(v.type)}` : '<span class="muted">Not in the fleet register</span>'}</div>
+        <div class="lv-status">${liveBadge(l.cat)}<span class="lv-seen">${moving}seen ${esc(agoText(l.seenAt))}</span></div>
       </div>`;
+
+    const copyText = [p.location, coords].filter(Boolean).join(' · ');
+    const loc = `<section class="lv-sec">
+        <h3>${I.pin} Location</h3>
+        ${p.hasFix ? `<p class="lv-addr">${esc(p.location || coords)}</p>${p.location ? `<p class="lv-coords">${coords}</p>` : ''}
+          <div class="lv-acts">
+            <button type="button" data-lv="centre">Show on map</button>
+            <button type="button" data-lv="copy" data-copy="${esc(copyText)}">Copy</button>
+            <a href="https://www.google.com/maps?q=${p.lat},${p.lng}" target="_blank" rel="noopener">Google Maps</a>
+          </div>` : '<p class="muted">No GPS fix</p>'}
+      </section>`;
+
+    if (!v) {
+      return `${head}${loc}<section class="lv-sec"><p class="muted">This device isn’t linked to a vehicle in the fleet register (its Netstar rego doesn’t match a plate).</p>
+        <dl class="lv-dl"><dt>Device</dt><dd>${esc(p.deviceName || '—')}</dd><dt>Last report</dt><dd>${esc(p.lastData || '—')}</dd></dl></section>`;
+    }
+
+    // Last 24 hours of trips
+    const c = trips24.get(v.id);
+    let act;
+    if (!c || c.loading) act = '<p class="muted">Loading trips…</p>';
+    else if (c.error) act = `<p class="muted">Couldn’t load trips: ${esc(c.error)}</p>`;
+    else if (!c.sum.trips) act = '<p class="muted">No trips in the last 24 hours.</p>';
+    else {
+      const s = c.sum, engine = s.driveMin + s.idleMin;
+      const drivePct = engine ? Math.round((s.driveMin / engine) * 100) : 0;
+      act = `<div class="lv-km"><b>${Math.round(s.km).toLocaleString('en-AU')}</b> km
+          <span>${s.trips} trip${s.trips === 1 ? '' : 's'}${s.maxSpeed ? ` · top speed ${Math.round(s.maxSpeed)} km/h` : ''}</span></div>
+        <div class="lv-bar" role="img" aria-label="Driving ${drivePct}% of engine time"><i style="width:${drivePct}%"></i></div>
+        <dl class="lv-dl">
+          <dt><i class="sw sw-drive"></i>Driving</dt><dd>${hm(s.driveMin)}</dd>
+          <dt><i class="sw sw-idle"></i>Idling</dt><dd>${hm(s.idleMin)}</dd>
+          <dt>Engine on</dt><dd>${hm(engine)}</dd>
+        </dl>`;
+    }
+    const activity = `<section class="lv-sec"><h3>${I.activity} Last 24 hours</h3>${act}<p class="lv-src">From Netstar trip reports</p></section>`;
+
+    // Booked job now, and the next one — with how far the truck is from the site.
+    const now = Date.now();
+    const bs = L.bookingsFor(v.id).filter((b) => b.status !== 'cancelled').sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
+    const nowB = bs.find((b) => Date.parse(b.start) <= now && Date.parse(b.end) > now);
+    const nextB = bs.find((b) => Date.parse(b.start) > now);
+    // "07:30 – 15:00" today; "Fri 27/11 · 08:30 – 15:00" another day; full dates if it spans days.
+    const when = (b) => {
+      const s = Date.parse(b.start), e = Date.parse(b.end), sk = T.dateKey(s);
+      if (sk !== T.dateKey(e)) return `${T.fmtDateTime(b.start)} – ${T.fmtDateTime(b.end)}`;
+      const day = sk === T.todayKey() ? '' : `${T.DOW[T.dayOfWeek(sk)]} ${T.fmtKey(sk).slice(0, 5)} · `;
+      return `${day}${T.fmtTime(s)} – ${T.fmtTime(e)}`;
+    };
+    const jobRow = (b, label) => `<div class="lv-job"><span class="lv-k">${label}</span><b>${esc(L.bookingTitle(b))}</b>
+        ${[b.client, siteName(b)].filter(Boolean).length ? `<span>${[b.client, siteName(b)].filter(Boolean).map(esc).join(' · ')}</span>` : ''}
+        <span class="muted">${when(b)}</span></div>`;
+    let dist = '';
+    if (nowB && p.hasFix && nowB.lat != null && nowB.lng != null) {
+      const d = kmBetween(p, nowB);
+      dist = d < 0.3 ? '<p class="lv-dist on">At the booked site</p>'
+        : `<p class="lv-dist off">${d < 10 ? d.toFixed(1) : Math.round(d)} km from the booked site</p>`;
+    }
+    const jobs = nowB || nextB ? `<section class="lv-sec"><h3>${I.calendar} Bookings</h3>
+        ${nowB ? jobRow(nowB, 'Booked now') + dist : ''}${nextB ? jobRow(nextB, 'Next') : ''}</section>` : '';
+
+    // From the fleet register
+    const svc = L.serviceState(v), rego = L.regoState(v), defects = L.openDefects(v.id).length;
+    const tone = (state) => (state === 'overdue' ? 'lv-bad' : state === 'soon' ? 'lv-warn' : '');
+    const driver = p.driver || (nowB && nowB.driverId ? L.driverName(nowB.driverId) : '') || L.driverName(v.driverId);
+    const odo = p.odometerYesterday != null
+      ? `${Math.round(p.odometerYesterday).toLocaleString('en-AU')} km<span class="t2">From Netstar, as at yesterday</span>`
+      : esc(L.fmtKm(v.odometer));
+    const facts = `<section class="lv-sec"><h3>${I.truck} Vehicle</h3>
+        <dl class="lv-dl">
+          <dt>Driver</dt><dd>${driver ? esc(driver) : '<span class="muted">Not recorded</span>'}</dd>
+          <dt>Odometer</dt><dd>${odo}</dd>
+          ${v.engineHours != null && v.engineHours !== '' ? `<dt>Engine hours</dt><dd>${esc(L.fmtHours(v.engineHours))}</dd>` : ''}
+          <dt>Next service</dt><dd class="${tone(svc.state)}">${esc(svc.why)}</dd>
+          <dt>Registration</dt><dd class="${tone(rego.state)}">${esc(rego.why)}</dd>
+          <dt>Open defects</dt><dd>${defects ? `<button type="button" class="lv-link${defects ? ' lv-warn' : ''}" data-defects="${v.id}">${defects} open</button>` : 'None'}</dd>
+        </dl></section>`;
+
+    return `${head}${loc}${activity}${jobs}${facts}
+      <div class="lv-foot">
+        <button type="button" class="btn btn-primary btn-sm" data-veh="${v.id}">View vehicle</button>
+        <button type="button" class="btn btn-secondary btn-sm" data-trips="${v.id}">Trips and replay</button>
+      </div>`;
+  }
+
+  function wireCard(list, l) {
+    const on = (sel, fn) => list.querySelectorAll(sel).forEach((b) => (b.onclick = fn));
+    on('[data-lv="back"]', () => {
+      const id = st.sel;
+      st.sel = '';
+      update();
+      const row = root.querySelector(`.fp-item[data-t="${id}"] .fp-row`);
+      if (row) { row.scrollIntoView({ block: 'nearest' }); row.focus(); }
+    });
+    on('[data-lv="centre"]', () => revealMarker(l.truckId, true));
+    on('[data-lv="copy"]', (e) => {
+      const text = e.currentTarget.dataset.copy;
+      const done = navigator.clipboard && navigator.clipboard.writeText ? navigator.clipboard.writeText(text) : Promise.reject(new Error('no clipboard'));
+      done.then(() => AD.ui.toast('Location copied')).catch(() => AD.ui.toast('Couldn’t copy the location', 'error'));
+    });
+    on('[data-veh]', (e) => AD.go('vehicle/' + e.currentTarget.dataset.veh, { tab: 'overview' }));
+    on('[data-trips]', (e) => AD.go('vehicle/' + e.currentTarget.dataset.trips, { tab: 'trips' }));
+    on('[data-defects]', (e) => AD.go('vehicle/' + e.currentTarget.dataset.defects, { tab: 'defects' }));
   }
 
   function detail(l) {
@@ -839,6 +988,17 @@ AD.views.tracker = (function () {
 
   // ---------------------------------------------------------------- selection
   function select(id, source, fromKeyboard) {
+    if (st.mode === 'live') {
+      // Live GPS: a vehicle opens its details card in the side panel.
+      st.sel = id;
+      if (prefs.panel === 'closed') setPanel('open');
+      update();
+      const list = root.querySelector('#t-list');
+      if (list) list.scrollTop = 0;
+      if (source === 'list') revealMarker(id, false);
+      if (fromKeyboard) { const back = root.querySelector('.lv-back'); if (back) back.focus(); }
+      return;
+    }
     st.sel = source === 'list' && st.sel === id ? '' : id; // clicking an open entry closes it
     update();
     const list = root.querySelector('#t-list');
