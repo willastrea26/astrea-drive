@@ -168,6 +168,28 @@ AD.views.dashboard = (function () {
   // Which insight is on screen. Held across redraws so a background refresh
   // doesn't yank the band back to the first card while it's being read.
   let insightIdx = 0, insightTimer = null;
+
+  // No Tag fees on the latest Linkt statement, for the insights band. Only the
+  // fee lines of that one statement (a few hundred rows), fetched once per
+  // session, never the whole toll history the Cost sheet loads.
+  let noTag = null, noTagBusy = false;
+  async function loadNoTag() {
+    if (noTag || noTagBusy || !AD.sb) return;
+    noTagBusy = true;
+    try {
+      const head = await AD.sb.from('toll_entries').select('statement,periodStart,periodEnd')
+        .eq('kind', 'fee').order('periodEnd', { ascending: false, nullsFirst: false }).limit(1);
+      const latest = !head.error && head.data && head.data[0];
+      if (!latest || !latest.statement) noTag = { rows: [] };
+      else {
+        const res = await AD.sb.from('toll_entries').select('plate,tag,amount,vehicleId')
+          .eq('kind', 'fee').eq('statement', latest.statement).limit(10000);
+        noTag = { rows: res.error ? [] : (res.data || []), from: latest.periodStart, to: latest.periodEnd };
+      }
+    } catch (e) { noTag = { rows: [] }; }
+    noTagBusy = false;
+    if (root) draw();   // root is cleared when the dashboard is left
+  }
   // Charts animate in when the page is opened, not on every in-page redraw
   // (changing the schedule tab or date would otherwise replay the whole page).
   let fresh = true;
@@ -215,6 +237,20 @@ AD.views.dashboard = (function () {
       '#/defects?status=open&priority=Critical');
 
     const regoGone = rego.filter((x) => x.r.state === 'overdue');
+
+    // Expired rego AND the GPS shows it driven since: unregistered on the road.
+    const dailyRows = AD.store.all('vehicle_work_hours_daily') || [];
+    const kmSince = (id, fromKey) => dailyRows.reduce((n, r) =>
+      (r.vehicleId === id && String(r.day).slice(0, 10) > fromKey ? n + (Number(r.distanceKm) || 0) : n), 0);
+    const drivenUnreg = regoGone.map((x) => ({ v: x.v, km: x.v.regoExpiry ? kmSince(x.v.id, String(x.v.regoExpiry).slice(0, 10)) : 0 }))
+      .filter((x) => x.km >= 1).sort((a, c) => c.km - a.km);
+    if (drivenUnreg.length === 1) add(98, 'critical', I.file,
+      `${b(esc(drivenUnreg[0].v.id))} has driven ${b(Math.round(drivenUnreg[0].km).toLocaleString('en-AU') + ' km')} since its registration expired`,
+      `The register shows it expired ${T.fmtKey(drivenUnreg[0].v.regoExpiry)} · renew it, or update the register if it already has been`, vHref(drivenUnreg[0].v.id));
+    else if (drivenUnreg.length) add(98, 'critical', I.file,
+      `${b(drivenUnreg.length)} vehicles have been driven on an expired registration`,
+      `${few(drivenUnreg.map((x) => x.v.id))} · GPS shows them driven since the expiry on the register`, '#/fleet?flag=rego');
+
     if (regoGone.length) add(96, 'critical', I.file,
       `${b(regoGone.length)} registration${s(regoGone.length)} ${regoGone.length === 1 ? 'has' : 'have'} expired`,
       few(regoGone.map((x) => x.v.id)), '#/fleet?flag=rego');
@@ -271,7 +307,7 @@ AD.views.dashboard = (function () {
     if (cur.total > 0 && prev.total > 0) {
       const pct = Math.round(((cur.total - prev.total) / prev.total) * 100);
       if (Math.abs(pct) >= 5) add(64, pct > 0 ? 'warn' : 'good', I.receipt,
-        `Spend is ${b((pct > 0 ? 'up ' : 'down ') + Math.abs(pct) + '%')} on the previous 30 days`,
+        `Servicing and repair spend is ${b((pct > 0 ? 'up ' : 'down ') + Math.abs(pct) + '%')} on the previous 30 days`,
         `${L.fmtAUD(cur.total)} in the last 30 days · ${L.fmtAUD(prev.total)} before that`, '#/cost-sheet');
     }
     if (cur.total > 0) {
@@ -281,15 +317,103 @@ AD.views.dashboard = (function () {
         `${L.fmtAUD(cur.unplanned)} on defects against ${L.fmtAUD(cur.total)} all up`, '#/cost-sheet');
     }
 
+    // Dearest vehicle to run: fuel-card spend plus servicing and repairs.
+    // Tolls are left out (they load separately and would make this flicker).
     const yearFrom = T.addDays(today, -364);
     const perVehicle = new Map();
-    const tally = (id, n2) => perVehicle.set(id, (perVehicle.get(id) || 0) + n2);
-    AD.store.all('services').forEach((x) => { if (x.date >= yearFrom && x.date <= today) tally(x.vehicleId, Number(x.cost || 0)); });
-    AD.store.all('defects').forEach((x) => { if (x.status === 'Resolved' && x.resolvedDate >= yearFrom && x.resolvedDate <= today) tally(x.vehicleId, Number(x.cost || 0)); });
-    const dearest = [...perVehicle.entries()].sort((a, b2) => b2[1] - a[1])[0];
-    if (dearest && dearest[1] > 0) add(46, 'info', I.receipt,
-      `${b(esc(dearest[0]))} has cost the most this year — ${b(L.fmtAUD(dearest[1]))}`,
-      'Services and resolved defects over the last 12 months', vHref(dearest[0]));
+    const tally = (id, k, n2) => {
+      if (!id || !(n2 > 0)) return;
+      const t = perVehicle.get(id) || { fuel: 0, upkeep: 0 };
+      t[k] += n2; perVehicle.set(id, t);
+    };
+    const inYear = (d) => { const k = d ? String(d).slice(0, 10) : ''; return k >= yearFrom && k <= today; };
+    (AD.store.all('fuel_entries') || []).forEach((x) => { if (inYear(x.date)) tally(x.vehicleId, 'fuel', Number(x.cost) || 0); });
+    AD.store.all('services').forEach((x) => { if (inYear(x.date)) tally(x.vehicleId, 'upkeep', Number(x.cost || 0)); });
+    AD.store.all('defects').forEach((x) => { if (x.status === 'Resolved' && inYear(x.resolvedDate)) tally(x.vehicleId, 'upkeep', Number(x.cost || 0)); });
+    const dearest = [...perVehicle.entries()].map(([id, t]) => ({ id, ...t, total: t.fuel + t.upkeep }))
+      .sort((a, b2) => b2.total - a.total)[0];
+    if (dearest && dearest.total > 0) add(46, 'info', I.receipt,
+      `${b(esc(dearest.id))} has cost the most to run — ${b(L.fmtAUD(dearest.total))} over 12 months`,
+      `Fuel ${L.fmtAUD(dearest.fuel)} · servicing and repairs ${L.fmtAUD(dearest.upkeep)} · tolls not included`, vHref(dearest.id));
+
+    // ---- money the imports have turned up
+    // No Tag fees on the latest Linkt statement (loaded separately; see loadNoTag).
+    if (noTag && noTag.rows.length) {
+      const match = AD.linkt ? AD.linkt.matcher(vehicles) : null;
+      const byVeh = new Map();
+      let feeTotal = 0;
+      noTag.rows.forEach((r) => {
+        feeTotal += Number(r.amount) || 0;
+        const m = match ? match(r) : null;
+        const id = (m && m.vehicle && m.vehicle.id) || r.vehicleId || (r.plate ? 'plate ' + r.plate : 'an unknown plate');
+        byVeh.set(id, (byVeh.get(id) || 0) + 1);
+      });
+      const top = [...byVeh.entries()].sort((a, c) => c[1] - a[1])[0];
+      const period = noTag.from && noTag.to ? ` (${T.fmtKey(noTag.from)} – ${T.fmtKey(noTag.to)})` : '';
+      if (feeTotal > 0) add(70, 'warn', I.receipt,
+        `${b(L.fmtAUD(feeTotal))} in No Tag fees on the latest Linkt statement`,
+        `${noTag.rows.length.toLocaleString('en-AU')} fees on ${byVeh.size} vehicle${s(byVeh.size)}${period} · most on ${esc(top[0])} (${top[1]}) · a working tag stops these`,
+        '#/cost-sheet');
+    }
+
+    const model = AD.views['cost-sheet'] && AD.views['cost-sheet'].model;
+    if (model) {
+      // Fuel cards: a statement that looks missing, or none imported lately.
+      let cards = [];
+      try { cards = model.fuelCardCoverage(); } catch (e) { cards = []; }
+      const recentGap = cards.flatMap((c) => c.gaps.filter((gp) => gp.to >= T.addDays(today, -120)).map((gp) => ({ card: c.card, ...gp })))
+        .sort((a, c) => c.to.localeCompare(a.to))[0];
+      const stale = cards.filter((c) => T.daysBetween(c.to, today) > 45).sort((a, c) => a.to.localeCompare(c.to))[0];
+      if (recentGap) add(62, 'warn', I.receipt,
+        `${b(esc(recentGap.card.toUpperCase()))} has no fuel between ${b(T.fmtKey(recentGap.from))} and ${b(T.fmtKey(recentGap.to))}`,
+        'Probably a statement that hasn’t been imported · fuel costs read low until it is', '#/cost-sheet');
+      else if (stale) add(62, 'warn', I.receipt,
+        `No ${b(esc(stale.card.toUpperCase()))} fuel imported since ${b(T.fmtKey(stale.to))}`,
+        'Import the latest statement to keep fuel costs current', '#/cost-sheet');
+
+      // Driven on GPS with no fuel on its own card: its fuel is going elsewhere.
+      // Same test as the Fleet Report (14+ days measured, 300+ km).
+      let noFuel = [];
+      try {
+        noFuel = model.usageMeasures('km').list
+          .filter((m) => m.state !== 'waiting' && m.span >= 14 && m.use >= 300 && !(m.fuelOnly > 0))
+          .sort((a, c) => c.use - a.use);
+      } catch (e) { noFuel = []; }
+      if (noFuel.length === 1) add(66, 'warn', I.receipt,
+        `${b(esc(noFuel[0].v.id))} drove ${b(Math.round(noFuel[0].use).toLocaleString('en-AU') + ' km')} with no fuel on its own card`,
+        `${T.fmtKey(noFuel[0].fromKey)} – ${T.fmtKey(noFuel[0].toKey)} · its fuel is probably going on another card`, '#/cost-sheet');
+      else if (noFuel.length) add(66, 'warn', I.receipt,
+        `${b(noFuel.length)} vehicles drove with no fuel on their own cards`,
+        `${few(noFuel.map((m) => m.v.id))} · their fuel is probably going on other cards`, '#/cost-sheet');
+    }
+
+    // ---- GPS: tracked vehicles that haven't moved in a fortnight. Uses the
+    // last day with any distance or engine hours, so a missed sync day can't
+    // make a busy vehicle look parked; only flagged while the sync is current.
+    const PARKED_DAYS = 14;
+    const lastMove = new Map();
+    let syncedTo = '';
+    dailyRows.forEach((r) => {
+      const d = String(r.day || '').slice(0, 10);
+      if (!d) return;
+      if (d > syncedTo) syncedTo = d;
+      if ((Number(r.distanceKm) || 0) > 0 || (Number(r.hours) || 0) > 0) {
+        if (!lastMove.has(r.vehicleId) || d > lastMove.get(r.vehicleId)) lastMove.set(r.vehicleId, d);
+      }
+    });
+    const tracked = new Set(dailyRows.map((r) => r.vehicleId));
+    if (syncedTo && T.daysBetween(syncedTo, today) <= 3) {
+      const parked = vehicles.filter((v) => tracked.has(v.id) && (v.status === 'Available' || v.status === 'In use'))
+        .map((v) => ({ v, last: lastMove.get(v.id) || '' }))
+        .filter((x) => !x.last || T.daysBetween(x.last, today) >= PARKED_DAYS)
+        .sort((a, c) => a.last.localeCompare(c.last));
+      if (parked.length === 1) add(52, 'info', I.truck,
+        `${b(esc(parked[0].v.id))} hasn’t moved in ${b(parked[0].last ? T.daysBetween(parked[0].last, today) + ' days' : 'over ' + PARKED_DAYS + ' days')}`,
+        `${parked[0].last ? 'Last driven or run ' + T.fmtKey(parked[0].last) : 'No GPS distance or engine hours on record'} · is it still needed?`, vHref(parked[0].v.id));
+      else if (parked.length) add(52, 'info', I.truck,
+        `${b(parked.length)} GPS-tracked vehicles haven’t moved in ${PARKED_DAYS}+ days`,
+        `${few(parked.map((x) => x.v.id))} · no distance or engine hours`, '#/tracker');
+    }
 
     // ---- what the fortnight looks like
     if (vac.length) {
@@ -317,7 +441,7 @@ AD.views.dashboard = (function () {
     if (!critical.length) add(23, 'good', I.checkCircle,
       'No critical defects are open', `${defects.length} open at lower priorities`, '#/defects?status=open');
 
-    return out.sort((a, b2) => b2.weight - a.weight).slice(0, 8);
+    return out.sort((a, b2) => b2.weight - a.weight).slice(0, 10);
   }
 
   /** The rotating band itself. */
@@ -638,6 +762,7 @@ AD.views.dashboard = (function () {
     fresh = true;
     hero();
     draw();
+    loadNoTag();
   }
 
   function draw() {
@@ -1149,5 +1274,5 @@ AD.views.dashboard = (function () {
     return `<span class="t2">${cancelled ? '' : `<span class="flag flag-amber">Site location required</span>`}${b.address ? ` <span class="${strike}">${esc(b.address)} (not located)</span>` : ''}</span>`;
   }
 
-  return { title: 'Fleet overview', render, refresh: () => root && draw(), destroy: stopInsights };
+  return { title: 'Fleet overview', render, refresh: () => root && draw(), destroy: () => { stopInsights(); root = null; } };
 })();
