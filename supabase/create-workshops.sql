@@ -30,7 +30,7 @@ insert into public.workshops (id, name, address, category, lat, lng) values
   ('wsp-loyal',        'Loyal Truck Services',               '233-241 Cowpasture Road, Wetherill Park NSW 2164',            'heavy',     -33.8391972, 150.8805146),
   ('wsp-cityhino',     'City Hino — Arndell Park',           'Penelope Crescent & McCormack Street, Arndell Park NSW 2148', 'heavy',     -33.7900602, 150.8734948),
   ('wsp-gilbertroach', 'Gilbert and Roach',                  '8 Huntingwood Drive, Huntingwood NSW 2148',                   'heavy',     -33.7967234, 150.8874094),
-  ('wsp-astreaheavy',  'Astrea Heavy Fleet (own workshop)',  '10B Tepco Road, Terrey Hills NSW 2084',                       'all',       -33.6829775, 151.2282964),
+  ('wsp-astreaheavy',  'Astrea Heavy Fleet (own workshop)',  '10B Tepco Road, Terrey Hills NSW 2084',                       'all',       -33.680776,  151.223958),
   ('wsp-nhvr',         'NHVR Heavy Vehicle Inspection',      'Multiple locations',                                          'heavy',     null,        null)
 on conflict (id) do nothing;
 
