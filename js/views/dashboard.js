@@ -586,19 +586,27 @@ AD.views.dashboard = (function () {
     cards.forEach((c) => srcs.push({ name: c.card.toUpperCase(), to: c.to, late: 35, fix: 'import the latest statement' }));
     if (noTag && noTag.to) {
       const len = noTag.from ? T.daysBetween(String(noTag.from).slice(0, 10), String(noTag.to).slice(0, 10)) + 1 : 31;
-      srcs.push({ name: 'Linkt', to: String(noTag.to).slice(0, 10), late: len + 7, fix: 'the next statement should be out' });
+      srcs.push({ name: 'Linkt', to: String(noTag.to).slice(0, 10), late: len + 7, period: len, fix: 'the next statement should be out' });
     }
     let gpsTo = '';
     (AD.store.all('vehicle_work_hours_daily') || []).forEach((r) => { const d = String(r.day || '').slice(0, 10); if (d > gpsTo) gpsTo = d; });
     if (gpsTo) srcs.push({ name: 'GPS', to: gpsTo, late: 2, fix: 'check the nightly sync', href: '#/fleet' });
-    srcs.forEach((x) => { x.age = T.daysBetween(x.to, today); });
-    const behind = srcs.filter((x) => x.age > x.late).sort((a, c) => c.age - a.age);
-    const list = srcs.map((x) => `${esc(x.name)} ${short(x.to)} (${x.age}d)`).join(' · ');
+    srcs.forEach((x) => { x.age = Math.max(0, T.daysBetween(x.to, today)); x.behind = x.age > x.late; });
+    srcs.sort((a, c) => c.age - a.age);   // longest without new data first
+    const behind = srcs.filter((x) => x.behind);
+    // Headline: days since each source last had new data. When one is
+    // behind, only the late ones are highlighted so they stand out.
+    const ages = srcs.map((x) => `${esc(x.name)} ${behind.length && !x.behind ? x.age : b(x.age)}`).join(' · ');
+    const newest = 'Newest: ' + srcs.map((x) => `${esc(x.name)} ${short(x.to)}`).join(' · ');
+    const linkt = srcs.find((x) => x.name === 'Linkt' && x.period > 45);
     if (behind.length) add(76, 'warn', I.clock,
-      behind.length === 1 ? `${b(esc(behind[0].name))} data is ${b(behind[0].age + ' days')} old` : `${b(behind.length)} data sources are behind`,
-      behind.length === 1 ? `${behind[0].fix[0].toUpperCase() + behind[0].fix.slice(1)} · Data up to: ${list}` : `Data up to: ${list}`,
+      `Days without new data: ${ages}`,
+      `${behind.length === 1 ? `${esc(behind[0].name)} is overdue: ${behind[0].fix}` : `${behind.map((x) => esc(x.name)).join(' and ')} are overdue`} · ${newest}`,
       (behind.length === 1 && behind[0].href) || '#/cost-sheet');
-    else if (srcs.length) add(30, 'good', I.clock, 'All data is up to date', `Data up to: ${list}`, '#/cost-sheet');
+    else if (srcs.length) add(30, 'good', I.clock,
+      `Days without new data: ${ages}`,
+      `${newest} · all within their usual cycle${linkt ? ` (Linkt statements cover ${Math.round(linkt.period / 30)} months)` : ''}`,
+      '#/cost-sheet');
 
     if (!out.length) add(20, 'good', I.checkCircle, 'Nothing needs your attention',
       'No booking clashes, new defects or expiries this week', '#/calendar');
