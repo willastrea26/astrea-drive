@@ -167,18 +167,19 @@ AD.views.dashboard = (function () {
   let root = null, day = '', schedFilter = 'all';
   // Which insight is on screen. Held across redraws so a background refresh
   // doesn't yank the band back to the first card while it's being read.
-  let insightIdx = 0, insightTimer = null;
+  const bandState = {};   // per rotating band: { idx, timer }
 
-  // No Tag fees on the latest Linkt statement, for the insights band. Only the
-  // fee lines of that one statement (a few hundred rows), fetched once per
-  // session, never the whole toll history the Cost sheet loads.
+  // The latest Linkt statement (its period feeds "Data up to" in
+  // Notifications) and its No Tag fee lines (Fleet insights). Only that one
+  // statement's fee lines (a few hundred rows), fetched once per session,
+  // never the whole toll history the Cost sheet loads.
   let noTag = null, noTagBusy = false;
   async function loadNoTag() {
     if (noTag || noTagBusy || !AD.sb) return;
     noTagBusy = true;
     try {
       const head = await AD.sb.from('toll_entries').select('statement,periodStart,periodEnd')
-        .eq('kind', 'fee').order('periodEnd', { ascending: false, nullsFirst: false }).limit(1);
+        .order('periodEnd', { ascending: false, nullsFirst: false }).limit(1);
       const latest = !head.error && head.data && head.data[0];
       if (!latest || !latest.statement) noTag = { rows: [] };
       else {
@@ -444,8 +445,169 @@ AD.views.dashboard = (function () {
     return out.sort((a, b2) => b2.weight - a.weight).slice(0, 10);
   }
 
-  /** The rotating band itself. */
-  function insightsBand(list) {
+  /* --------------------------------------------------------------- notifications
+   * Specific things to act on today, or that just happened — where Fleet
+   * insights reads patterns and money. Same rules: every check stays silent
+   * when it has nothing, `weight` decides what leads, and the closing "Data
+   * up to" card means the band is never empty.
+   */
+  function notices({ vehicles, rego, defects, today }) {
+    const out = [];
+    const add = (weight, tone, icon, text, sub, href) => out.push({ weight, tone, icon, text, sub, href });
+    const b = (x) => `<b>${x}</b>`;
+    const s = (c) => (c === 1 ? '' : 's');
+    const few = (ids) => ids.slice(0, 3).map(esc).join(', ') + (ids.length > 3 ? ` and ${ids.length - 3} more` : '');
+    const vHref = (id) => `#/vehicle/${encodeURIComponent(id)}`;
+    const dayHref = (iso) => `#/calendar?view=day&date=${T.dateKey(Date.parse(iso))}`;
+    const now = Date.now();
+    const tomorrow = T.addDays(today, 1);
+    const daysTo = (k) => (k ? T.daysBetween(today, String(k).slice(0, 10)) : null);
+    const expires = (d) => (d < 0 ? `expired ${-d} day${s(-d)} ago` : d === 0 ? 'expires today' : d === 1 ? 'expires tomorrow' : `expires in ${d} days`);
+    const isDue = (d) => (d < 0 ? `was due ${-d} day${s(-d)} ago` : d === 0 ? 'is due today' : d === 1 ? 'is due tomorrow' : `is due in ${d} days`);
+    const short = (k) => `${Number(k.slice(8, 10))} ${T.MONTHS[Number(k.slice(5, 7)) - 1].slice(0, 3)}`;
+    const WEEK = 7;
+
+    // ---- bookings that can't go ahead as planned (today and tomorrow)
+    const until = T.startOfDay(T.addDays(today, 2));
+    const blocked = [];
+    vehicles.filter((v) => v.status === 'In workshop' || v.status === 'Out of service').forEach((v) => {
+      L.bookingsFor(v.id).forEach((x) => {
+        if (x.status !== 'cancelled' && Date.parse(x.end) > now && Date.parse(x.start) < until) blocked.push({ v, x });
+      });
+    });
+    blocked.sort((a, c) => Date.parse(a.x.start) - Date.parse(c.x.start));
+    if (blocked.length) {
+      const { v, x } = blocked[0];
+      const isToday = Date.parse(x.start) < T.startOfDay(tomorrow);
+      add(isToday ? 99 : 90, isToday ? 'critical' : 'warn', I.calendar,
+        `${b(esc(v.id))} is booked ${isToday ? 'today' : 'tomorrow'} but is ${v.status === 'In workshop' ? 'in the workshop' : 'out of service'}`,
+        `${esc(L.bookingTitle(x))} · ${T.fmtDateTime(x.start)}${blocked.length > 1 ? ` · ${blocked.length - 1} more like this` : ''}`,
+        dayHref(x.start));
+    }
+
+    // ---- double bookings still to come (or under way)
+    const byId = new Map(AD.store.all('bookings').map((x) => [x.id, x]));
+    const upcoming = (ids) => [...ids].map((id) => byId.get(id))
+      .filter((x) => x && Date.parse(x.end) > now).sort((a, c) => Date.parse(a.start) - Date.parse(c.start));
+    const truckClash = upcoming(L.conflictIds());
+    if (truckClash.length) {
+      const n = new Set(truckClash.map((x) => x.truckId)).size, x = truckClash[0];
+      add(95, 'critical', I.calendar,
+        n === 1 ? `${b(esc(x.truckId))} is double-booked` : `${b(n)} vehicles are double-booked`,
+        `${n === 1 ? 'From' : `Soonest: ${esc(x.truckId)},`} ${T.fmtDateTime(x.start)}`, dayHref(x.start));
+    }
+    const driverClash = upcoming(L.driverConflictIds());
+    if (driverClash.length) {
+      const n = new Set(driverClash.map((x) => x.driverId)).size, x = driverClash[0];
+      const who = L.driverName(x.driverId) || 'A driver';
+      add(93, 'critical', I.users,
+        n === 1 ? `${b(esc(who))} is booked on two jobs at once` : `${b(n)} drivers are booked on two jobs at once`,
+        `${n === 1 ? 'From' : `Soonest: ${esc(who)},`} ${T.fmtDateTime(x.start)}`, dayHref(x.start));
+    }
+
+    // ---- new critical / high defects (reported in the last two days, still open)
+    const newDefects = defects.filter((d) => (d.priority === 'Critical' || d.priority === 'High')
+      && d.reportedDate && T.daysBetween(String(d.reportedDate).slice(0, 10), today) <= 2)
+      .sort((a, c) => (a.priority === c.priority ? String(c.reportedDate).localeCompare(String(a.reportedDate)) : a.priority === 'Critical' ? -1 : 1));
+    if (newDefects.length) {
+      const d = newDefects[0], crit = newDefects.some((x) => x.priority === 'Critical');
+      add(crit ? 97 : 88, crit ? 'critical' : 'warn', I.alert,
+        newDefects.length === 1 ? `New ${d.priority.toLowerCase()} defect on ${b(esc(d.vehicleId))}` : `${b(newDefects.length)} new critical or high defects`,
+        newDefects.length === 1 ? `${esc(String(d.description || '').slice(0, 70))}${d.reportedBy ? ` · reported by ${esc(d.reportedBy)}` : ''}` : few(newDefects.map((x) => x.vehicleId)),
+        '#/defects?status=open');
+    }
+
+    // ---- due this week
+    const regoWeek = rego.filter((x) => x.r.days >= 0 && x.r.days <= WEEK);   // expired ones are in Fleet insights
+    if (regoWeek.length) add(84, 'warn', I.file,
+      regoWeek.length === 1 ? `${b(esc(regoWeek[0].v.id))}’s registration ${expires(regoWeek[0].r.days)}` : `${b(regoWeek.length)} registrations expire this week`,
+      regoWeek.length === 1 ? T.fmtKey(regoWeek[0].v.regoExpiry) : `${few(regoWeek.map((x) => x.v.id))} · soonest ${T.fmtKey(regoWeek[0].v.regoExpiry)}`,
+      '#/fleet?flag=rego');
+
+    const lic = [];
+    (AD.store.all('employees') || []).forEach((e) => {
+      const m = e.licenceExpiries && typeof e.licenceExpiries === 'object' ? e.licenceExpiries : {};
+      Object.entries(m).forEach(([name, k]) => { const d = daysTo(k); if (d != null && d <= WEEK) lic.push({ e, name, d }); });
+    });
+    lic.sort((a, c) => a.d - c.d);
+    if (lic.length) {
+      const l = lic[0], gone = lic.some((x) => x.d < 0);
+      add(gone ? 86 : 82, gone ? 'critical' : 'warn', I.users,
+        lic.length === 1 ? `${b(esc(l.e.name))}’s ${esc(l.name)} ${expires(l.d)}` : `${b(lic.length)} staff licences or tickets ${gone ? 'are expired or expire' : 'expire'} this week`,
+        lic.length === 1 ? 'From the employee register' : `Soonest: ${esc(l.e.name)}’s ${esc(l.name)} (${expires(l.d)})`,
+        '#/employee-register');
+    }
+
+    const kit = [];
+    vehicles.forEach((v) => {
+      const fa = daysTo(v.firstAidNextDue), fe = daysTo(v.fireExtNextDue);
+      if (fa != null && fa <= WEEK) kit.push({ v, what: 'first aid kit', d: fa, href: '#/first-aid' });
+      if (fe != null && fe <= WEEK) kit.push({ v, what: 'fire extinguisher', d: fe, href: '#/fire-extinguishers' });
+    });
+    (AD.store.all('equipment') || []).forEach((x) => {
+      const d = daysTo(x.nextInspection);
+      if (d != null && d <= WEEK) kit.push({ v: { id: x.name || x.type || x.id }, what: 'inspection', d, href: '#/equipment-register' });
+    });
+    kit.sort((a, c) => a.d - c.d);
+    if (kit.length) {
+      const k = kit[0], late = kit.some((x) => x.d < 0);
+      add(late ? 80 : 78, 'warn', I.shield,
+        kit.length === 1 ? `${b(esc(k.v.id))}’s ${k.what} ${isDue(k.d)}` : `${b(kit.length)} safety checks and inspections ${late ? 'are overdue or due' : 'are due'} this week`,
+        kit.length === 1 ? 'Record it once it’s done' : `Soonest: ${esc(k.v.id)}’s ${k.what} (${isDue(k.d).replace(/^is |^was /, '')})`,
+        kit.length === 1 ? k.href : kit.every((x) => x.href === k.href) ? k.href : '#/first-aid');
+    }
+
+    // ---- GPS: workshop arrivals and departures (geofences, last 48 hours)
+    const geo = (AD.store.all('activity') || [])
+      .filter((a) => /\(GPS\)\s*$/.test(a.text || '') && Date.parse(a.ts) >= now - 48 * 3600000)
+      .sort((a, c) => Date.parse(c.ts) - Date.parse(a.ts));
+    geo.slice(0, 3).forEach((a, i) => {
+      const arrived = /parked at (.+?) for 30\+ min/.exec(a.text);
+      const left = /left (.+?) — back to (.+?) \(GPS\)/.exec(a.text);
+      if (!arrived && !left) return;
+      add(60 - i, 'info', I.garage,
+        arrived ? `${b(esc(a.vehicleId))} arrived at ${esc(arrived[1])}` : `${b(esc(a.vehicleId))} left ${esc(left[1])}`,
+        `${T.fmtDateTime(a.ts)} · ${arrived ? 'marked In workshop' : 'back to ' + esc(left[2])} from its GPS`, vHref(a.vehicleId));
+    });
+
+    // ---- the GPS sync itself
+    const lastRun = (AD.store.all('sync_log') || [])[0];   // newest first
+    if (lastRun && lastRun.ok === false) add(92, 'critical', I.alert,
+      'The last GPS sync failed',
+      `${T.fmtDateTime(lastRun.ranAt)}${lastRun.error ? ' · ' + esc(String(lastRun.error).slice(0, 80)) : ''}`, '#/fleet');
+
+    // ---- Data up to: how old the newest data from each source is. Measured
+    // from the data itself, not the import date, so re-importing an old
+    // statement can't make it look current.
+    const srcs = [];
+    const model = AD.views['cost-sheet'] && AD.views['cost-sheet'].model;
+    let cards = [];
+    try { cards = model ? model.fuelCardCoverage() : []; } catch (e) { cards = []; }
+    cards.forEach((c) => srcs.push({ name: c.card.toUpperCase(), to: c.to, late: 35, fix: 'import the latest statement' }));
+    if (noTag && noTag.to) {
+      const len = noTag.from ? T.daysBetween(String(noTag.from).slice(0, 10), String(noTag.to).slice(0, 10)) + 1 : 31;
+      srcs.push({ name: 'Linkt', to: String(noTag.to).slice(0, 10), late: len + 7, fix: 'the next statement should be out' });
+    }
+    let gpsTo = '';
+    (AD.store.all('vehicle_work_hours_daily') || []).forEach((r) => { const d = String(r.day || '').slice(0, 10); if (d > gpsTo) gpsTo = d; });
+    if (gpsTo) srcs.push({ name: 'GPS', to: gpsTo, late: 2, fix: 'check the nightly sync', href: '#/fleet' });
+    srcs.forEach((x) => { x.age = T.daysBetween(x.to, today); });
+    const behind = srcs.filter((x) => x.age > x.late).sort((a, c) => c.age - a.age);
+    const list = srcs.map((x) => `${esc(x.name)} ${short(x.to)} (${x.age}d)`).join(' · ');
+    if (behind.length) add(76, 'warn', I.clock,
+      behind.length === 1 ? `${b(esc(behind[0].name))} data is ${b(behind[0].age + ' days')} old` : `${b(behind.length)} data sources are behind`,
+      behind.length === 1 ? `${behind[0].fix[0].toUpperCase() + behind[0].fix.slice(1)} · Data up to: ${list}` : `Data up to: ${list}`,
+      (behind.length === 1 && behind[0].href) || '#/cost-sheet');
+    else if (srcs.length) add(30, 'good', I.clock, 'All data is up to date', `Data up to: ${list}`, '#/cost-sheet');
+
+    if (!out.length) add(20, 'good', I.checkCircle, 'Nothing needs your attention',
+      'No booking clashes, new defects or expiries this week', '#/calendar');
+
+    return out.sort((a, c) => c.weight - a.weight).slice(0, 10);
+  }
+
+  /** A rotating band: Fleet insights, or Notifications (same card, own rotation). */
+  function insightsBand(list, { key = 'insights', label = 'Fleet insights', icon = I.activity } = {}) {
     if (!list.length) return '';
     const many = list.length > 1;
     const items = list.map((f, i) => `
@@ -454,13 +616,14 @@ AD.views.dashboard = (function () {
         <span class="ib-copy"><span class="ib-text">${f.text}</span><span class="ib-sub">${f.sub}</span></span>
         <span class="ib-go">${I.chevR}</span>
       </a>`).join('');
-    return `<section class="ib" data-tone="${list[0].tone}" aria-label="Fleet insights">
+    const one = key === 'notices' ? 'notification' : 'insight';
+    return `<section class="ib" data-band="${key}" data-tone="${list[0].tone}" aria-label="${esc(label)}">
       <div class="ib-head">
-        <span class="ib-eyebrow">${I.activity}Fleet insights</span>
+        <span class="ib-eyebrow">${icon}${esc(label)}</span>
         ${many ? `<div class="ib-nav">
-          <button type="button" class="ib-arrow ib-prev" aria-label="Previous insight">${I.chevL}</button>
-          <span class="ib-dots">${list.map((_, i) => `<button type="button" class="ib-dot${i === 0 ? ' on' : ''}" data-i="${i}" aria-label="Insight ${i + 1} of ${list.length}"></button>`).join('')}</span>
-          <button type="button" class="ib-arrow ib-next" aria-label="Next insight">${I.chevR}</button>
+          <button type="button" class="ib-arrow ib-prev" aria-label="Previous ${one}">${I.chevL}</button>
+          <span class="ib-dots">${list.map((_, i) => `<button type="button" class="ib-dot${i === 0 ? ' on' : ''}" data-i="${i}" aria-label="${one[0].toUpperCase() + one.slice(1)} ${i + 1} of ${list.length}"></button>`).join('')}</span>
+          <button type="button" class="ib-arrow ib-next" aria-label="Next ${one}">${I.chevR}</button>
         </div>` : ''}
       </div>
       <div class="ib-stage" aria-live="polite">${items}</div>
@@ -478,29 +641,34 @@ AD.views.dashboard = (function () {
 
   function wireInsights(el) {
     stopInsights();
-    const band = el.querySelector('.ib');
-    if (!band) return;
+    el.querySelectorAll('.ib[data-band]').forEach(wireBand);
+  }
+
+  // Each band keeps its own place and timer, so the two rotate independently
+  // and a background redraw doesn't jump either back to its first card.
+  function wireBand(band) {
+    const st = bandState[band.dataset.band] || (bandState[band.dataset.band] = { idx: 0, timer: null });
     const items = [...band.querySelectorAll('.ib-item')];
     const dots = [...band.querySelectorAll('.ib-dot')];
     const bar = band.querySelector('.ib-bar i');
     if (!items.length) return;
     const auto = items.length > 1 && !(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
 
-    let i = Math.min(insightIdx, items.length - 1);
+    let i = Math.min(st.idx, items.length - 1);
     let held = false;
 
     const queue = () => {
-      clearTimeout(insightTimer);
+      clearTimeout(st.timer);
       if (!auto || held) return;
-      insightTimer = setTimeout(() => {
+      st.timer = setTimeout(() => {
         // The view may have been replaced since the timer was set.
-        if (!band.isConnected) return stopInsights();
+        if (!band.isConnected) { st.timer = null; return; }
         show(i + 1);
       }, INSIGHT_DWELL);
     };
     const show = (next, restart = true) => {
       i = (next + items.length) % items.length;
-      insightIdx = i;
+      st.idx = i;
       items.forEach((it, k) => it.classList.toggle('is-on', k === i));
       dots.forEach((d, k) => d.classList.toggle('on', k === i));
       band.dataset.tone = items[i].dataset.tone;
@@ -522,7 +690,9 @@ AD.views.dashboard = (function () {
     show(i, false);
   }
 
-  function stopInsights() { clearTimeout(insightTimer); insightTimer = null; }
+  function stopInsights() {
+    Object.values(bandState).forEach((st) => { clearTimeout(st.timer); st.timer = null; });
+  }
 
   /** Multi-segment ring. Each part becomes an arc; the centre carries the headline. */
   function donutRing(parts, big, small) {
@@ -840,7 +1010,10 @@ AD.views.dashboard = (function () {
     const openDetails = detailsSnapshot(el);
 
     el.innerHTML = `
-      ${insightsBand(facts({ vehicles, vac, svc, rego, defects, today }))}
+      <div class="ib-pair">
+        ${insightsBand(facts({ vehicles, vac, svc, rego, defects, today }))}
+        ${insightsBand(notices({ vehicles, rego, defects, today }), { key: 'notices', label: 'Notifications', icon: I.bell })}
+      </div>
 
       <div class="strip" role="group" aria-label="Fleet summary">
         ${activityCard(gps, vehicles.length, today)}

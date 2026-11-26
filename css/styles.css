@@ -1749,6 +1749,10 @@ input[type=text], input[type=number], input[type=date], input[type=datetime-loca
   border-radius: var(--r-lg); box-shadow: var(--shadow-1); overflow: hidden;
   transition: border-color .45s ease;
 }
+/* Fleet insights and Notifications side by side, each its own rotating card. */
+.ib-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 20px 0 28px; }
+.ib-pair > .ib { margin: 0; }
+@media (max-width: 1100px) { .ib-pair { grid-template-columns: minmax(0, 1fr); gap: 12px; } }
 .ib[data-tone="critical"] { --ib-tone: var(--red); }
 .ib[data-tone="warn"] { --ib-tone: var(--amber); }
 .ib[data-tone="good"] { --ib-tone: var(--green); }
