@@ -1,5 +1,5 @@
 /*
- * Brand logo animation. Every minute or so the road in the sidebar logo's "A"
+ * Brand logo animation. Every 25 seconds or so the road in the sidebar logo's "A"
  * comes alive for a few seconds: the centre markings ease into a gentle flow
  * towards you, as if driving, while a pair of tail lights pulls away up the
  * left lane into the distance. The markings then ease back to rest exactly
@@ -10,9 +10,9 @@
  * plain image stays) and does nothing while the tab is hidden.
  */
 (function () {
-  const INTERVAL_MS = 60000;       // about once a minute
-  const INTERVAL_JITTER = 10000;   // ± a little so it doesn't feel robotic
-  const FIRST_DELAY_MS = 6000;     // after the sidebar first appears
+  const INTERVAL_MS = 25000;       // about every 25 seconds
+  const INTERVAL_JITTER = 5000;    // ± a little so it doesn't feel robotic
+  const FIRST_DELAY_MS = 4000;     // after the sidebar first appears
   const EPISODE_MS = 8000;         // markings ease in, cruise, ease out
   const DASH_STEPS = 2;            // whole dashes travelled, so they stop where they started
   const LIGHTS_START_MS = 900;     // tail lights pull away once the road is moving
